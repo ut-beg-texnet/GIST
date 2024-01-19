@@ -38,13 +38,16 @@ import math
 #       init                    #
 #       initPP                  #
 #       initPE                  #
+#       initPPAniso             #
 #       initMCPP                #
 #       initMCPE                #
+#       initMCPPAniso           #
 #       writeRealizations       #
 #       addWells                #
 #       findWells               #
 #       runPressureScenarios    #
 #       pressureScenario        #
+#       pressureScenarioAniso   #
 #       runPoroelasticScenarios #
 #       poroelasticScenario     #
 #       poroAttr                #
@@ -69,11 +72,13 @@ class gistMC:
   
   Contains
   #####################################
-  # init     - initialize general class ########################
-  # initPP   - initialize pore pressure deterministic modeling #
-  # initPE   - initialize poroelastic determinisitic modeling  #
-  # initMCPP - initialize Monte Carlo pore pressure models     #
-  # initMCPE - initialize Monte Carlo poroelastic models       #
+  # init          - initialize general class ########################
+  # initPP        - initialize pore pressure deterministic modeling #
+  # initPE        - initialize poroelastic determinisitic modeling  #
+  # initPPAniso   - initialize anisotropic pore pressure deterministic modeling #
+  # initMCPP      - initialize Monte Carlo pore pressure models     #
+  # initMCPE      - initialize Monte Carlo poroelastic models       #
+  # initMCPPAniso - initialize Monte Carlo anisotropic pore pressure models     #
   # writeRealizations - output csv of parameter sets           #
   ####################################################################
   # addWells   - load injection and well info from injectionV3 files #
@@ -121,6 +126,17 @@ class gistMC:
     # Initialize injection data frame #
     ###################################
     self.inj=pd.DataFrame(columns=['ID','BPD','Days'])
+    ######################################################################
+    # Generate vector of nReal x 17 (number of parameters) random floats #
+    ######################################################################
+    self.randomFloats=self.rng.random(size=(self.nReal,17))
+    #####################################################
+    # Set initialization status for different scenarios #
+    #####################################################
+    self.runPP=False
+    self.runPE=False
+    self.runPPAniso=False
+    self.runPEAniso=False
     #######################################
     # To-do: error checking of parameters # 
     #######################################
@@ -180,6 +196,10 @@ class gistMC:
     self.diffPP=diffPP
     self.C=C
     self.kappa=kapM2/nta
+    #
+    # Set initialized Flag as done
+    #
+    self.runPP=True
     ########################################################################
     # To-do - error checking - bounds of parameters, unphysical rock, etc. #
     ########################################################################
@@ -203,6 +223,7 @@ class gistMC:
     #     Runs after init and initPP #
     ##################################
     """
+    if self.runPP==False: print("gistMCLive.initPE Error: initPP must be run first!")
     self.mu=mu
     self.nu=nu
     ###########################################################
@@ -223,9 +244,9 @@ class gistMC:
     ###############################################################
     self.match=match
     if match:
-      #####################################################
-      # Recompute Lame's constants (drained and undrained #
-      #####################################################
+      ######################################################
+      # Recompute Lame's constants (drained and undrained) #
+      ######################################################
       lamda,lamda_u = matchPE2PP(self.mu,self.nu,self.alpha,self.C)
       ###########################################
       # Recompute new undrained Poisson's ratio #
@@ -255,9 +276,48 @@ class gistMC:
     ################################################
     self.diffPE=(self.kapM2)*(self.lamda_u-self.lamda)*(self.lamda+2.*self.mu)/(self.nta*self.alpha*self.alpha*(self.lamda_u+2.*self.mu))
     if verbose>0: print(" gistMC.initPE - diffusivities: ",self.diffPP,self.diffPE)
+    self.runPE=True
     return
 
-
+  def initPPAniso(self,kMDSlow=10.,kFastkSlow=10.,azimuthDeg=0.,kOffDiagRatio=0.,verbose=0):
+    """
+    #######################################################
+    # Initialize Anisotropy for Pore Pressure modeling    #
+    #######################################################
+    # Inputs: ####################################################################
+    #        kMDSlow :  Permeabilty in slow direction             (millidarcies) #
+    #     kFastkSlow :  Ratio of fast to slow lateral permeablity (unitless, >1) #
+    #     azimuthDeg :  Azimuth of fast direction           (degrees CCW from E) #
+    #  kOffDiagRatio :  Off-diagonal xy Permeability Ratio     (unitless, abs<1) #
+    ##############################################################################
+    # Assumptions: ##########
+    #     Runs after initPP #
+    #########################
+    # Set input parameters #
+    ########################
+    """
+    if self.runPP==False: print("gistMCLive.initPPAniso Error: initPP must be run first!")
+    self.kMDSlow=kMDSlow
+    self.kFastkSlow=kFastkSlow
+    self.kMDFast=kMDSlow*kFastkSlow
+    self.azimuth=azimuthDeg
+    self.kOffDiagRatio=kOffDiagRatio
+    self.kMDOffDiag=kOffDiagRatio*np.sqrt(self.kMDSlow*self.kMDFast)
+    # form permeability tensor
+    kMDTensor=np.array([[self.kMDSlow, self.kMDOffDiag],[self.kMDOffDiag,self.kMDFast]])
+    # form rotation tensor
+    azRad=np.deg2rad(azimuthDeg)
+    ATensor=np.array([[np.sin(azRad), -np.cos(azRad)],[np.cos(azRad),np.sin(azRad)]])
+    # rotate permeability tensor to NE coordinates
+    kMDRotate=np.matmul(ATensor.T,np.matmul(kMDTensor,ATensor))
+    (kapM2,K,TAniso,diffPP,TBar)=calcPPAnisoVals(kMDRotate,self.hM,self.alphav,self.beta,self.phi,self.rho,self.g,self.nta)
+    self.kMDRotate=kMDRotate
+    self.TAniso=TAniso
+    self.kapAnisoM2=kapM2
+    self.TBar=TBar
+    self.runPPAniso=True
+    return
+  
   def initMCPP(self,rhoUnc=2.,ntaUnc=1e-6,phiUnc=3.,kMDLogUnc=0.2,hUnc=25.,alphavUnc=1e-11,betaUnc=1e-12,verbose=0):
     """
     #############################################
@@ -266,7 +326,7 @@ class gistMC:
     #     rhoUnc : Density uncertainty                 (kg/m^3) #
     #     ntaUnc : Fluid viscosity uncertainty (Pascal-seconds) #
     #     phiUnc : Porosity uncertainty               (percent) #
-    #     kMDUnc : Permeability uncertainty      (millidarcies) #
+    #  kMDLogUnc : Uncertainty in log of permeability  (log(mD) #
     #       hUnc : Interval thickness uncertainty        (feet) #
     #  alphavUnc : Vertical compressibility uncertainty  (1/Pa) #
     #    betaUnc : Fluid compressibility uncertainty     (1/Pa) #
@@ -280,6 +340,7 @@ class gistMC:
     #     Runs after init and initPP #
     ##################################
     """
+    if self.runPP==False: print("gistMCLive.initMCPP Error: initPP must be run first!")
     self.rhoUnc=rhoUnc
     self.ntaUnc=ntaUnc
     self.phiUnc=phiUnc
@@ -287,21 +348,18 @@ class gistMC:
     self.hUnc=hUnc
     self.alphavUnc=alphavUnc
     self.betaUnc=betaUnc
-    ###############################################
-    # Generate vector of nReal x 13 random floats #
-    ###############################################
-    self.randomFloats=self.rng.random(size=(self.nReal,13))
     #########################
     # Get vectors of values #
     #########################
     self.rhoVec   =self.randomFloats[:,0]*rhoUnc*2.   +(self.rho   -self.rhoUnc)
     self.ntaVec   =self.randomFloats[:,1]*ntaUnc*2.   +(self.nta   -self.ntaUnc)
     self.phiVec   =self.randomFloats[:,2]*phiUnc*2.   +(self.phi   -self.phiUnc)
-    kMDUpper=np.power(10.,(np.log10(self.kMD)+self.kMDLogUnc))
-    kMDLower=np.power(10.,(np.log10(self.kMD)-self.kMDLogUnc))
-    self.kMDUnc=(kMDUpper-kMDLower)/2.
-    self.kMDCentral=kMDLower+self.kMDUnc
-    print(" gistMC.initMCPP - kMD original Central value, upper bound, lower bound, updated value, uncertainty:",self.kMD,kMDUpper,kMDLower,self.kMDCentral,self.kMDUnc)
+    self.kMDCentral,self.kMDUnc=logSpace(self.kMD,self.kMDLogUnc,verbose=1)
+    #kMDUpper=np.power(10.,(np.log10(self.kMD)+self.kMDLogUnc))
+    #kMDLower=np.power(10.,(np.log10(self.kMD)-self.kMDLogUnc))
+    #self.kMDUnc=(kMDUpper-kMDLower)/2.
+    #self.kMDCentral=kMDLower+self.kMDUnc
+    #print(" gistMC.initMCPP - kMD original Central value, upper bound, lower bound, updated value, uncertainty:",self.kMD,kMDUpper,kMDLower,self.kMDCentral,self.kMDUnc)
     self.kMDVec   =self.randomFloats[:,3]*self.kMDUnc*2.   +(self.kMDCentral-self.kMDUnc)
     self.hVec     =self.randomFloats[:,4]*hUnc*2.     +(self.h     -self.hUnc)
     self.alphavVec=self.randomFloats[:,5]*alphavUnc*2.+(self.alphav-self.alphavUnc)
@@ -357,6 +415,7 @@ class gistMC:
     #     Runs after initMCPP and initPE #
     ######################################
     """
+    if self.runPE==False: print("gistMCLive.initMCPE Error: initPE must be run first!")
     self.muUnc=muUnc
     self.nuUnc=nuUnc
     ############################################################
@@ -436,6 +495,67 @@ class gistMC:
         print(" Monte Carlo poroelastic (matched) -diffPE min/max:",np.amin(self.diffPEVec),np.amax(self.diffPEVec))
     return
   
+  def initMCPPAniso(self,kMDSlowLogUnc=0.2,kFastkSlowLogUnc=10.,azimuthDegUnc=30.,kOffDiagRatioUnc=0.):
+    """
+    ##########################################################
+    # Initialize Monte Carlo pore pressure w/anisotropy runs #
+    # Inputs: ########################################################################################
+    #       kMDSlowLogUnc : Uncertainty in log of slowest permeability                     (log(mD)) #
+    #    kFastkSlowLogUnc : Uncertainty in log of ratio of fast to slow permeability (log(unitless)) #
+    #                       This gets clipped so kFastkSlow>=1.                                      #
+    #       azimuthDegUnc : Uncertainty in azimuth of fastest permeability                 (degrees) #
+    #                       This gets clipped to 90 degrees.                                         #
+    #    kOffDiagRatioUnc : Uncertainty in off-diagonal permeability                      (unitless) #
+    #                       This gets clipped so that abs(ratio)<1.                                  #
+    ##################################################################################################
+    # To-do: check to make sure parameters are physically realizable #
+    #        negative values, physical bounds, etc.                  #
+    #        additional probability distributions                    #
+    #        is this the best parameterization to add uncertainty to?#
+    ##################################################################
+    # Assumptions: ###################
+    #     Runs after init and initPP #
+    ##################################
+    """
+    if self.runPP==False: print("gistMCLive.initMCPPAniso Error: initPP must be run first!")
+    if self.runPPAniso==False: print("gistMCLive.initMCPPAniso Error: initPPAniso must be run first!")
+    self.kMDSlowLogUnc=kMDSlowLogUnc
+    self.kFastkSlowLogUnc=kFastkSlowLogUnc
+    self.azimuthDegUnc=azimuthDegUnc
+    self.kMDSlowCentral,self.kMDSlowUnc=logSpace(self.kMDSlow,self.kMDSlowLogUnc,clip=None,verbose=1)
+    # Force kFast to be larger than kSlow
+    self.kFastkSlowCentral,self.kFastkSlowUnc=logSpace(self.kFastkSlow,self.kFastkSlowLogUnc,clip=1.,verbose=1)
+    # kMDFast * kMDSlow must be greater than kMDOffDiag**2
+    # This means that kOffDiagRatio needs to be within -1 and 1
+    # Find minimum and maximum values of kMDOffDiag
+    lowerOffDiagRatio=max(-1.,self.kOffDiagRatio-kOffDiagRatioUnc)
+    upperOffDiagRatio=min(1.,self.kOffDiagRatio+kOffDiagRatioUnc)
+    self.kOffDiagRatioUnc=(upperOffDiagRatio-lowerOffDiagRatio)/2.
+    self.kOffDiagRatioCenter=lowerOffDiagRatio+self.kOffDiagRatioUnc
+    #########################
+    # Get vectors of values #
+    #########################
+    self.kMDSlowVec   = self.randomFloats[:,13]*self.kMDSlowUnc*2.       + (self.kMDSlowCentral      -self.kMDSlowUnc)
+    self.kMDFastVec   =(self.randomFloats[:,14]*self.kFastkSlowUnc*2.    + (self.kFastkSlowCentral   -self.kFastkSlowUnc))   * self.kMDSlowVec
+    self.azimuthVec   = self.randomFloats[:,15]*self.azimuthDegUnc*2.    + (self.azimuth             -self.azimuthDegUnc)
+    self.kMDOffDiagVec=(self.randomFloats[:,16]*self.kOffDiagRatioUnc*2. + (self.kOffDiagRatioCenter -self.kOffDiagRatioUnc))* np.sqrt(self.kMDSlowVec*self.kMDFastVec)
+    # Initialize arrays
+    self.kMDTensor=np.zeros([2,2,self.nReal])
+    self.TAnisoVec=np.zeros([2,2,self.nReal])
+    self.kapAnisoM2Vec=np.zeros([2,2,self.nReal])
+    self.TBarVec=np.zeros([self.nReal,1])
+    self.KAnisoVec=np.zeros([2,2,self.nReal])
+    self.diffAnisoPPVec=np.zeros([2,2,self.nReal])
+    azRadVec=np.deg2rad(self.azimuthVec)
+    # Loop over realizations
+    for iReal in range(self.nReal):
+      # Form Rotation Tensor
+      ATensor=np.array([[np.sin(azRadVec[iReal]), -np.cos(azRadVec[iReal])],[np.cos(azRadVec[iReal]),np.sin(azRadVec[iReal])]])
+      kMDOrig=np.array([[self.kMDSlowVec[iReal], self.kMDOffDiagVec[iReal]],[self.kMDOffDiagVec[iReal],self.kMDFastVec[iReal]]])
+      self.kMDTensor[:,:,iReal]=np.matmul(ATensor.T,np.matmul(kMDOrig,ATensor))
+      (self.kapAnisoM2Vec[:,:,iReal],self.KAnisoVec[:,:,iReal],self.TAnisoVec[:,:,iReal],self.diffAnisoPPVec[:,:,iReal],self.TBarVec[iReal])=calcPPAnisoVals(self.kMDTensor[:,:,iReal],self.hMVec[iReal],self.alphavVec[iReal],self.betaVec[iReal],self.phiVec[iReal],self.rhoVec[iReal],self.g,self.ntaVec[iReal])
+    return
+  
   def writeRealizations(self,filePath):
     """
     #######################################################
@@ -447,14 +567,53 @@ class gistMC:
     # Assumptions: #########################
     #     Runs after initMCPP and initMCPE #
     ########################################
+    """
     # Make vector of realization number #
     #####################################
     realization=np.arange(self.nReal)
     ###################################
     # Form dictionary of realizations #
     ###################################
-    """
-    d={'rho':self.rhoVec,'nta':self.ntaVec,'phi':self.phiVec,'kMD':self.kMDVec,'h':self.hVec,'alphav':self.alphavVec,'beta':self.betaVec,'kapM2':self.kapM2Vec,'S':self.SVec,'T':self.TVec,'K':self.KVec,'diffPP':self.diffPPVec,'mu':self.muVec,'nu':self.nuVec,'nu_u':self.nu_uVec,'alpha':self.alphaVec,'muF':self.muFVec,'muR':self.muRVec,'lambda':self.lamdaVec,'lambdaU':self.lamda_uVec,'B':self.BVec,'diffPE':self.diffPEVec,'kappa':self.kappaVec,'realization':realization}
+    d={}
+    d['realization']=realization
+    if self.runPP:
+      d['rho']=self.rhoVec
+      d['nta']=self.ntaVec
+      d['phi']=self.phiVec
+      d['kMD']=self.kMDVec
+      d['h']=self.hVec
+      d['alphav']=self.alphavVec
+      d['beta']=self.betaVec
+      d['kapM2']=self.kapM2Vec
+      d['S']=self.SVec
+      d['T']=self.TVec
+      d['K']=self.KVec
+      d['diffPP']=self.diffPPVec
+    if self.runPE:
+      d['mu']=self.muVec
+      d['nu']=self.nuVec
+      d['nu_u']=self.nu_uVec
+      d['alpha']=self.alphaVec
+      d['muF']=self.muFVec
+      d['muR']=self.muRVec
+      d['lambda']=self.lamdaVec
+      d['lambdaU']=self.lamda_uVec
+      d['B']=self.BVec
+      d['diffPE']=self.diffPEVec
+      d['kappa']=self.kappaVec
+    if self.runPPAniso:
+      d['kMDxx']=self.kMDTensor[0,0,:].flatten()
+      d['kMDyy']=self.kMDTensor[1,1,:].flatten()
+      d['kMDxy']=self.kMDTensor[0,1,:].flatten()
+      d['diffxx']=self.diffAnisoPPVec[0,0,:].flatten()
+      d['diffyy']=self.diffAnisoPPVec[1,1,:].flatten()
+      d['diffxy']=self.diffAnisoPPVec[0,1,:].flatten()
+      d['t_bar']=self.TBarVec.flatten()
+      d['azimuth']=self.azimuthVec.flatten()
+      # Not including
+      #    self.TAnisoVec
+      #    self.kapAnisoM2Vec
+      #    self.KAnisoVec
     ########################
     # Convert to dataframe #
     ########################
@@ -505,7 +664,7 @@ class gistMC:
       print(' gistMC.addWells: injection file last day: ',injWellDayMax)
       print(' gistMC.addWells: injection file day interval: ',self.injDT)
       print(' gistMC.addWells: injection file number of time samples: ',self.injNT)
-      
+    self.runAddWells=True
     return
 
   def findWells(self,eq,PE=False,verbose=0):
@@ -519,6 +678,7 @@ class gistMC:
     #####################################################################
     # Outputs:                                        #
     #    consideredWells: dataframe of selected wells #
+    #       ignoredWells: dataframe of ignored wells  #
     #              injDF: dataframe of injection data #
     ###################################################
     # Assumptions: ##################
@@ -532,6 +692,7 @@ class gistMC:
     dxs=np.zeros([self.nw])
     dys=np.zeros([self.nw])
     ddRatios=np.zeros([self.nw])
+    wellDurations=np.zeros([self.nw])
     ##########################################
     # Get uncertainty for the earthquake     #
     # this is one standard deviation so we   #
@@ -546,6 +707,7 @@ class gistMC:
       # Get number of days from start of injection to the earthquake date #
       #####################################################################
       injectionDays=(pd.to_datetime(eq['Origin Date'])-pd.to_datetime(self.wellDF['StartDate'][iw])).days
+      wellDurations[iw]=injectionDays/365.25
       ###########################################################################
       # Find diffusion distance for each well at that date                      #
       # Equation 2.13 in documentation - take maximum pore pressure diffusivity #
@@ -576,22 +738,36 @@ class gistMC:
     ##############################################################
     # Step 2: Select wells where diffusion distances are greater #
     #         than the distance to the earthquake + uncertainty  #
-    # If this is a dataframe, I should call it consideredWellsDF #
     ##############################################################
-    consideredWells=self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)
-    consideredWells['Distances']=wellDistances[diffusionDistances>(wellDistances-eqUncert)]
-    consideredWells['DXs']=dxs[diffusionDistances>(wellDistances-eqUncert)]
-    consideredWells['DYs']=dys[diffusionDistances>(wellDistances-eqUncert)]
-    # Add a column for the ratio of the diffusion distance to the EQ distance - all must be greater than 1
-    consideredWells['DDRatio']=ddRatios[diffusionDistances>(wellDistances-eqUncert)]
-    # Add a column with cumulative volume injected
-    
+    consideredWellsDF=self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)
+    consideredWellsDF['Distances']=wellDistances[diffusionDistances>(wellDistances-eqUncert)]
+    consideredWellsDF['DXs']=dxs[diffusionDistances>(wellDistances-eqUncert)]
+    consideredWellsDF['DYs']=dys[diffusionDistances>(wellDistances-eqUncert)]
+    consideredWellsDF['DDRatio']=ddRatios[diffusionDistances>(wellDistances-eqUncert)]
+    # Add a column with the time injecting prior to the earthquake
+    consideredWellsDF['YearsInjecting']=wellDurations[diffusionDistances>(wellDistances-eqUncert)]
+    ################################################################################
+    # Create dataframe of wells that are ignored - this needs to be output as a QC #
+    ################################################################################
+    excludedWellsDF=self.wellDF[diffusionDistances<(wellDistances-eqUncert)].reset_index(drop=True)
+    excludedWellsDF['Distances']=wellDistances[diffusionDistances<(wellDistances-eqUncert)]
+    excludedWellsDF['DXs']=dxs[diffusionDistances<(wellDistances-eqUncert)]
+    excludedWellsDF['DYs']=dys[diffusionDistances<(wellDistances-eqUncert)]
+    excludedWellsDF['DDRatio']=ddRatios[diffusionDistances<(wellDistances-eqUncert)]
+    # Add a column with the time injecting prior to the earthquake
+    excludedWellsDF['YearsInjecting']=wellDurations[diffusionDistances<(wellDistances-eqUncert)]
+    #
+    # To-do: compute total injection for ignored wells - should do this in injection processing #
+    #
+    excludedWellsDF['TotalBBL']=0.
     ##########################################################################
     # Step 3: Pull injection data from injection file that matches well list #
+    #         and calculate total injected volume for all wells at EQ date   #
     ##########################################################################
     # Get list of IDs #
     ###################
-    ids=consideredWells['ID']
+    ids=consideredWellsDF['ID']
+    excludedIDs=excludedWellsDF['ID']
     #####################
     # Open self.injFile #
     #####################
@@ -599,12 +775,21 @@ class gistMC:
     #############################################################
     # One line - iteratively read through file and select wells #
     #############################################################
-    injDF= pd.concat([chunk[chunk['ID'].isin(ids)] for chunk in iter_csv])
+    #injDF= pd.concat([chunk[chunk['ID'].isin(ids)] for chunk in iter_csv])
+    injDF=pd.DataFrame()
+    injExcludedDF=pd.DataFrame()
+    for chunk in iter_csv:
+      # Collect injection data for selected wells
+      injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
+      # Collect injection data for unselected wells
+      injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
     ############################################################
     # Get the number of wells selected from the injection file #
     ############################################################
     numDataWells=len(pd.unique(injDF['ID']))
-    if verbose>0: print(" gistMC.findWells: ",consideredWells.shape[0],numDataWells,len(ids))
+    numExcludedWells=len(pd.unique(injExcludedDF['ID']))
+    if verbose>0: print(" gistMC.findWells included: ",consideredWellsDF.shape[0],numDataWells,len(ids))
+    if verbose>0: print(" gistMC.findWells excluded: ",excludedWellsDF.shape[0],numExcludedWells,len(excludedIDs))
     totalVolumes=np.zeros([len(ids)])
     # Loop over injection volume 
     for iwSelect in range(len(ids)):
@@ -613,15 +798,24 @@ class gistMC:
         totalVolumes[iwSelect]=0.
       else:
         totalVolumes[iwSelect]=self.injDT*sum(injDF['BPD'][injDF['ID']==wellID])
-    consideredWells['TotalBBL']=totalVolumes
+    consideredWellsDF['TotalBBL']=totalVolumes
+    totalExcludedVolumes=np.zeros([len(excludedIDs)])
+    # Loop over injection volume 
+    for iwSelect in range(len(excludedIDs)):
+      wellID=excludedIDs[iwSelect]
+      if sum(injExcludedDF['ID']==wellID)==0:
+        totalExcludedVolumes[iwSelect]=0.
+      else:
+        totalExcludedVolumes[iwSelect]=self.injDT*sum(injExcludedDF['BPD'][injExcludedDF['ID']==wellID])
+    excludedWellsDF['TotalBBL']=totalExcludedVolumes
     if verbose>0:
       ##########################################
       # Print total number of wells selected   #
       # and wells that have reported injection #
       ##########################################
-      print(' gistMC.findWells: ',consideredWells.shape[0],' wells considered')
+      print(' gistMC.findWells: ',consideredWellsDF.shape[0],' wells considered')
       print(' gistMC.findWells: ',numDataWells,' wells with reported volumes, with ',injDF.shape[0],' injection values')
-    return consideredWells,injDF
+    return consideredWellsDF,excludedWellsDF,injDF
     
   def runPressureScenarios(self,eq,consideredWells,injDF,verbose=0):
     """
@@ -681,6 +875,7 @@ class gistMC:
       # Loop over realizations #
       # to model pressures     #
       ##########################
+      # This should be pulled out of two loops and vectorized #
       for iReal in range(self.nReal):
         pressures[iwc,iReal],timeSeries=self.pressureScenario(bpds,days,eqDay,dist,iReal)
         # Time series should be of one well and one realization - I don't think that these are lined up - fixed?
@@ -845,6 +1040,60 @@ class gistMC:
     if dP<0.: print(" gistMC.pressureScenario: Negative pressure! ",dP,",",timeSteps)
     return dP,dPT
 
+  def pressureScenarioAniso(self,bpds,days,eqDay,r,iReal):
+    """
+    ###################################
+    # Pore pressure modeling a la FSP #
+    ###################################
+    # Inputs: ################################################
+    #            bpds: list of injection rates (Barrels/day) #
+    #            days: list of injection days                #
+    #           eqDay: day number of earthquake              #
+    #               r: distance to earthquake       (meters) #
+    #           iReal: realization number                    #
+    ##########################################################
+    # Output:      dP: modeled change in pressure      (PSI) # 
+    # Assumptions: #########################################
+    #     Run inside runPressureScenarios #
+    # To-do - replace with Lei's code with additional terms #
+    """
+    
+    #Radial (in-plane) distance to well
+    #R=sqrt((X-Wells.x).^2+(Y-Wells.y).^2); % distance from wells 
+    #Rv=R(:); 
+
+    #Initialization 
+    #H1=zeros(length(Rv), length(t));  % hydraulic head, m, for method 1 
+    #H2=zeros(length(Rv), length(t));  % hydraulic head, m, for method 2
+    #ta=t-dt; % a vector containing left-end  time of each injection inteRval (ti-1 vector); must be specified in data if inteRvals not equal-time
+    #tb=t;    % a vector containing right-end time of each injection inteRval (ti   vector) 
+
+    #% Intermedita constants 
+    #% cons1=(S*Rv.^2)/(4*T_iso);  % vector of length(Rv)
+    # cons2=1/(4*pi*T_bar);         % scalar 
+
+    # Method 1: Equation (14)
+    #for k = 1:length(t)
+      #delta_ta=t(k)-ta(1:k);  % a vector of length k; t(k) is the current total time 
+      #delta_tb=t(k)-tb(1:k);  % a vector of length k; 
+    
+      #temp=T(1,1)*Yv.^2 + T(2,2)*Xv.^2  - 2*T(1,2).*Xv.*Yv;  % matrix of (length(Rv), k); 
+      #u=(S/4).*temp./(T_bar^2*delta_ta);                     % matrix of (length(Rv), k); 
+      #v=(S/4).*temp./(T_bar^2*delta_tb);                     % matrix of (length(Rv), k); at kth colume, sigularity due to delta_tb=0.
+    
+      #Wa=expint(u);           % Theis well function; matrix of (length(Rv), k); 
+      #Wb=expint(v);           % Theis well function; delta_tb can be 0 --> Singularity / inf in v; matrix of (length(Rv), k); 
+      #Wb(isnan(Wb))=0;        % Due to singularity in v; W(inf)=0 theoretically, see equation 13
+    
+      #H1_temp=cons2*Q(1:k).*(Wa-Wb);  % matrix of (length(Rv), k); 
+      #H1(:,k)=sum(H1_temp,2);         % summed over time, "2" indicates summation horizontally
+      #% Equivalent to:
+      #% for j=1:length(Rv)
+      #%     H1(j,k)=cons2*dot(Q(1:k), Wa(j,:)-Wb(j,:));
+      #% end     
+    #end 
+    #pp1=rou_0*g*H1; 
+    return
   def runPoroelasticScenarios(self,eq,consideredWells,injDF,verbose=0):
     """
     #########################################
@@ -1378,6 +1627,60 @@ def calcPPVals(kMD,hFt,alphav,beta,phi,rho,g,nta):
   T = K*hM
   return (phiFrac,hM,kapM2,S,K,T,diffPP,C)
 
+def calcPPAnisoVals(kMDTensor,hM,alphav,beta,phi,rho,g,nta):
+  """
+  ##########################################################################
+  # Convert tensor inputs to SI units and generate other tensor parameters #
+  ##########################################################################
+  # Inputs: #######################################
+  #   kMD:    permeability     (2x2,millidarcies) #
+  #   hM:     thickness                  (meters) #
+  #   alphav: vertical compressibility     (1/Pa) #
+  #   beta:   fluid compressibility        (1/Pa) #
+  #   phi:    porosity                  (percent) #
+  #   rho:    fluid density              (kg/m^3) #
+  #   g:      gravitational acceleartion  (m/s^2) #
+  #   nta:    fluid viscosity    (Pascal seconds) #
+  #################################################
+  # Outputs: ###################################
+  #   kapM2:   permeability in       (2x2,m^2) #
+  #   K:       conductivity      (kg / Pa s^3) #
+  #   T:       transmissivity    (2x2,m^2 / s) #
+  #   diffPP:  diffusivity       (2x2,m^2 / s) #
+  ##############################################
+  """
+  # Unit conversions #
+  ####################################
+  # Convert from Millidarcies to m^2 #
+  ####################################
+  kapM2 = kMDTensor*(1e-3)*(9.9e-13)
+  #######################
+  # Percent to fraction #
+  #######################
+  phiFrac=phi*0.01
+  ###########################
+  # Intermediate parameters #
+  #######################################
+  # Now compute intermediate parameters #
+  #######################################
+  # Diffusivity (pore pressure) #
+  # Equation 1.29, 3.1          #               
+  ###############################
+  diffPP=kapM2/(nta*(alphav+(beta*phiFrac)))
+  ####################################
+  # Saturated hydraulic conductivity #
+  ####################################
+  K = kapM2*rho*g/nta
+  ##################
+  # Transmissivity #
+  # Equation 1.5   #
+  ##################
+  T = K*hM
+  # 
+  TBar=np.sqrt( T[0,0]*T[1,1] - T[0,1]*T[1,0])
+  return (kapM2,K,T,diffPP,TBar)
+
+
 def matchPE2PP(mu,nu,alpha,C):
   """
   ##############################################################
@@ -1482,6 +1785,28 @@ def getDates(inDF,epoch,dayName='Days',default=99999999,verbose=0):
   #print(' getDates - dateList ', dateList)
   outDF[outName]=dateList
   return outDF
+
+def logSpace(centerVal,logUncertainty,clip=None,verbose=0):
+  """
+  ################################################
+  # logSpace(centerVal,logUncertainty,clip=None,verbose=0) #
+  ##########################################################
+  # Set linear uncertainty bounds given logarithmic ranges #
+  ##########################################################
+  # Inputs: ###################################################################
+  #        centerVal: original central deterministic value    (unknown units) #
+  #   logUncertainty: log10 uncertainty - how many orders                     #
+  #                   of magnitude could we be off by? (log10(unknown units)) #
+  #             clip: If you want a minimum value, set it here
+  #############################################################################
+  """
+  upperBound=np.power(10.,(np.log10(centerVal)+logUncertainty))
+  lowerBound=np.power(10.,(np.log10(centerVal)-logUncertainty))
+  if clip!=None: lowerBound=min(lowerBound,clip)
+  uncertainty=(upperBound-lowerBound)/2.
+  newCenterVal=lowerBound+uncertainty
+  if verbose>0: print("  logSpace: lower bound: ",lowerBound,", upper bound: ",upperBound)
+  return newCenterVal,uncertainty
 
 def haversineXY(lat1,lat2,lon1,lon2):
   """
