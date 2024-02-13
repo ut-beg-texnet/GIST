@@ -667,15 +667,17 @@ class gistMC:
     self.runAddWells=True
     return
 
-  def findWells(self,eq,PE=False,verbose=0):
+  def findWells(self,eq,PE=False,responseYears=0.,verbose=0):
     """
     ###########################################################
     # Get subset of wells within contribution distance/time   #
-    #####################################################################
-    # Input:                                                            #
-    #    eq: Earthquake dictionary - TexNet csv output                  #
-    #    PE: if using poroelasticity, multiply diffusion distances by 6 #
-    #####################################################################
+    ################################################################################
+    # Input:                                                                       #
+    #               eq: Earthquake dictionary - TexNet csv output                  #
+    #               PE: if using poroelasticity, multiply diffusion distances by 6 #
+    #    responseYears: Duration of response in years. Extend the time of the well #
+    #                   selection by this amount. NOT CURRENTLY USED               #
+    ################################################################################
     # Outputs:                                        #
     #    consideredWells: dataframe of selected wells #
     #       ignoredWells: dataframe of ignored wells  #
@@ -689,6 +691,8 @@ class gistMC:
     #####################
     wellDistances=np.zeros([self.nw])
     diffusionDistances=np.zeros([self.nw])
+    encompassingDays=np.zeros([self.nw])
+    encompassingDiffusivity=np.zeros([self.nw])
     dxs=np.zeros([self.nw])
     dys=np.zeros([self.nw])
     ddRatios=np.zeros([self.nw])
@@ -722,6 +726,32 @@ class gistMC:
       # Compute distances from wells to earthquake #
       ##############################################
       wellDistances[iw]=haversine(eq['Latitude'],self.wellDF['SurfaceHoleLatitude'][iw],eq['Longitude'],self.wellDF['SurfaceHoleLongitude'][iw])
+      ######################################################
+      # Compute encompassing dates - what time will the    #
+      # diffusion front from this well pass the epicenter? #
+      # This is relative to the earthquake date            #
+      ######################################################
+      # First calculate the number of days for the well's  #
+      # pressure front to reach the epicenter relative to  #
+      # the wells first injection date                     #
+      #######################################################
+      # To-do: include earthquake location uncertainty here #
+      #######################################################
+      injWellDaysToEpicenter=(wellDistances[iw]*wellDistances[iw] /(4. * np.pi * self.diffPPMax))/(24*60*60)
+      ##############################################################
+      # Now add that number of days to the well time to get a date #
+      ##############################################################
+      injWellDateAtEpicenter=pd.to_datetime(self.wellDF['StartDate'][iw]) + pd.DateOffset(days=injWellDaysToEpicenter)
+      ###################################################
+      # Then subtract off the date of the earthquake to #
+      # get a number of days relative to the earthquake #
+      ###################################################
+      encompassingDays[iw]=(pd.to_datetime(eq['Origin Date'])-injWellDateAtEpicenter).days
+      #############################################################
+      # Compute encompassing diffusivity - the diffusivity needed #
+      # for this well to have been included in the analysis.      #
+      #############################################################
+      encompassingDiffusivity[iw]=(wellDistances[iw]*wellDistances[iw])/(4. * np.pi * injectionDays*24*60*60)
       ################################################################
       # Get an approximate x and y distance for poroelastic modeling #
       # Will also be needed for anisotropic permeability in v2       #
@@ -739,6 +769,9 @@ class gistMC:
     # Step 2: Select wells where diffusion distances are greater #
     #         than the distance to the earthquake + uncertainty  #
     ##############################################################
+    # To-do- Change this distance criteria to a time # 
+    # criteria where we include responseYears        #
+    ################################################## 
     consideredWellsDF=self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)
     consideredWellsDF['Distances']=wellDistances[diffusionDistances>(wellDistances-eqUncert)]
     consideredWellsDF['DXs']=dxs[diffusionDistances>(wellDistances-eqUncert)]
@@ -746,6 +779,8 @@ class gistMC:
     consideredWellsDF['DDRatio']=ddRatios[diffusionDistances>(wellDistances-eqUncert)]
     # Add a column with the time injecting prior to the earthquake
     consideredWellsDF['YearsInjecting']=wellDurations[diffusionDistances>(wellDistances-eqUncert)]
+    consideredWellsDF['EncompassingDay']=encompassingDays[diffusionDistances>(wellDistances-eqUncert)]
+    consideredWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[diffusionDistances>(wellDistances-eqUncert)]
     ################################################################################
     # Create dataframe of wells that are ignored - this needs to be output as a QC #
     ################################################################################
@@ -756,10 +791,8 @@ class gistMC:
     excludedWellsDF['DDRatio']=ddRatios[diffusionDistances<(wellDistances-eqUncert)]
     # Add a column with the time injecting prior to the earthquake
     excludedWellsDF['YearsInjecting']=wellDurations[diffusionDistances<(wellDistances-eqUncert)]
-    #
-    # To-do: compute total injection for ignored wells - should do this in injection processing #
-    #
-    excludedWellsDF['TotalBBL']=0.
+    excludedWellsDF['EncompassingDay']=encompassingDays[diffusionDistances<(wellDistances-eqUncert)]
+    excludedWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[diffusionDistances<(wellDistances-eqUncert)]
     ##########################################################################
     # Step 3: Pull injection data from injection file that matches well list #
     #         and calculate total injected volume for all wells at EQ date   #
@@ -844,7 +877,9 @@ class gistMC:
     #######################################################
     nwC=consideredWells.shape[0]
     if verbose>0: print(" gistMC.runPressureScenarios: Number of wells considered: ",nwC)
-    
+    #
+    # Print information about injDF['ID'] and consideredWells['ID']
+    print("runPressureScenarios: ")
     #################################
     # Initialize MC pressure arrays #
     #################################
@@ -862,6 +897,8 @@ class gistMC:
       #################################
       # Injection rates for this well #
       #################################
+      # Failing here
+      
       bpds=injDF['BPD'][injDF['ID']==consideredWells['ID'][iwc]]
       ################################
       # Injection days for this well #
