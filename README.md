@@ -10,8 +10,6 @@ Code is written as classes and subroutines in one .py file, with a second .py fi
 
 Injection processing, GIST computation, and visualization are broken up into separate steps
 
-Visualization is structur
-
 # Contents:
 
 Code to regenerate results from IMAGE presentation in August 2022:
