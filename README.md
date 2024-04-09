@@ -39,9 +39,13 @@ Most recent version:
 
       		GIST_Stanton_11-4-23Plots.ipynb		- Jupyter notebook for 11/4/23 Stanton earthquake - plotting
 
+ 		GIST_TestAnisotropy.ipynb		- Jupyter notebook for testing azimuthal permeability anisotropy in gistMCLive
+
+   		GIST_Stanton_TodayCompute.ipynb		- Jupyter notebook for a hypothetical present-day Stanton earthquake - computation
+
 # To-do (very incomplete list)
 
-	- Speed up pore pressure modeling code
+	- Validate pore pressure modeling codes
   
 	- Include Matlab prototype code
   
