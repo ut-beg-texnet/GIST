@@ -40,14 +40,12 @@ import gc
 #       initPP                  #
 #       initPE                  #
 #       initPPAniso             #
-#       initMCPP                #
-#       initMCPE                #
-#       initMCPPAniso           #
 #       writeRealizations       #
 #       addWells                #
 #       findWells               #
 #       runPressureScenarios    #
 #       pressureScenario        #
+#       runPressureGrid
 #       pressureScenarioAniso   #
 #       runPoroelasticScenarios #
 #       poroelasticScenario     #
@@ -61,6 +59,7 @@ import gc
 #     formEffectiveStressTensor #
 #     projectStress             #
 #     stressInvariants          #
+#     prepInj
 #################################
 
 
@@ -74,12 +73,9 @@ class gistMC:
   Contains
   #####################################
   # init          - initialize general class ########################
-  # initPP        - initialize pore pressure deterministic modeling #
-  # initPE        - initialize poroelastic determinisitic modeling  #
-  # initPPAniso   - initialize anisotropic pore pressure deterministic modeling #
-  # initMCPP      - initialize Monte Carlo pore pressure models     #
-  # initMCPE      - initialize Monte Carlo poroelastic models       #
-  # initMCPPAniso - initialize Monte Carlo anisotropic pore pressure models     #
+  # initPP        - initialize pore pressure modeling #
+  # initPE        - initialize poroelastic modeling  #
+  # initPPAniso   - initialize anisotropic pore pressure modeling #
   # writeRealizations - output csv of parameter sets           #
   ####################################################################
   # addWells   - load injection and well info from injectionV3 files #
@@ -89,6 +85,7 @@ class gistMC:
   # poroelasticImpulseResponse - 
   # runPressureScenarios    - run all pore pressure scenarios for EQ #
   # pressureScenario        - individual pore pressure modeling case #
+  # runPressureGrid ---
   # runPoroelasticScenarios - run all poroelastic scenarios for EQ   #
   # poroelasticScenario     - individual poroelastic modeling case   #
   # poroAttr                - poroelastic disaggregation to wells    #
@@ -144,229 +141,60 @@ class gistMC:
     # To-do: error checking of parameters # 
     #######################################
   
-  def initPP(self,rho_0=1000.,nta=1.e-3,phi=10.,kMD=200.,h=100.,alphav=1.08e-9,beta=3.6e-10):
+  def initPP(self,rho0_min=980.,rho0_max=1020.,
+             nta_min=0.9e-3,nta_max=1.1e-3,
+             phi_min=5.,phi_max=20.,
+             kMD_min=20.,kMD_max=250.,
+             h_min=80.,h_max=200.,
+             alphav_min=1.08e-9,alphav_max=1.1e-9,
+             beta_min=3.5e-10,beta_max=3.7e-10):
     """
     # Initialize Pore Pressure modeling #
-    ####################################################
-    # Inputs: ##########################################
-    #     rho_0 :  Fluid density              (kg/m^3) #
-    #       phi :  Porosity                  (percent) #
-    #       nta :  Fluid viscosity    (Pascal-seconds) #
-    #       kMD :  Permeability         (millidarcies) #
-    #         h :  Injection interval thickness (feet) #
-    #    alphav :  Vertical compressibility     (1/Pa) #
-    #      beta :  Fluid compressibility        (1/Pa) #
-    ####################################################
+    ############################################################
+    # Inputs: ##################################################
+    #      rho0_min/max :  Fluid density              (kg/m^3) #
+    #       phi_min/max :  Porosity                  (percent) #
+    #       nta_min/max :  Fluid viscosity    (Pascal-seconds) #
+    #       kMD_min/max :  Permeability         (millidarcies) #
+    #         h_min/max :  Injection interval thickness (feet) #
+    #    alphav_min/max :  Vertical compressibility     (1/Pa) #
+    #      beta_min/max :  Fluid compressibility        (1/Pa) #
+    ############################################################
     # Assumptions: ########
     #     Runs after init #
     ########################
     # Set input parameters #
     ########################
     """
-    self.phi=phi
-    self.kMD=kMD
-    self.rho=rho_0
-    self.nta=nta
-    self.alphav=alphav
-    self.beta=beta
-    self.h=h
-    ########################################################
-    # Convert units to SI, compute intermediate parameters #
-    ########################################################
-    (phiFrac,hM,kapM2,S,K,T,diffPP,C)=calcPPVals(kMD,h,alphav,beta,phi,rho_0,self.g,nta)
-    ####################
-    # Set class values #
-    #######################
-    # Fractional porosity #
-    #######################
-    self.phiFrac=phiFrac
-    ################################
-    # Interval thickness in meters #
-    ################################
-    self.hM=hM
-    #######################
-    # Permeability in m^2 #
-    #######################
-    self.kapM2=kapM2
-    ###############################
-    # Storativity, Transmissivity #
-    ###############################
-    self.S=S
-    self.T=T
-    #####################
-    # Diffusivity m^2/s #
-    #####################
-    self.diffPP=diffPP
-    self.C=C
-    self.kappa=kapM2/nta
-    #
-    # Set initialized Flag as done
-    #
-    self.runPP=True
-    ########################################################################
-    # To-do - error checking - bounds of parameters, unphysical rock, etc. #
-    ########################################################################
-    return
-  
-  def initPE(self,mu=20e9,nu=0.25,nu_u=0.3,alpha=0.31,mu_f=0.6,mu_r=0.6,match=False,verbose=0):
-    """
-    ###################################
-    # Initialize poroelastic modeling #
-    ####################################################
-    # Inputs: ############################################
-    #     mu : Rock shear modulus              (Pascals) #
-    #     nu : Rock drained Poisson's ratio   (unitless) #
-    #   nu_u : Rock undrained Poisson's ratio (unitless) #
-    #  alpha : Biot's coefficient             (unitless) #
-    #   mu_f : Fault friction coefficient     (unitless) #
-    #   mu_r : Rock friction coefficient      (unitless) #
-    #  match : Force matching diffusivities    (boolean) #
-    ######################################################
-    # Assumptions: ###################
-    #     Runs after init and initPP #
-    ##################################
-    """
-    if self.runPP==False: print("gistMCLive.initPE Error: initPP must be run first!")
-    self.mu=mu
-    self.nu=nu
-    ###########################################################
-    # This does not get used if match=True which it should be #
-    ###########################################################
-    self.nu_u=nu_u
+    self.phi_min=phi_min
+    self.phi_max=phi_max
+    self.kMD_min=kMD_min
+    self.kMD_max=kMD_max
+    self.rho_min=rho0_min
+    self.rho_max=rho0_max
+    self.nta_min=nta_min
+    self.nta_max=nta_max
+    self.alphav_min=alphav_min
+    self.alphav_max=alphav_max
+    self.beta_min=beta_min
+    self.beta_max=beta_max
+    self.h_min=h_min
+    self.h_max=h_max
     
-    self.alpha= alpha
-    #######################################################
-    # Friction coefficientS (unitless)                    #
-    # mu_f - used when computing CFF                      #
-    # mu_r - only used when computing MC stress invariant #
-    #######################################################
-    self.muF=mu_f
-    self.muR=mu_r
-    ###############################################################
-    # If we match the poroelastic and pore pressure diffusivities #
-    ###############################################################
-    self.match=match
-    if match:
-      ######################################################
-      # Recompute Lame's constants (drained and undrained) #
-      ######################################################
-      lamda,lamda_u = matchPE2PP(self.mu,self.nu,self.alpha,self.C)
-      ###########################################
-      # Recompute new undrained Poisson's ratio #
-      ###########################################
-      nu_u=lamda_u/(2.*(lamda_u+self.mu))
-      ########################
-      # Set class parameters #
-      ########################
-      self.lamda=lamda
-      self.lamda_u=lamda_u
-      if verbose>0: print(" gistMC.initPE - nu_u matched ",self.nu_u," to ",nu_u)
-      self.nu_u=nu_u
-    else:
-      #########################################################################
-      # Don't recompute - validity of undrained Lame's parameter not checked! #
-      #########################################################################
-      self.lamda=2.*self.mu*self.nu/(1.-2.*self.nu)
-      self.lamda_u=2.*self.mu*self.nu_u/(1.-2.*self.nu_u)
-    ##################################
-    # Compute Skempton's coefficient #
-    ##################################
-    self.B=3.*(self.nu_u-self.nu)/(self.alpha*(1.+self.nu_u)*(1.-2.*self.nu))
-    #####################################
-    # Compute diffusivity (poroelastic) #
-    ################################################
-    # Shouldn't this match the pore pressure one ? #
-    ################################################
-    self.diffPE=(self.kapM2)*(self.lamda_u-self.lamda)*(self.lamda+2.*self.mu)/(self.nta*self.alpha*self.alpha*(self.lamda_u+2.*self.mu))
-    if verbose>0: print(" gistMC.initPE - diffusivities: ",self.diffPP,self.diffPE)
-    self.runPE=True
-    return
-
-  def initPPAniso(self,kMDSlow=10.,kFastkSlow=10.,azimuthDeg=0.,kOffDiagRatio=0.,verbose=0):
-    """
-    #######################################################
-    # Initialize Anisotropy for Pore Pressure modeling    #
-    #######################################################
-    # Inputs: ####################################################################
-    #        kMDSlow :  Permeabilty in slow direction             (millidarcies) #
-    #     kFastkSlow :  Ratio of fast to slow lateral permeablity (unitless, >1) #
-    #     azimuthDeg :  Azimuth of fast direction           (degrees CCW from E) #
-    #  kOffDiagRatio :  Off-diagonal xy Permeability Ratio     (unitless, abs<1) #
-    ##############################################################################
-    # Assumptions: ##########
-    #     Runs after initPP #
-    #########################
-    # Set input parameters #
-    ########################
-    """
-    if self.runPP==False: print("gistMCLive.initPPAniso Error: initPP must be run first!")
-    self.kMDSlow=kMDSlow
-    self.kFastkSlow=kFastkSlow
-    self.kMDFast=kMDSlow*kFastkSlow
-    self.azimuth=azimuthDeg
-    self.kOffDiagRatio=kOffDiagRatio
-    self.kMDOffDiag=kOffDiagRatio*np.sqrt(self.kMDSlow*self.kMDFast)
-    # form permeability tensor
-    kMDTensor=np.array([[self.kMDSlow, self.kMDOffDiag],[self.kMDOffDiag,self.kMDFast]])
-    # form rotation tensor
-    azRad=np.deg2rad(azimuthDeg)
-    ATensor=np.array([[np.sin(azRad), -np.cos(azRad)],[np.cos(azRad),np.sin(azRad)]])
-    # rotate permeability tensor to NE coordinates
-    kMDRotate=np.matmul(ATensor.T,np.matmul(kMDTensor,ATensor))
-    (kapM2,K,TAniso,diffPP,TBar)=calcPPAnisoVals(kMDRotate,self.hM,self.alphav,self.beta,self.phi,self.rho,self.g,self.nta)
-    self.kMDRotate=kMDRotate
-    self.TAniso=TAniso
-    self.kapAnisoM2=kapM2
-    self.TBar=TBar
-    self.runPPAniso=True
-    return
-  
-  def initMCPP(self,rhoUnc=2.,ntaUnc=1e-6,phiUnc=3.,kMDLogUnc=0.2,hUnc=25.,alphavUnc=1e-11,betaUnc=1e-12,verbose=0):
-    """
-    #############################################
-    # Initialize Monte Carlo pore pressure runs #
-    # Inputs: ###################################################
-    #     rhoUnc : Density uncertainty                 (kg/m^3) #
-    #     ntaUnc : Fluid viscosity uncertainty (Pascal-seconds) #
-    #     phiUnc : Porosity uncertainty               (percent) #
-    #  kMDLogUnc : Uncertainty in log of permeability  (log(mD) #
-    #       hUnc : Interval thickness uncertainty        (feet) #
-    #  alphavUnc : Vertical compressibility uncertainty  (1/Pa) #
-    #    betaUnc : Fluid compressibility uncertainty     (1/Pa) #
-    ##################################################################
-    # To-do: check to make sure parameters are physically realizable #
-    #        negative values, physical bounds, etc.                  #
-    #        additional probability distributions                    #
-    #        is this the best parameterization to add uncertainty to?#
-    ##################################################################
-    # Assumptions: ###################
-    #     Runs after init and initPP #
-    ##################################
-    """
-    if self.runPP==False: print("gistMCLive.initMCPP Error: initPP must be run first!")
-    self.rhoUnc=rhoUnc
-    self.ntaUnc=ntaUnc
-    self.phiUnc=phiUnc
-    self.kMDLogUnc=kMDLogUnc
-    self.hUnc=hUnc
-    self.alphavUnc=alphavUnc
-    self.betaUnc=betaUnc
     #########################
     # Get vectors of values #
     #########################
-    self.rhoVec   =self.randomFloats[:,0]*rhoUnc*2.   +(self.rho   -self.rhoUnc)
-    self.ntaVec   =self.randomFloats[:,1]*ntaUnc*2.   +(self.nta   -self.ntaUnc)
-    self.phiVec   =self.randomFloats[:,2]*phiUnc*2.   +(self.phi   -self.phiUnc)
-    self.kMDCentral,self.kMDUnc=logSpace(self.kMD,self.kMDLogUnc,verbose=1)
-    #kMDUpper=np.power(10.,(np.log10(self.kMD)+self.kMDLogUnc))
-    #kMDLower=np.power(10.,(np.log10(self.kMD)-self.kMDLogUnc))
-    #self.kMDUnc=(kMDUpper-kMDLower)/2.
-    #self.kMDCentral=kMDLower+self.kMDUnc
-    #print(" gistMC.initMCPP - kMD original Central value, upper bound, lower bound, updated value, uncertainty:",self.kMD,kMDUpper,kMDLower,self.kMDCentral,self.kMDUnc)
-    self.kMDVec   =self.randomFloats[:,3]*self.kMDUnc*2.   +(self.kMDCentral-self.kMDUnc)
-    self.hVec     =self.randomFloats[:,4]*hUnc*2.     +(self.h     -self.hUnc)
-    self.alphavVec=self.randomFloats[:,5]*alphavUnc*2.+(self.alphav-self.alphavUnc)
-    self.betaVec  =self.randomFloats[:,6]*betaUnc*2.  +(self.beta  -self.betaUnc)
+    self.rhoVec   =self.rho_min    + self.randomFloats[:,0]*(self.rho_max   -self.rho_min)
+    self.ntaVec   =self.nta_min    + self.randomFloats[:,1]*(self.nta_max   -self.nta_min)
+    self.phiVec   =self.phi_min    + self.randomFloats[:,2]*(self.phi_max   -self.phi_min)
+    self.hVec     =self.h_min      + self.randomFloats[:,3]*(self.h_max     -self.h_min)
+    self.alphavVec=self.alphav_min + self.randomFloats[:,4]*(self.alphav_max-self.alphav_min)
+    self.betaVec  =self.beta_min   + self.randomFloats[:,5]*(self.beta_max  -self.beta_min)
+    # This is a linear distribution from the minimum to maximum
+    #self.kMDVec   =self.kMD_min    + self.randomFloats[:,6]*(self.kMD_max   -self.kMD_min)
+    # I think that this is a logarithmic distribution from the minimum to maximum
+    self.kMDVec   =self.kMD_min    + np.power(10.,(self.randomFloats[:,6]*(np.log10(self.kMD_max)-np.log10(self.kMD_min))))
+
     ##############################################################
     # Convert vectors to SI units, generate intermediate vectors #
     ##############################################################
@@ -383,65 +211,73 @@ class gistMC:
     self.diffPPVec=diffPPVec
     self.diffPPMax=np.max(diffPPVec)
     self.CVec=CVec
-    if verbose>0:
-      print(" gistMC.initMCPP - rho    min/max:",np.amin(self.rhoVec),np.amax(self.rhoVec))
-      print(" gistMC.initMCPP - nta    min/max:",np.amin(self.ntaVec),np.amax(self.ntaVec))
-      print(" gistMC.initMCPP - phi    min/max:",np.amin(self.phiVec),np.amax(self.phiVec))
-      print(" gistMC.initMCPP - kMD    min/max:",np.amin(self.kMDVec),np.amax(self.kMDVec))
-      print(" gistMC.initMCPP - h      min/max:",np.amin(self.hVec),np.amax(self.hVec))
-      print(" gistMC.initMCPP - alphav min/max:",np.amin(self.alphavVec),np.amax(self.alphavVec))
-      print(" gistMC.initMCPP - beta   min/max:",np.amin(self.betaVec),np.amax(self.betaVec))
-      print(" gistMC.initMCPP - kapM2  min/max:",np.amin(self.kapM2Vec),np.amax(self.kapM2Vec))
-      print(" gistMC.initMCPP - S      min/max:",np.amin(self.SVec),np.amax(self.SVec))
-      print(" gistMC.initMCPP - K      min/max:",np.amin(self.KVec),np.amax(self.KVec))
-      print(" gistMC.initMCPP - T      min/max:",np.amin(self.TVec),np.amax(self.TVec))
-      print(" gistMC.initMCPP - diffPP min/max:",np.amin(self.diffPPVec),np.amax(self.diffPPVec))
+    #
+    # Set initialized Flag as done
+    #
+    self.runPP=True
+    ########################################################################
+    # To-do - error checking - bounds of parameters, unphysical rock, etc. #
+    ########################################################################
     return
-    
-  def initMCPE(self,muUnc=1e9,nuUnc=0.02,nu_uUnc=0.02,alphaUnc=0.05,muFUnc=0.05,muRUnc=0.05,match=True,verbose=0):
+  
+  def initPE(self,mu_min=19e9,mu_max=21e9,
+             nu_min=0.23,nu_max=0.25,
+             nu_u_min=0.28,nu_u_max=0.32,
+             alpha_min=0.26,alpha_max=0.36,
+             mu_f_min=0.55,mu_f_max=0.65,
+             mu_r_min=0.55,mu_r_max=0.65,
+             match=True,verbose=0):
     """
-    ###########################################
-    # Initialize Monte Carlo poroelastic runs #
-    # To-do: Error checking on possible bounds#
-    #     eg - nu_u>nu, positive values, etc. #   
-    #######################################################################
-    # Inputs: #############################################################
-    #       muUnc : Rock shear modulus uncertainty              (Pascals) #
-    #       nuUnc : Rock drained Poisson's ratio uncertainty   (unitless) #
-    #     nu_uUnc : Rock undrained Poisson's ratio uncertainty (unitless) #
-    #    alphaUnc : Biot's coefficient uncertainty             (unitless) #
-    #      muFUnc : Fault friction coefficient uncertainty     (unitless) #
-    #      muRUnc : Rock friction coefficient uncertainty      (unitless) #
-    #       match : Force diffusivities to match PP cases       (boolean) #
-    #######################################################################
-    # Assumptions: #######################
-    #     Runs after initMCPP and initPE #
-    ######################################
+    ###################################
+    # Initialize poroelastic modeling #
+    ##############################################################
+    # Inputs: ####################################################
+    #     mu_min/max : Rock shear modulus              (Pascals) #
+    #     nu_min/max : Rock drained Poisson's ratio   (unitless) #
+    #   nu_u_min/max : Rock undrained Poisson's ratio (unitless) #
+    #                 Does not get used if match=True
+    #  alpha_min/max : Biot's coefficient             (unitless) #
+    #   mu_f_min/max : Fault friction coefficient     (unitless) #
+    #   mu_r_min/max : Rock friction coefficient      (unitless) #
+    #          match : Force matching diffusivities    (boolean) #
+    ##############################################################
+    # Assumptions: ###################
+    #     Runs after init and initPP #
+    ##################################
     """
-    if self.runPE==False: print("gistMCLive.initMCPE Error: initPE must be run first!")
-    self.muUnc=muUnc
-    self.nuUnc=nuUnc
-    ############################################################
-    # This does not get used if match=True (it should be True) #
-    ############################################################
-    self.nu_uUnc=nu_uUnc
+    if self.runPP==False: print("gistMCLive.initPE Error: initPP must be run first!")
+    self.mu_min=mu_min
+    self.mu_max=mu_max
+    self.nu_min=nu_min
+    self.nu_max=nu_max
+    ###########################################################
+    # This does not get used if match=True which it should be #
+    ###########################################################
+    self.nu_u_min=nu_u_min
+    self.nu_u_max=nu_u_max
     
-    self.alphaUnc=alphaUnc
-    #################################################
-    # Not sure where these gets used - might remove #
-    #################################################
-    self.muFUnc=muFUnc
-    self.muRUnc=muRUnc
+    self.alpha_min= alpha_min
+    self.alpha_max= alpha_max
+    #######################################################
+    # Friction coefficientS (unitless)                    #
+    # mu_f - used when computing CFF                      #
+    # mu_r - only used when computing MC stress invariant #
+    #######################################################
+    self.muF_min=mu_f_min
+    self.muF_max=mu_f_max
+    self.muR_min=mu_r_min
+    self.muR_max=mu_r_max
+    
     ##################################
     # Get vectors of values          #
     # Use randomfloats from initMCPP #
     ##################################
-    self.muVec    =self.randomFloats[:,7]*muUnc*2.   +(self.mu   -self.muUnc)
-    self.nuVec    =self.randomFloats[:,8]*nuUnc*2.   +(self.nu   -self.nuUnc)
-    self.nu_uVec  =self.randomFloats[:,9]*nu_uUnc*2.   +(self.nu_u -self.nu_uUnc)
-    self.alphaVec =self.randomFloats[:,10]*alphaUnc*2.  +(self.alpha-self.alphaUnc)
-    self.muFVec   =self.randomFloats[:,11]*muFUnc*2.  +(self.muF  -self.muFUnc)
-    self.muRVec   =self.randomFloats[:,12]*muRUnc*2.  +(self.muR  -self.muRUnc)
+    self.muVec    =self.mu_min    + self.randomFloats[:,7] *(self.mu_max   -self.mu_min)
+    self.nuVec    =self.nu_min    + self.randomFloats[:,8] *(self.nu_max   -self.nu_min)
+    self.nu_uVec  =self.nu_u_min  + self.randomFloats[:,9] *(self.nu_u_max -self.nu_u_min)
+    self.alphaVec =self.alpha_min + self.randomFloats[:,10]*(self.alpha_max-self.alpha_min)
+    self.muFVec   =self.muF_min   + self.randomFloats[:,11]*(self.muF_max-self.muF_min)
+    self.muRVec   =self.muR_min   + self.randomFloats[:,12]*(self.muR_max-self.muR_min)
     ##############################################################
     # Convert vectors to SI units, generate intermediate vectors #
     ##############################################################
@@ -454,18 +290,7 @@ class gistMC:
     self.BVec=BVec
     self.diffPEVec=diffPEVec
     self.kappaVec=kappaVec
-    if verbose>0:
-      print(" gistMC.initMCPE - mu      min/max:",np.amin(self.muVec),np.amax(self.muVec))
-      print(" gistMC.initMCPE - nu      min/max:",np.amin(self.nuVec),np.amax(self.nuVec))
-      print(" gistMC.initMCPE - nu_u    min/max:",np.amin(self.nu_uVec),np.amax(self.nu_uVec))
-      print(" gistMC.initMCPE - alpha   min/max:",np.amin(self.alphaVec),np.amax(self.alphaVec))
-      print(" gistMC.initMCPE - muF     min/max:",np.amin(self.muFVec),np.amax(self.muFVec))
-      print(" gistMC.initMCPE - muR     min/max:",np.amin(self.muRVec),np.amax(self.muRVec))
-      print(" gistMC.initMCPE - lamda   min/max:",np.amin(self.lamdaVec),np.amax(self.lamdaVec))
-      print(" gistMC.initMCPE - lamda_u min/max:",np.amin(self.lamda_uVec),np.amax(self.lamda_uVec))
-      print(" gistMC.initMCPE - B       min/max:",np.amin(self.BVec),np.amax(self.BVec))
-      print(" gistMC.initMCPE - diffPE  min/max:",np.amin(self.diffPEVec),np.amax(self.diffPEVec))
-      print(" gistMC.initMCPE - kappa   min/max:",np.amin(self.kappaVec),np.amax(self.kappaVec))
+    # This needs cleanup to remove repeated code #
     if match:
       ####################################
       # If we match - nu_u Unc goes away #
@@ -490,42 +315,87 @@ class gistMC:
         self.BVec[i]=3.*(self.nu_uVec[i]-self.nuVec[i])/(self.alphaVec[i]*(1.+self.nu_uVec[i])*(1.-2.*self.nuVec[i]))
         ############################################
         # Recompute poroelastic diffusivity vector #
-        # Shouldn't this be the same as the PP one #
+        # This should be the same as the PP one    #
         ############################################
         self.diffPEVec[i]=(self.kapM2Vec[i])*(self.lamda_uVec[i]-self.lamdaVec[i])*(self.lamdaVec[i]+2.*self.muVec[i])/(self.ntaVec[i]*self.alphaVec[i]*self.alphaVec[i]*(self.lamda_uVec[i]+2.*self.muVec[i]))
       if verbose>0:
         print(" Monte Carlo poroelastic (matched) - B     min/max:",np.amin(self.BVec),np.amax(self.BVec))
         print(" Monte Carlo poroelastic (matched) -diffPE min/max:",np.amin(self.diffPEVec),np.amax(self.diffPEVec))
+    else:
+      #########################################################################
+      # Don't recompute - validity of undrained Lame's parameter not checked! #
+      #########################################################################
+      self.lamdaVec=2.*self.muVec*self.nuVec/(1.-2.*self.nuVec)
+      self.lamda_uVec=2.*self.muVec*self.nu_uVec/(1.-2.*self.nu_uVec)
+      ##################################
+      # Compute Skempton's coefficient #
+      ##################################
+      self.BVec=3.*(self.nu_uVec-self.nuVec)/(self.alphaVec*(1.+self.nu_uVec)*(1.-2.*self.nuVec))
+      #####################################
+      # Compute diffusivity (poroelastic) #
+      ################################################
+      # Shouldn't this match the pore pressure one ? #
+      ################################################
+      self.diffPEVec=(self.kapM2Vec)*(self.lamda_uVec-self.lamdaVec)*(self.lamdaVec+2.*self.muVec)/(self.ntaVec*self.alphaVec*self.alphaVec*(self.lamda_uVec+2.*self.muVec))
+    self.runPE=True
     return
-  
-  def initMCPPAniso(self,kMDSlowLogUnc=0.2,kFastkSlowLogUnc=10.,azimuthDegUnc=30.,kOffDiagRatioUnc=0.):
+
+  def initPPAniso(self,kMDSlow_min=1.,kMDSlow_max=100.,
+                  kFastkSlow_min=1.,kFastkSlow_max=5.,
+                  azimuthDeg_min=0.,azimuthDeg_max=10.,
+                  kOffDiagRatio_min=-1.,kOffDiagRatio_max=1.,
+                  verbose=0):
     """
-    ##########################################################
-    # Initialize Monte Carlo pore pressure w/anisotropy runs #
-    # Inputs: ########################################################################################
-    #       kMDSlowLogUnc : Uncertainty in log of slowest permeability                     (log(mD)) #
-    #    kFastkSlowLogUnc : Uncertainty in log of ratio of fast to slow permeability (log(unitless)) #
-    #                       This gets clipped so kFastkSlow>=1.                                      #
-    #       azimuthDegUnc : Uncertainty in azimuth of fastest permeability                 (degrees) #
-    #                       This gets clipped to 90 degrees.                                         #
-    #    kOffDiagRatioUnc : Uncertainty in off-diagonal permeability                      (unitless) #
-    #                       This gets clipped so that abs(ratio)<1.                                  #
-    ##################################################################################################
-    # To-do: check to make sure parameters are physically realizable #
-    #        negative values, physical bounds, etc.                  #
-    #        additional probability distributions                    #
-    #        is this the best parameterization to add uncertainty to?#
-    ##################################################################
-    # Assumptions: ###################
-    #     Runs after init and initPP #
-    ##################################
+    #######################################################
+    # Initialize Anisotropy for Pore Pressure modeling    #
+    #######################################################
+    # Inputs: ####################################################################
+    #        kMDSlow_min/max :  Permeabilty in slow direction             (millidarcies) #
+    #     kFastkSlow_min/max :  Ratio of fast to slow lateral permeablity (unitless, >1) #
+    #     azimuthDeg_min/max :  Azimuth of fast direction           (degrees CCW from E) #
+    #  kOffDiagRatio_min/max :  Off-diagonal xy Permeability Ratio     (unitless, abs<1) #
+    ##############################################################################
+    # Assumptions: ##########
+    #     Runs after initPP #
+    #########################
+    # Set input parameters #
+    ########################
     """
-    if self.runPP==False: print("gistMCLive.initMCPPAniso Error: initPP must be run first!")
-    if self.runPPAniso==False: print("gistMCLive.initMCPPAniso Error: initPPAniso must be run first!")
-    self.kMDSlowLogUnc=kMDSlowLogUnc
-    self.kFastkSlowLogUnc=kFastkSlowLogUnc
-    self.azimuthDegUnc=azimuthDegUnc
-    self.kMDSlowCentral,self.kMDSlowUnc=logSpace(self.kMDSlow,self.kMDSlowLogUnc,clip=None,verbose=1)
+    if self.runPP==False: print("gistMCLive.initPPAniso Error: initPP must be run first!")
+    self.kMDSlow_min=kMDSlow_min
+    self.kMDSlow_max=kMDSlow_max
+    self.kFastkSlow_min=kFastkSlow_min
+    self.kFastkSlow_max=kFastkSlow_max
+    # I don't think that i need this
+    self.kMDFast_min=kMDSlow_min*kFastkSlow_min
+    self.kMDFast_max=kMDSlow_max*kFastkSlow_max
+    #
+    self.azimuth_min=azimuthDeg_min
+    self.azimuth_max=azimuthDeg_max
+    self.kOffDiagRatio_min=min(kOffDiagRatio_min,-1.)
+    self.kOffDiagRatio_max=max(kOffDiagRatio_max,1.)
+    # All of this stuff needs to be done on a per realization basis
+    self.kMDOffDiag_min=kOffDiagRatio_min*np.sqrt(self.kMDSlow_min*self.kMDFast_min)
+    # form permeability tensor
+    kMDTensor=np.array([[self.kMDSlow, self.kMDOffDiag],[self.kMDOffDiag,self.kMDFast]])
+    # form rotation tensor
+    azRad=np.deg2rad(azimuthDeg)
+    ATensor=np.array([[np.sin(azRad), -np.cos(azRad)],[np.cos(azRad),np.sin(azRad)]])
+    # rotate permeability tensor to NE coordinates
+    kMDRotate=np.matmul(ATensor.T,np.matmul(kMDTensor,ATensor))
+    (kapM2,K,TAniso,diffPP,TBar)=calcPPAnisoVals(kMDRotate,self.hM,self.alphav,self.beta,self.phi,self.rho,self.g,self.nta)
+    self.kMDRotate=kMDRotate
+    self.TAniso=TAniso
+    self.kapAnisoM2=kapM2
+    self.TBar=TBar
+    #########################
+    # Get vectors of values #
+    #########################
+    self.kMDSlowVec   = self.kMDSlow_min    + np.power(10.,(self.randomFloats[:,13]*(np.log10(self.kMDSlow_max)-np.log10(self.kMDSlow_min))))
+    self.kMDFastVec   = self.kMDSlowVec * ( self.kFastkSlow_min + self.randomFloats[:,14]*(self.kFastkSlow_max-self.kFastkSlow_min))
+    self.azimuthVec   = self.azimuth_min + self.randomFloats[:,15]*(self.azimuth_max - self.azimuth_min)
+    self.kMDOffDiagVec=np.sqrt(self.kMDSlowVec*self.kMDFastVec)*self.kOffDiagRatio_min+self.randomFloats[:,16]*(self.kOffDiagRatio_max-self.kOffDiagRatio_min)
+
     # Force kFast to be larger than kSlow
     self.kFastkSlowCentral,self.kFastkSlowUnc=logSpace(self.kFastkSlow,self.kFastkSlowLogUnc,clip=1.,verbose=1)
     # kMDFast * kMDSlow must be greater than kMDOffDiag**2
@@ -533,15 +403,7 @@ class gistMC:
     # Find minimum and maximum values of kMDOffDiag
     lowerOffDiagRatio=max(-1.,self.kOffDiagRatio-kOffDiagRatioUnc)
     upperOffDiagRatio=min(1.,self.kOffDiagRatio+kOffDiagRatioUnc)
-    self.kOffDiagRatioUnc=(upperOffDiagRatio-lowerOffDiagRatio)/2.
-    self.kOffDiagRatioCenter=lowerOffDiagRatio+self.kOffDiagRatioUnc
-    #########################
-    # Get vectors of values #
-    #########################
-    self.kMDSlowVec   = self.randomFloats[:,13]*self.kMDSlowUnc*2.       + (self.kMDSlowCentral      -self.kMDSlowUnc)
-    self.kMDFastVec   =(self.randomFloats[:,14]*self.kFastkSlowUnc*2.    + (self.kFastkSlowCentral   -self.kFastkSlowUnc))   * self.kMDSlowVec
-    self.azimuthVec   = self.randomFloats[:,15]*self.azimuthDegUnc*2.    + (self.azimuth             -self.azimuthDegUnc)
-    self.kMDOffDiagVec=(self.randomFloats[:,16]*self.kOffDiagRatioUnc*2. + (self.kOffDiagRatioCenter -self.kOffDiagRatioUnc))* np.sqrt(self.kMDSlowVec*self.kMDFastVec)
+
     # Initialize arrays
     self.kMDTensor=np.zeros([2,2,self.nReal])
     self.TAnisoVec=np.zeros([2,2,self.nReal])
@@ -557,8 +419,10 @@ class gistMC:
       kMDOrig=np.array([[self.kMDSlowVec[iReal], self.kMDOffDiagVec[iReal]],[self.kMDOffDiagVec[iReal],self.kMDFastVec[iReal]]])
       self.kMDTensor[:,:,iReal]=np.matmul(ATensor.T,np.matmul(kMDOrig,ATensor))
       (self.kapAnisoM2Vec[:,:,iReal],self.KAnisoVec[:,:,iReal],self.TAnisoVec[:,:,iReal],self.diffAnisoPPVec[:,:,iReal],self.TBarVec[iReal])=calcPPAnisoVals(self.kMDTensor[:,:,iReal],self.hMVec[iReal],self.alphavVec[iReal],self.betaVec[iReal],self.phiVec[iReal],self.rhoVec[iReal],self.g,self.ntaVec[iReal])
+
+    self.runPPAniso=True
     return
-  
+    
   def writeRealizations(self,filePath):
     """
     #######################################################
@@ -576,6 +440,7 @@ class gistMC:
     realization=np.arange(self.nReal)
     ###################################
     # Form dictionary of realizations #
+    # Then turn it into a dataframe   #
     ###################################
     d={}
     d['realization']=realization
@@ -814,6 +679,7 @@ class gistMC:
     iter_csv=pd.read_csv(self.injFile, iterator=True,chunksize=100000)
     #############################################################
     # One line - iteratively read through file and select wells #
+    # Shelly suggests looking at SPARKF for reading through this #
     #############################################################
     #injDF= pd.concat([chunk[chunk['ID'].isin(ids)] for chunk in iter_csv])
     injDF=pd.DataFrame()
@@ -894,7 +760,7 @@ class gistMC:
     percentages=np.zeros([nwC,self.nReal])
     totalPressures=np.zeros([nwC,self.nReal])
     #timeSeries=np.zeros([self.injNT,1])
-    allTimeSeries=np.zeros([self.injNT,nwC,self.nReal])
+    #allTimeSeries=np.zeros([self.injNT,nwC,self.nReal])
     ####################################
     # Loop over wells in consideration #
     # Secondary loop is realizations   #
@@ -905,16 +771,25 @@ class gistMC:
       # Injection rates for this well #
       #################################
       # Failing here
-      
-      bpds=injDF['BPD'][injDF['ID']==consideredWells['ID'][iwc]]
+      # try and check if this is an integer:
+      # except to the next try
+      try:
+        wellID=consideredWells['ID'][iwc].tolist()[0]
+      except:
+        wellID=consideredWells['ID'][iwc].tolist()          
+      #print("in loop",iwc,wellID)
+      bpds=injDF['BPD'][injDF['ID']==wellID]
       ################################
       # Injection days for this well #
       ################################
-      days=injDF['Days'][injDF['ID']==consideredWells['ID'][iwc]]
+      days=injDF['Days'][injDF['ID']==wellID]
       #################################
       # Convert distance from km to m #
       #################################
-      dist=1000.*consideredWells['Distances'][iwc]
+      try:
+        dist=np.real(1000.*consideredWells['Distances'][iwc].tolist()[0])
+      except:
+        dist=np.real(1000.*consideredWells['Distances'][iwc].tolist())
       ##########################
       # Loop over realizations #
       # to model pressures     #
@@ -1238,6 +1113,78 @@ class gistMC:
     scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
     return scenarioDF,dP
 
+  def runPressureGrid(self,wellDF,injDF,grid,dt=10):
+    '''
+    # Inputs:
+    #   Dataframe of well information wellDF
+    #       Has columns ...
+    #   Dataframe of injection information injDF
+    #       Has columns
+    #   Array of well locations  [nw,2]
+    #   Time vector in days      [nt]
+    #   Injection well dataframe [nw]
+    #   Per-well injection rates [nt,nw]
+    #   Grid defintion           [nx,ny,2]
+    # Outputs:
+    #   Pressures                [nx,ny,nt,nReal]
+    '''
+
+    nwC,nt,ot,bpdArray,secArray,dx,dy,wellDistances,dxdyGrid=prepInj(wellDF,injDF,dt=10,dxdyIn=grid,eqDay=None,endDate=None)
+    # Print out some useful things about bpd, sec Arrays, dxdyGrid
+    print('bpdArray max',max(bpdArray.ravel()),' min ',min(bpdArray.ravel()))
+    print('secArray max',max(secArray),' min ',min(secArray))
+    print('wellDistances max',max(wellDistances),' min ',min(wellDistances))
+    print('dxdyGrid max',max(dxdyGrid.ravel()),' min ',min(dxdyGrid.ravel()))
+
+
+    # Assume that bpds has already been populated with different subroutine
+    # Get number of wells
+    nw=wellDF.shape[0]
+    nx=grid.shape[0]
+    ny=grid.shape[1]
+    nxy=nx*ny
+    nwxy=nw*nx*ny
+    nt=len(secArray)
+    distances=np.zeros([nx,ny,nw])
+    dts=dt*24*60*60
+    for iw in range(nw):
+      distances[:,:,iw]=np.sqrt((dxdyGrid[0,:,:,0]*dxdyGrid[0,:,:,0]) + (dxdyGrid[0,:,:,1]*dxdyGrid[0,:,:,1]))
+    # secArray is dayArray in seconds
+    #secArray=24*60*60*dayArray
+    # convert bpdArray to Q - m3/s
+    QArray=1.84013e-6 *bpdArray
+    # take a derivative of QArray along the time (0) axis
+    # This is now shorter by 1
+    dQdtArray=np.diff(QArray,axis=1)
+    # compute r squared for all wells - size nx x ny x nw - flatten this to a vector
+    r2=np.ravel(distances*distances)
+    # compute property part of ppp - size nReal
+    TSOver4TT=self.TVec*self.SVec/(4.*self.TVec*self.TVec)
+    # Compute outer product of r2 and TSOver4TT to get ppp size nwC x nx x ny,nReal
+    ppp=np.outer(r2,TSOver4TT)
+    # Compute gRhoOverT [nReal]
+    gRhoOverT=self.rhoVec*self.g/(4.*np.pi*self.TVec)
+    # Initialize output dP ()
+    dP=np.zeros([nx,ny,nw,self.nReal,nt])
+    # Can I precompute the well function outside of the loop and just reference different parts of it?
+    # Isn't pp just a collection of constant responses with different times?
+    # durations can't have zero values - need to truncate
+    durations=np.max(secArray)-secArray+dts
+    # I am getting lots of Nans here. Need to print out durations. Are they all zero, or just one of them at the end?
+    epp=sc.exp1(ppp.reshape((nwxy,self.nReal,1)).repeat(nt,2) / durations[:].reshape((1,1,nt)).repeat(nwxy,0).repeat(self.nReal,1)).reshape((nx,ny,nw,self.nReal,nt))
+    # Loop over output time:
+    print('sizes:',nx,ny,nw,self.nReal,nt)
+    print('epp:',epp.shape,max(epp.ravel()),min(epp.ravel()))
+    print('gRhoOverT:',gRhoOverT.shape,max(gRhoOverT),min(gRhoOverT))
+    print('dP:',dP.shape)
+    print('durations:',durations)
+    print('dQdtArray',dQdtArray)
+    for it in range(1,nt):
+      # Get output of well function x the change in injection
+      timeStepsSum=np.sum(epp[:,:,:,:,-it:] * dQdtArray[:,:it].reshape((1,1,nw,1,it)).repeat(self.nReal,3),axis=4)
+      dP[:,:,:,:,it]=timeStepsSum.reshape(nx,ny,nw,self.nReal) * gRhoOverT.reshape((1,1,1,self.nReal)).repeat(nw,2).repeat(nx,0).repeat(ny,1) / 6894.76
+    return dP
+
   def pressureScenario(self,bpds,days,eqDay,r,iReal):
     """
     ###################################
@@ -1341,7 +1288,7 @@ class gistMC:
     if dP<0.: print(" gistMC.pressureScenario: Negative pressure! ",dP,",",timeSteps)
     return dP
 
-  def runPressureScenariosAniso(self,eq,consideredWells,injDF,endDate=None,verbose=0):
+  def runPressureScenariosAniso(self,eq,consideredWells,injDF,endDate=None,dxdy=None,verbose=0):
     """
     pressureScenarioAniso: pore pressure modeling with anisotropy
     Inputs: 
@@ -1350,6 +1297,8 @@ class gistMC:
                               with 'ID' and 'Distances' columns
             injDF:            dataframe of injection produced by self.findWells
                               with 'ID', 'Days' and 'BPD' columns 
+            dxdy:             OPTIONAL numpy[nd,2] array of x,y distances from 
+                              earthquake to evaluate
     Outputs:
             scenarioDF:       dataframe of pore pressure contribution scenarios
                               with many columns at earthquake date
@@ -1997,7 +1946,7 @@ class gistMC:
 
 # Generic subroutines not inside the class
 
-def prepInj(consideredWells,injDF,dt,eqDay=None,endDate=None):
+def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None):
   """
   prepInj(consideredWells,injDF,endDate=None)
   Produce numpy arrays of injection rates from 
@@ -2009,11 +1958,18 @@ def prepInj(consideredWells,injDF,dt,eqDay=None,endDate=None):
     injDF - injection dataframe from findWells
     dt    - time interval of injection data in days
     eqDay - earthquake day, used for timing, optional
-    endDate - desired otuput 
+    endDate - desired otuput
+    dxdyIn - grid values relative to EQ location - nx x ny, 2
   Outputs:
     nt, ot - sampling of bpdArray in days
     bpdArray(nw,nt) - rates in barrels per day, well distances(2,nw), and a time axis
+    secArray(nt)
+    dx (nw)
+    dy (nw)
+    wellDistances (nw)
     ieq, f - index of earthquake, interpolation weight (if eqDay provided)
+    dxdyArray(nw x nx x ny, 2) if dxdyIn provided
+
   Rates in BPD, distances in m, time in days
   """
   nwC=consideredWells.shape[0]
@@ -2022,17 +1978,25 @@ def prepInj(consideredWells,injDF,dt,eqDay=None,endDate=None):
   wellDistances=1000.*consideredWells['Distances'].to_numpy()
   dx=1000.*consideredWells['DXs'].to_numpy()
   dy=1000.*consideredWells['DYs'].to_numpy()
+  # Create Grid Relative to Earthquake here
+  if dxdyIn is not None:
+    dxdyArray=np.zeros([nwC, dxdyIn.shape[0],dxdyIn.shape[1],2])
+    for iw in range(nwC):
+      print('dx, dy ',dx[iw],dy[iw])
+      dxdyArray[iw,:,:,0]=dx[iw]-1000.*dxdyIn[:,:,0]
+      dxdyArray[iw,:,:,1]=dy[iw]-1000.*dxdyIn[:,:,1]
+    dxdyArray=dxdyArray
   # By default, make everything relative to the last injection date #
   minT=min(injDF['Days'])
-  # Need to prepend by a zero since we will probably take a difference
+  # Need to prepend by a zero since we will take a difference
   ot=minT-dt
   # If endDate is provided make it relative to that 
-  if endDate:
+  if endDate is not None:
     maxT=endDate
-  elif eqDay:
-    maxT=max(int((eqDay-ot)/dt)+1,max(injDF['Days']))
+  elif eqDay is not None:
+    maxT=max(int((eqDay-ot)/dt)*dt,max(injDF['Days']))+dt
   else:
-    maxT=max(injDF['Days'])
+    maxT=max(injDF['Days'])+dt
   nt=int((maxT-ot)/dt)+1
   #nt=nt1+1
   # Form array (nWells x ntOut of input injection)
@@ -2054,7 +2018,7 @@ def prepInj(consideredWells,injDF,dt,eqDay=None,endDate=None):
         it=int((days[id]-ot)/dt)
         bpdArray[iw,it]=bpds[id]
   # Evaluate dP at time of earthquake if eqDay provided
-  if eqDay:
+  if eqDay is not None:
     # Get point on time axis in terms of indicies of the output (ot, not ot0)
     feq=(eqDay-ot)/dt
     # Get the first point
@@ -2062,6 +2026,8 @@ def prepInj(consideredWells,injDF,dt,eqDay=None,endDate=None):
     # Get a linear interpolation weight
     f=feq-ieq
     return (nwC,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,feq)
+  elif dxdyIn is not None:
+    return (nwC,nt,ot,bpdArray,secArray,dx,dy,wellDistances,dxdyArray)
   else:
     return (nwC,nt,ot,bpdArray,secArray,dx,dy,wellDistances)
 
