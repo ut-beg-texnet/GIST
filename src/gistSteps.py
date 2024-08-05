@@ -8,17 +8,12 @@
 #   } 
 # }
 
-api_url = http://scdb.beg.utexas.edu/fdsnws/event/1/builder
 
 def step1(input):
 
-    def get_earthquake_info_from_csv(csv_string):
-    # Parse the CSV string and extract earthquake information
-    reader = csv.reader(csv_string.splitlines())
-    rows = list(reader)
-    event_id, origin_datetime, latitude, longitude, _, magnitude, _ = rows[0]
-    origin_datetime = origin_datetime.replace('Z', '')
-    origin_date, origin_time = origin_datetime.split('T')
+    api_url = http://scdb.beg.utexas.edu/fdsnws/event/1/builder
+    if input.eventId != '':
+        response = requests.get(api_url, verify=False)
 
     earthquake_info = {
         'Event ID': event_id,
@@ -30,5 +25,8 @@ def step1(input):
     }
     return earthquake_info
 
-    if input.eventId != '':
-        response = requests.get(api_url, verify=False)
+
+
+
+def step2(input):
+
