@@ -1027,43 +1027,45 @@ class gistMC:
     To-do:  optionally give a list of r values to compute on a grid
             for a single realization? 
     """
-    nwC=consideredWells.shape[0]
+    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
+    #nwC,nt,ot,bpdArray,secArray,dx,dy,wellDistances
+    (nwC,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,feq)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None)
+    #nwC=consideredWells.shape[0]
     # Form numpy arrays of well numbers, distances
-    wellIDs=consideredWells['ID'].to_numpy()
-    wellDistances=1000.*consideredWells['Distances'].to_numpy()
+    #wellIDs=consideredWells['ID'].to_numpy()
+    #wellDistances=1000.*consideredWells['Distances'].to_numpy()
     # Form array (nWells x ntOut of input injection)
-    maxT=max(injDF['Days'])
+    #maxT=max(injDF['Days'])
     # Need to prepend by a zero
-    ot=min(injDF['Days'])
+    #ot=min(injDF['Days'])
     # Need to prepend by a zero
-    ot0=ot-self.injDT
-    nt=int((maxT-ot)/self.injDT)+1
-    nt0=nt+1
-    bpdArray=np.zeros([nwC,nt0])
+    #ot0=ot-self.injDT
+    #nt=int((maxT-ot)/self.injDT)+1
+    #nt0=nt+1
+    #bpdArray=np.zeros([nwC,nt0])
     # dayArray is the duration in days from each step to the end of the simulation 
     ####
     # This will not be relative to anything, the reference point (output time)
     # needs to be in a loop for a time series
     ###
     # This includes the prepended 0
-    dayArray=np.linspace(start=ot0,stop=maxT,num=nt0,endpoint=False)
+    #dayArray=np.linspace(start=ot0,stop=maxT,num=nt0,endpoint=False)
     # secArray is dayArray in seconds
-    secArray=24*60*60*dayArray
-    for iw in range(nwC):
-      bpds=injDF['BPD'][injDF['ID']==consideredWells['ID'][iw]].tolist()
-      days=injDF['Days'][injDF['ID']==consideredWells['ID'][iw]].tolist()
-      if len(days)>0:
+    #secArray=24*60*60*dayArray
+    #for iw in range(nwC):
+    #  bpds=injDF['BPD'][injDF['ID']==consideredWells['ID'][iw]].tolist()
+    #  days=injDF['Days'][injDF['ID']==consideredWells['ID'][iw]].tolist()
+    #  if len(days)>0:
         #print(days)
         #print(ot+(len(bpdArray)-1) *self.injDT)
-        for id in range(len(days)):
-          it=int((days[id]-ot0)/self.injDT)
-          bpdArray[iw,it]=bpds[id]
+    #    for id in range(len(days)):
+    #      it=int((days[id]-ot0)/self.injDT)
+    #      bpdArray[iw,it]=bpds[id]
     # Evaluate dP at time of earthquake
-    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
     # Get point on time axis in terms of indicies of the output (ot, not ot0)
-    feq=(eqDay-ot)/self.injDT
+    #feq=(eqDay-ot)/self.injDT
     # Get the first point
-    ieq=int(feq)
+    #ieq=int(feq)
     # Get a linear interpolation weight
     f=feq-ieq
     # I should create a function that does all of the above separately
@@ -1076,21 +1078,28 @@ class gistMC:
     dQdtArray=np.diff(QArray,axis=1)
     # compute r squared for all wells - size nwC
     r2=wellDistances*wellDistances
+    print('r2: ',min(r2),max(r2))
     # compute property part of ppp - size nReal
     TSOver4TT=self.TVec*self.SVec/(4.*self.TVec*self.TVec)
+    print('TSOver4TT: ',min(TSOver4TT.flatten()),max(TSOver4TT.flatten()))
     # Compute outer product of r2 and TSOver4TT to get ppp size nwC,nReal
     ppp=np.outer(r2,TSOver4TT)
+    print('ppp: ',min(ppp.flatten()),max(ppp.flatten()))
     # Compute gRhoOverT [nReal]
     gRhoOverT=self.rhoVec*self.g/(4.*np.pi*self.TVec)
     # Initialize output dP ()
-    dP=np.zeros([nwC,self.nReal,nt0])
+    dP=np.zeros([nwC,self.nReal,nt])
+    #dP=np.zeros([nwC,self.nReal,nt0])
 
     # Can I precompute the well function outside of the loop and just reference different parts of it?
     # Isn't pp just a collection of constant responses with different times?
-    durations=secArray-np.max(secArray)
-    epp=sc.exp1(ppp.reshape((nwC,self.nReal,1)).repeat(nt0,2) / durations[:].reshape((1,1,nt0)).repeat(nwC,0).repeat(self.nReal,1))
+    dts=self.injDT*24*60*60
+    durations=np.max(secArray)-secArray+dts
+    print('durations: ',min(durations),max(durations))
+    epp=sc.exp1(ppp.reshape((nwC,self.nReal,1)).repeat(nt,2) / durations[:].reshape((1,1,nt)).repeat(nwC,0).repeat(self.nReal,1))
+    print('epp: ',min(epp.flatten()),max(epp.flatten()))
     # Loop over output time:
-    for it in range(1,nt0):
+    for it in range(1,nt):
       #print(" runPressureScenariosFast - time step ",it," of ",nt0)
       # Calculate time vector relative to it time, with length it
       #relSecArray=secArray[:it]-secArray[it]
@@ -1126,10 +1135,10 @@ class gistMC:
     #   Per-well injection rates [nt,nw]
     #   Grid defintion           [nx,ny,2]
     # Outputs:
-    #   Pressures                [nx,ny,nt,nReal]
+    #   Pressures                [nx,ny,nw,nReal,nt]
     '''
 
-    nwC,nt,ot,bpdArray,secArray,dx,dy,wellDistances,dxdyGrid=prepInj(wellDF,injDF,dt=10,dxdyIn=grid,eqDay=None,endDate=None)
+    nwC,nt,ot,bpdArray,secArray,dx,dy,wellDistances,dxdyGrid=prepInj(wellDF,injDF,dt,dxdyIn=grid,eqDay=None,endDate=None)
     # Print out some useful things about bpd, sec Arrays, dxdyGrid
     print('bpdArray max',max(bpdArray.ravel()),' min ',min(bpdArray.ravel()))
     print('secArray max',max(secArray),' min ',min(secArray))
@@ -1971,6 +1980,7 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None):
     dxdyArray(nw x nx x ny, 2) if dxdyIn provided
 
   Rates in BPD, distances in m, time in days
+  Since we are taking differences, we prepend by one time sample with a zero
   """
   nwC=consideredWells.shape[0]
   # Form numpy arrays of well numbers, distances
