@@ -10,38 +10,21 @@ Code is written as classes and subroutines in one .py file, with a second .py fi
 
 Injection processing, GIST computation, and visualization are broken up into separate steps
 
-# Contents:
+# Contents of compute branch:
 
-Code to regenerate results from IMAGE presentation in August 2022:
-
-		gistMC.py                  	 	- first Monte-Carlo GIST code used for IMAGE
-
-		gistMCExample.py           		- driver script for IMAGE examples
-
-
-Injection processing code:
-
-		injectionV3.py              		- basic injection data processing/merging for B3 TX and NM injection .csv files, (version 3)
-
-		injectionV3_driver.py       		- driver script to output time-regularized and filtered injection data with daily sampling
-
-		injectionV3_driver_10day.py 		- same as above, but with 10-day sampling to make the code run a bit faster for events with large numbers of wells
-
-Most recent version:
-
-		gistMCLive.py               		- GIST class built for version 3 of the B3 data
+	gistMC.py               		- GIST class built for version 3 of the B3 data
   
-		gistMCLiveTarzan.py         		- driver script built around the Range Hill earthquake
+	gistMCLiveTarzan.py         		- driver script built around the Range Hill earthquake
 
-  		gistPlots.py		    		- collection of plotting functions to visualize results
+	gistPlots.py		    		- collection of plotting functions to visualize results
 
-    		GIST_Stanton_11-4-23_Compute.ipnyb	- Jupyter notebook for 11/4/23 Stanton earthquake - computation
+	GIST_Stanton_11-4-23_Compute.ipnyb	- Jupyter notebook for 11/4/23 Stanton earthquake - computation
 
-      		GIST_Stanton_11-4-23Plots.ipynb		- Jupyter notebook for 11/4/23 Stanton earthquake - plotting
+	GIST_Stanton_11-4-23Plots.ipynb		- Jupyter notebook for 11/4/23 Stanton earthquake - plotting
 
- 		GIST_TestAnisotropy.ipynb		- Jupyter notebook for testing azimuthal permeability anisotropy in gistMCLive
+	GIST_TestAnisotropy.ipynb		- Jupyter notebook for testing azimuthal permeability anisotropy in gistMCLive
 
-   		GIST_Stanton_TodayCompute.ipynb		- Jupyter notebook for a hypothetical present-day Stanton earthquake - computation
+   	GIST_Stanton_TodayCompute.ipynb		- Jupyter notebook for a hypothetical present-day Stanton earthquake - computation
 
 # To-do (very incomplete list)
 
