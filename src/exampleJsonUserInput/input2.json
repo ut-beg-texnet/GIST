@@ -1,0 +1,7 @@
+{
+    "depthType": "shallow",
+    "realizationCount": 50,
+    "porePressureParams": {
+      "phi_min": 4
+    }
+}

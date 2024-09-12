@@ -116,7 +116,7 @@ class gistMC:
     ######################################
     # Initialize random number generator #
     ######################################
-    self.rng=np.random.default_rng(seed=seed)
+    rng=np.random.default_rng(seed=seed)
     ##############################
     # Initialize well data frame #
     ##############################
@@ -129,7 +129,7 @@ class gistMC:
     ######################################################################
     # Generate vector of nReal x 17 (number of parameters) random floats #
     ######################################################################
-    self.randomFloats=self.rng.random(size=(self.nReal,17))
+    self.randomFloats=rng.random(size=(self.nReal,17))
     #####################################################
     # Set initialization status for different scenarios #
     #####################################################
@@ -219,6 +219,10 @@ class gistMC:
     # To-do - error checking - bounds of parameters, unphysical rock, etc. #
     ########################################################################
     return
+
+  def to_dict(self):
+    #del self.randomFloats
+    return self.__dict__
   
   def initPE(self,mu_min=19e9,mu_max=21e9,
              nu_min=0.23,nu_max=0.25,
