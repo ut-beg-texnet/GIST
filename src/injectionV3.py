@@ -49,7 +49,8 @@ class injTX:
     ###########################################################
     # List of columns that we want to keep from InjectionWell #
     ###########################################################
-    keepColumns=['InjectionWellId','APINumber','UICNumber','Basin','SurfaceHoleLatitude','SurfaceHoleLongitude','WellName','CompletedWellDepthClassification','InjectionType','InjectionStatus','RRCInjectionStatus','WellActivatedDate','PermittedMaxLiquidBPD','PermittedIntervalBottomFt','PermittedIntervalTopFt','IsAuthorizedToInjectSaltWater']
+    #ORIGINAL COL LIST: keepColumns=['InjectionWellId','APINumber','UICNumber','Basin','SurfaceHoleLatitude','SurfaceHoleLongitude','WellName','CompletedWellDepthClassification','InjectionType','InjectionStatus','RRCInjectionStatus','WellActivatedDate','PermittedMaxLiquidBPD','PermittedIntervalBottomFt','PermittedIntervalTopFt','IsAuthorizedToInjectSaltWater']
+    keepColumns=['InjectionWellId','APINumber','UICNumber','SurfaceHoleLatitude','SurfaceHoleLongitude','WellName','CompletedWellDepthClassification','WellActivatedDate','PermittedMaxLiquidBPD','PermittedIntervalBottomFt','PermittedIntervalTopFt']
 
     ############################################
     # Read Injection Well file - list of wells #
@@ -62,13 +63,13 @@ class injTX:
     ##########################
     # Limit Basin to Permian #
     ##########################
-    TempWellPermianDF=TempWellDF[(TempWellDF['Basin'].str.contains('Permian',case=False,na=False))]
-    if verbose>0: print(' injectionV3.injTX: Basin filtered to ',TempWellPermianDF.shape[0],' wells')
+    ###TempWellPermianDF=TempWellDF[(TempWellDF['Basin'].str.contains('Permian',case=False,na=False))]
+    ###if verbose>0: print(' injectionV3.injTX: Basin filtered to ',TempWellPermianDF.shape[0],' wells')
     ###############################################################
     # Limit InjectionType to Injection Into a Non-Productive Zone #
     ###############################################################
-    TempWellFiltDF=TempWellPermianDF[(TempWellPermianDF['InjectionType']=='Injection Into Non-Productive Zone')]
-    if verbose>0: print(' injectionV3.injTX: InjectionType filtered to ',TempWellFiltDF.shape[0],' wells')
+    ###TempWellFiltDF=TempWellPermianDF[(TempWellPermianDF['InjectionType']=='Injection Into Non-Productive Zone')]
+    ###if verbose>0: print(' injectionV3.injTX: InjectionType filtered to ',TempWellFiltDF.shape[0],' wells')
     ######################################################
     # I did not filter to active wells, seems unreliable #
     ######################################################
@@ -76,14 +77,14 @@ class injTX:
     # Filter based on permitted depth of injection interval #
     #########################################################
     if deepShallow=='Deep':
-      self.wellDepthDF=TempWellFiltDF[(TempWellFiltDF['PermittedIntervalTopFt']>depth)]
+      self.wellDepthDF=TempWellDF[(TempWellDF['PermittedIntervalTopFt']>depth)]
     elif deepShallow=='Shallow':
-      self.wellDepthDF=TempWellFiltDF[(TempWellFiltDF['PermittedIntervalBottomFt']<depth)]
+      self.wellDepthDF=TempWellDF[(TempWellDF['PermittedIntervalBottomFt']<depth)]
     if verbose>0: print(' injectionV3.injTX: PermittedInterval filtered to ',self.wellDepthDF.shape[0],' wells')
     ############################################################################################
     # Secondary filter on B3's CompletedWellDepthClassification based on an incomplete horizon #
     ############################################################################################
-    self.wellClassDF=TempWellFiltDF[(TempWellFiltDF['CompletedWellDepthClassification'].str.contains(deepShallow,case=False,na=False))]
+    self.wellClassDF=TempWellDF[(TempWellDF['CompletedWellDepthClassification'].str.contains(deepShallow,case=False,na=False))]
     if verbose>0: print(' injectionV3.injTX: CompletedWellDepthClassification filtered to ',self.wellClassDF.shape[0],' wells')
     ######################################
     # Merge both depth filtering results #
@@ -106,7 +107,7 @@ class injTX:
     ##########################################
     # Set columns for time series dictionary #
     ##########################################
-    self.timeSeriesColumns=['InjectionWellId','Date','BPD','Modeled']
+    self.timeSeriesColumns=['InjectionWellId','Date','BPD']
     #########################
     # Initialize dictionary #
     #########################
@@ -115,6 +116,7 @@ class injTX:
     # Initialize one dataframe per dictionary entry (well) #
     ########################################################
     for well in self.wellList:
+      #print(well)
       self.timeSeriesDict[str(well)]=pd.DataFrame(columns=self.timeSeriesColumns)
     return
 
@@ -163,7 +165,7 @@ class injTX:
           ##################################################################
           # Select the columns and change their names to timeSeriesColumns #
           ##################################################################
-          wellWinDF=wellDF[['InjectionWellId','StartOfMonthDate','InjectedLiquidBPD','InjectedLiquidIsModeled']]
+          wellWinDF=wellDF[['InjectionWellId','StartOfMonthDate','InjectedLiquidBPD']]
           wellWinDF.columns=self.timeSeriesColumns
           #############################################
           # Append to the dataframe in the dictionary #
@@ -225,12 +227,19 @@ class injTX:
           ##################################################################
           # Select the columns and change their names to timeSeriesColumns #
           ##################################################################
-          wellWinDF=wellDF[['InjectionWellId','Date','InjectedLiquidBBL','InjectedLiquidIsModeled']]
+          wellWinDF=wellDF[['InjectionWellId','Date','InjectedLiquidBBL']]
           wellWinDF.columns=self.timeSeriesColumns
           #############################################
           # Append to the dataframe in the dictionary #
           #############################################
-          self.timeSeriesDict[str(well)]=self.timeSeriesDict[str(well)].append(wellWinDF)
+          #print('=======================' + str(self.timeSeriesDict) + '=======================')
+          #print('Current Well' + self.timeSeriesDict[str(well)])
+          #self.timeSeriesDict[str(well)]=self.timeSeriesDict[str(well)].append(wellWinDF)
+          key = str(well)
+          if key in self.timeSeriesDict:
+              self.timeSeriesDict[key] = pd.concat([self.timeSeriesDict[key], wellWinDF], ignore_index=True)
+          else:
+              self.timeSeriesDict[key] = wellWinDF.copy()
           if verbose>1: print(' injectionV3.injTX.addDaily: ',self.timeSeriesDict[str(well)].shape[0],' rows total for well ',well)
         # end if
       chunk=chunk+1
@@ -322,7 +331,7 @@ class injNM:
     ##########################################
     # Set columns for time series dictionary #
     ##########################################
-    self.timeSeriesColumns=['InjectionWellId','Date','BPD','Modeled']
+    self.timeSeriesColumns=['InjectionWellId','Date','BPD']
     #########################
     # Initialize dictionary #
     #########################
@@ -378,7 +387,7 @@ class injNM:
           ##################################################################
           # Select the columns and change their names to timeSeriesColumns #
           ##################################################################
-          wellWinDF=wellDF[['InjectionWellId','StartOfMonthDate','InjectedLiquidBPD','InjectedLiquidIsModeled']]
+          wellWinDF=wellDF[['InjectionWellId','StartOfMonthDate','InjectedLiquidBPD']]
           wellWinDF.columns=self.timeSeriesColumns
           #############################################
           # Append to the dataframe in the dictionary #
@@ -437,7 +446,7 @@ class injNM:
           ##################################################################
           # Select the columns and change their names to timeSeriesColumns #
           ##################################################################
-          wellWinDF=wellDF[['InjectionWellId','Date','InjectedLiquidBBL','InjectedLiquidIsModeled']]
+          wellWinDF=wellDF[['InjectionWellId','Date','InjectedLiquidBBL']]
           wellWinDF.columns=self.timeSeriesColumns
           #############################################
           # Append to the dataframe in the dictionary #
@@ -473,46 +482,70 @@ class inj:
     #################################################################################
     # Set time series output columns #
     ##################################
-    self.timeSeriesColumns=['InjectionWellId','Date','BPD','Modeled']
+    self.timeSeriesColumns=['InjectionWellId','Date','BPD']
     #############
     # Set epoch #
     #############
     self.epoch=pd.to_datetime(epoch)
-    #################################################################
-    # Define unique well ID by adding scalars to B3 InjectionWellId #
-    #################################################################
-    # Adding 1000000 to NM wells and 2000000 to TX wells #
-    ######################################################
-    NMShift=1000000
-    TXShift=2000000
-    if verbose>0: print(' injectionV3.inj: NM max ID ',NM.wellDF['InjectionWellId'].max(),"; TX max ID, ",TX.wellDF['InjectionWellId'].max())
-    NMDF=NM.wellDF.copy()
-    NMDF.insert(0,'ID',NM.wellDF['InjectionWellId']+NMShift)
-    TXDF=TX.wellDF.copy()
-    TXDF.insert(0,'ID',TX.wellDF['InjectionWellId']+TXShift)
-    #########################
-    # Merge NM and TX files #
-    #########################
-    self.wellDF=pd.concat([NMDF,TXDF],join='inner')
-    ######################################
-    # Optionally output merged well file #
-    ######################################
-    if OutWellFile!=None: self.wellDF.to_csv(OutWellFile,index=False)
-    ##################################################################################
-    # Now copy time series dictionaries and change ID numbers so they don't conflict #
-    ##################################################################################
-    self.allInj={}
-    for wellNum in NM.timeSeriesDict:
-      self.allInj[str(int(wellNum)+NMShift)]=NM.timeSeriesDict[wellNum]
-      self.allInj[str(int(wellNum)+NMShift)]['ID']=NM.timeSeriesDict[wellNum]['InjectionWellId']+NMShift
-    for wellNum in TX.timeSeriesDict:
-      self.allInj[str(int(wellNum)+TXShift)]=TX.timeSeriesDict[wellNum]
-      self.allInj[str(int(wellNum)+TXShift)]['ID']=TX.timeSeriesDict[wellNum]['InjectionWellId']+TXShift
-    ###########################################
-    # Optionally output merged injection file #
-    ###########################################
-    if OutInjFile!=None: writeDictDF(self.allInj,OutInjFile)
-    return
+    #####################################################
+    # Only join injection records if both objects exist #
+    #####################################################
+    if (NM and TX):
+      #################################################################
+      # Define unique well ID by adding scalars to B3 InjectionWellId #
+      #################################################################
+      # Adding 1000000 to NM wells and 2000000 to TX wells #
+      ######################################################
+      NMShift=1000000
+      TXShift=2000000
+      if verbose>0: print(' injectionV3.inj: NM max ID ',NM.wellDF['InjectionWellId'].max(),"; TX max ID, ",TX.wellDF['InjectionWellId'].max())
+      NMDF=NM.wellDF.copy()
+      NMDF.insert(0,'ID',NM.wellDF['InjectionWellId']+NMShift)
+      TXDF=TX.wellDF.copy()
+      TXDF.insert(0,'ID',TX.wellDF['InjectionWellId']+TXShift)
+      #########################
+      # Merge NM and TX files #
+      #########################
+      self.wellDF=pd.concat([NMDF,TXDF],join='inner')
+      ######################################
+      # Optionally output merged well file #
+      ######################################
+      if OutWellFile!=None: self.wellDF.to_csv(OutWellFile,index=False)
+      ##################################################################################
+      # Now copy time series dictionaries and change ID numbers so they don't conflict #
+      ##################################################################################
+      self.allInj={}
+      for wellNum in NM.timeSeriesDict:
+        self.allInj[str(int(wellNum)+NMShift)]=NM.timeSeriesDict[wellNum]
+        self.allInj[str(int(wellNum)+NMShift)]['ID']=NM.timeSeriesDict[wellNum]['InjectionWellId']+NMShift
+      for wellNum in TX.timeSeriesDict:
+        self.allInj[str(int(wellNum)+TXShift)]=TX.timeSeriesDict[wellNum]
+        self.allInj[str(int(wellNum)+TXShift)]['ID']=TX.timeSeriesDict[wellNum]['InjectionWellId']+TXShift
+      ###########################################
+      # Optionally output merged injection file #
+      ###########################################
+      if OutInjFile!=None: writeDictDF(self.allInj,OutInjFile)
+      return
+    ###################################
+    # When only TX object is provided #
+    ###################################
+    else:
+      self.wellDF=TX.wellDF.copy()
+      ######################################
+      # Optionally output merged well file #
+      ######################################
+      if OutWellFile!=None: self.wellDF.to_csv(OutWellFile,index=False)
+      self.allInj={}
+      for wellNum in TX.timeSeriesDict:
+        self.allInj[wellNum]=TX.timeSeriesDict[wellNum]
+        self.allInj[wellNum]['ID']=TX.timeSeriesDict[wellNum]['InjectionWellId']
+        self.allInj[wellNum]['Modeled']=False
+      ###########################################
+      # Optionally output merged injection file #
+      ###########################################
+      if OutInjFile!=None: writeDictDF(self.allInj,OutInjFile)
+      return
+
 
   def processRates(self,thresh,interval,endDate,keepModeled,verbose=0):
     #####################################################

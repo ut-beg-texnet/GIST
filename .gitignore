@@ -3,3 +3,8 @@
 ################################################################################
 
 /.vs
+/data
+/src/__pycache__
+.idea
+gist_injection_data.csv
+gist_well_data.csv
