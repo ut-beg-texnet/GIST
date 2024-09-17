@@ -94,10 +94,11 @@ def step2(input, session):
 
 # addWells, findWells, runPressureScenarios
 def step3(input, session):
-    injectioncsv = './injectionV3_output.csv'
+    wellcsv = './gist_well_data.csv'
+    injectioncsv = './gist_injection_data.csv'
     gistMC_instance = json.loads(session["gistInstance"])
-    print(gistMC_instance)
-    #gistMC_instance.addWells(injectioncsv, verbose=1)
+    gistMC_instance = gistMC(gistMC_instance)
+    gistMC_instance.addWells(wellcsv, injectioncsv, 1)
 
 #Determine List of Contributing Wells (Auto Filtering)
 def step4(input, session):
