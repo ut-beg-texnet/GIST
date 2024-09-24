@@ -91,7 +91,7 @@ class gistMC:
   # poroAttr                - poroelastic disaggregation to wells    #
   ####################################################################
   """
-  def __init__(self,epoch=pd.to_datetime('01-01-1970'),nReal=100,seed=42,ntBin=51):
+  def __init__(self,epoch=pd.to_datetime('01-01-1970'),nReal=100,seed=42,ntBin=51,pSession=None):
     """
     Constructor for base class
     # Inputs:
@@ -102,45 +102,54 @@ class gistMC:
     #   ntBin: Factor of time interpolation needed for   #
     #          numerical integration for poroelastic eqn #
     """
-    # Constants #
-    #############
-    # Gravity #
-    ###########
-    self.g=9.81
-    ##################
-    # Set parameters #
-    ##################
-    self.ntBin=ntBin
-    self.epoch=epoch
-    self.nReal=nReal
-    ######################################
-    # Initialize random number generator #
-    ######################################
-    rng=np.random.default_rng(seed=seed)
-    ##############################
-    # Initialize well data frame #
-    ##############################
-    self.nw=0
-    self.wells=pd.DataFrame(columns=['ID','InjectionWellId','APINumber','UICNumber','Basin','SurfaceHoleLatitude','SurfaceHoleLongitude','WellName','InjectionType','CompletedWellDepthClassification','InjectionStatus','StartDate','PermittedMaxLiquidBPD','PermittedIntervalBottomFt','PermittedIntervalTopFt'])
-    ###################################
-    # Initialize injection data frame #
-    ###################################
-    self.inj=pd.DataFrame(columns=['ID','BPD','Days'])
-    ######################################################################
-    # Generate vector of nReal x 17 (number of parameters) random floats #
-    ######################################################################
-    self.randomFloats=rng.random(size=(self.nReal,17))
-    #####################################################
-    # Set initialization status for different scenarios #
-    #####################################################
-    self.runPP=False
-    self.runPE=False
-    self.runPPAniso=False
-    self.runPEAniso=False
-    #######################################
-    # To-do: error checking of parameters # 
-    #######################################
-  
+
+    if pSession is not None:
+      self.update_from_session(pSession)
+    else:
+      #############
+      # Constants #
+      #############
+      # Gravity #
+      ###########
+      self.g=9.81
+      ##################
+      # Set parameters #
+      ##################
+      self.ntBin=ntBin
+      self.epoch=epoch
+      self.nReal=nReal
+      ######################################
+      # Initialize random number generator #
+      ######################################
+      rng=np.random.default_rng(seed=seed)
+      ##############################
+      # Initialize well data frame #
+      ##############################
+      self.nw=0
+      self.wells=pd.DataFrame(columns=['ID','InjectionWellId','APINumber','UICNumber','Basin','SurfaceHoleLatitude','SurfaceHoleLongitude','WellName','InjectionType','CompletedWellDepthClassification','InjectionStatus','StartDate','PermittedMaxLiquidBPD','PermittedIntervalBottomFt','PermittedIntervalTopFt'])
+      ###################################
+      # Initialize injection data frame #
+      ###################################
+      self.inj=pd.DataFrame(columns=['ID','BPD','Days'])
+      ######################################################################
+      # Generate vector of nReal x 17 (number of parameters) random floats #
+      ######################################################################
+      self.randomFloats=rng.random(size=(self.nReal,17))
+      #####################################################
+      # Set initialization status for different scenarios #
+      #####################################################
+      self.runPP=False
+      self.runPE=False
+      self.runPPAniso=False
+      self.runPEAniso=False
+      #######################################
+      # To-do: error checking of parameters # 
+      #######################################
+
+  def update_from_session(self, pSession):
+    for key in pSession:
+      setattr(self, key, pSession[key])
+
   def initPP(self,rho0_min=980.,rho0_max=1020.,
              nta_min=0.9e-3,nta_max=1.1e-3,
              phi_min=5.,phi_max=20.,
@@ -649,6 +658,7 @@ class gistMC:
     # criteria where we include responseYears        #
     ################################################## 
     consideredWellsDF=self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)
+    print('CHECK HERE: ' + str(self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)))
     consideredWellsDF['Distances']=wellDistances[diffusionDistances>(wellDistances-eqUncert)]
     consideredWellsDF['DXs']=dxs[diffusionDistances>(wellDistances-eqUncert)]
     consideredWellsDF['DYs']=dys[diffusionDistances>(wellDistances-eqUncert)]

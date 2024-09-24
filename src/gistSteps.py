@@ -40,9 +40,10 @@ def step1(input, session):
             earthquake_data =  json.loads(response.text).get('features')[0].get('attributes')
             earthquakeDetails = {
                 'Latitude': earthquake_data.get('Latitude'),
+                'LatitudeError': earthquake_data.get('LatitudeError'),
                 'Longitude': earthquake_data.get('Longitude'),
-                'Magnitude': earthquake_data.get('Magnitude'),
-                'Event_Date': earthquake_data.get('Event_Date')
+                'LongitudeError': earthquake_data.get('LongitudeError'),
+                'Origin Date': earthquake_data.get('Event_Date')
             }
         else:
             return False
@@ -96,9 +97,21 @@ def step2(input, session):
 def step3(input, session):
     wellcsv = './gist_well_data.csv'
     injectioncsv = './gist_injection_data.csv'
-    gistMC_instance = json.loads(session["gistInstance"])
-    gistMC_instance = gistMC(gistMC_instance)
-    gistMC_instance.addWells(wellcsv, injectioncsv, 1)
+    prevSession = json.loads(session["gistInstance"])
+    gistMC_instance = gistMC(pSession=prevSession)
+    gistMC_instance.addWells(wellcsv, injectioncsv, verbose=1)
+
+    eq = session["sessionValues"]["earthquakeDetails"]
+    print('Here is the earthquake details: ' + str(eq))
+    gistMC_instance.findWells(eq, verbose=1)
+
+
+    #save gist instance after add and find wells
+    obj = gistMC_instance.to_dict()
+    json_str = json.dumps(obj, cls=jsonEncoder)
+
+    session["gistInstance"] = json_str
+    return session
 
 #Determine List of Contributing Wells (Auto Filtering)
 def step4(input, session):
