@@ -8,7 +8,9 @@ Additional dependencies for plotting: seaborn, matplotlib, geopandas, contextily
 
 Code is written as classes and subroutines in one .py file, with a second .py file or Jupyter notebook as a driver script
 
-Injection processing, GIST computation, and visualization are broken up into separate steps
+Injection processing, GIST computation, and visualization are broken up into separate steps and separate branches.
+
+Main has been deprecated!
 
 # Contents:
 
