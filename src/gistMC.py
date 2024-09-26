@@ -931,7 +931,7 @@ class gistMC:
     ##########################
     for it in range(1,nt):
       if verbose>0:
-        if mod(it,10)==0: print('runPRessureScenariosTimeSeries time step ',it,' of ',nt)
+        if it%10==0: print('runPRessureScenariosTimeSeries time step ',it,' of ',nt)
       #########################################################
       # Get output of well function x the change in injection #
       # We take the last 'it' values of epp that is a series  #
