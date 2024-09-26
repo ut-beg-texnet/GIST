@@ -873,12 +873,8 @@ class gistMC:
     ########################################################################
     # Prep injection data to get arrays needed for vectorized calculations #
     ########################################################################
-    (wellIDs,nwC,dayVec,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,feq)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None)
+    (wellIDs,nwC,dayVec,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,f)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None)
     if verbose>0: print('runPressureScenariosTimeSeries time axis information - nt:',nt,'; ot:',ot,'; dt:',self.injDT,' earthquake index: ',ieq)
-    #######################################################
-    # Floating point linear interpolation factor - scalar #
-    #######################################################
-    f=feq-ieq
     ###########################################
     # Convert bpdArray to Q - m3/s [nt+1,nwC] #
     ###########################################
@@ -1614,8 +1610,6 @@ class gistMC:
     ############################################################################
     # theta = slip tendency direction in degrees (CCW from tf1), equation 4.20 #
     ############################################################################
-    # Need to switch to arctan2 - st1 could be zero
-    #theta=np.degrees(np.arctan(st2/st1))
     theta=np.degrees(np.arctan2(st2,st1))
     thetaVec[:,0]=theta
     for iw in range(nw):
@@ -1690,69 +1684,51 @@ class gistMC:
     return (perc[:,0],CFF[:,0],CFFsum[:,0],thetaVec[:,0])
 
 
-  def pressureScenariosToDF(self,eq,consideredWells,dPAtEQ,totalPressureAtEQ,percentages):
+  def pressureScenariosToDF(self,eq,consideredWells,dPAtEQ,totalPressureAtEQ,percentages,verbose=0):
     """
-    # Create dataframe for pressure scenarios
-    Inputs: pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
-          eq:                 Dataframe of earthquake
-                              with EventID, Latitude, and Longitude columns
-          consideredWells:    Dataframe of wells from findWells
-                              with APINumber, WellName, ID, SurfaceHoleLatitude, and SurfaceHoleLongitude
-          dPAtEQ:             Numpy array of per-well pressure contributions at earthquake epicenter/Time
-                              size(consideredWells.shape()[0], self.nReal)
-          totalPressureAtEQ:  Numpy array of total pressures at earthquake epicenter/time
-                              size(self.nReal)
-          percentages:        Numpy array of per-well relative contributions at earthquake epicenter/Time
-                              size(consideredWells.shape()[0], self.nReal)
-    Returns:
-          scenarioDF:         Dataframe with consideredWells.shape()[0] x self.nReal rows
+    ##################################################################################
+    # pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages) #
+    ##################################################################################
+    # Take numpy output of pressureScenarios and convert it to a dataframe #
+    ######################################################################### #
+    # Inputs:                                                                 #
+    #      eq:                 Dataframe of earthquake                        #
+    #                          with EventID, Latitude, and Longitude columns  #
+    #      consideredWells:    Dataframe of wells from findWells              #
+    #                          with APINumber, WellName, ID,                  #
+    #                          SurfaceHoleLatitude, and SurfaceHoleLongitude  #
+    #      dPAtEQ:             Numpy array of per-well pressure contributions #
+    #                          at earthquake epicenter/Time                   #
+    #                          size(consideredWells.shape()[0], self.nReal)   #
+    #      totalPressureAtEQ:  Numpy array of total pressures at earthquake   #
+    #                          epicenter/time [self.nReal]                    #
+    #      percentages:        Numpy array of per-well relative contributions #
+    #                          at earthquake epicenter/Time                   #
+    #                          [consideredWells.shape()[0], self.nReal]       #
+    ########################################################################################
+    # Output:                                                                              #
+    #      scenarioDF:         Dataframe with consideredWells.shape()[0] x self.nReal rows #
+    ########################################################################################
     """
     allScenariosDF=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','Pressures','TotalPressure','Percentages','Realization'])
     ##################################################
     # Number of wells with a meaningful contribution #
     ##################################################
     nw=consideredWells.shape[0]
-    #nwCnz=np.sum((percentages>0.01),axis=0)
-    print('pressureScenariosToDF: number of wells: ',nw)
-    print('pressureScenariosToDF: number of realizations:',self.nReal)
-    print('pressureScenariosToDF: dPAtEQ:',dPAtEQ.shape,len(dPAtEQ.flatten()))
-    print('pressureScenariosToDF: totalPressureAtEQ:',totalPressureAtEQ.shape,len(totalPressureAtEQ.flatten()))
-    
-    # Ordering of dataframe is in fast to slow:
-    # Well, realization, event
-
-    ############################
-    # Set columns of dataframe #
-    ############################
-    #scenarioDF['Pressures']=dPAtEQ.flatten()
-    #scenarioDF['TotalPressure']=np.repeat(totalPressureAtEQ.flatten(),nw)
-    #scenarioDF['Percentages']=percentages.flatten()
-    #scenarioDF['EventID']=eq['EventID']
-    #scenarioDF['EventLatitude']=eq['Latitude']
-    #scenarioDF['EventLongitude']=eq['Longitude']
-    #apis=np.tile(consideredWells['APINumber'].to_numpy(),self.nReal)
-    #print('pressureScenariosToDF: ',len(apis),scenarioDF.shape[0])
-    #scenarioDF['API']=apis
-    ##scenarioDF['Name']=pd.concat([consideredWells['WellName'].squeeze()]*self.nReal,axis=0).reset_index()
-    ##scenarioDF['Name']=np.tile(consideredWells['WellName'].to_numpy(),self.nReal)
-    #scenarioDF['ID']=np.tile(consideredWells['ID'].to_numpy(),self.nReal)
-    #scenarioDF['Latitude']=np.tile(consideredWells['SurfaceHoleLatitude'].to_numpy(),self.nReal)
-    #scenarioDF['Longitude']=np.tile(consideredWells['SurfaceHoleLongitude'].to_numpy(),self.nReal)
-    #scenarioDF['NumWells']=np.repeat(nwCnz,nw)
-    ##########################
-    # Add realization number #
-    ##########################
-    #scenarioDF['Realization']=np.repeat(np.linspace(0,self.nReal-1,self.nReal),nw)
-
-    
+    if verbose>0:
+      print('pressureScenariosToDF: number of wells: ',nw)
+      print('pressureScenariosToDF: number of realizations:',self.nReal)
+      print('pressureScenariosToDF: dPAtEQ:',dPAtEQ.shape,len(dPAtEQ.flatten()))
+      print('pressureScenariosToDF: totalPressureAtEQ:',totalPressureAtEQ.shape,len(totalPressureAtEQ.flatten()))
     ##################################
     # Form dataframe of realizations #
     ##################################
     totalPressures=np.zeros([nw,self.nReal])
-    #percentages=np.zeros([nw,self.nReal])
     ###############################
     # Loop over realizations      #
     # for disaggregation to wells #
+    # Ordering of dataframes not  #
+    # guaranteed!                 #
     ###############################
     for iReal in range(self.nReal):
       scenarioDF=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','Pressures','TotalPressure','Percentages','Realization'])
@@ -1761,7 +1737,6 @@ class gistMC:
       # and disaggregate - equation 4.9    #
       ######################################
       totalPressures[:,iReal]=np.sum(dPAtEQ[:,iReal])
-      #percentages[:,iReal]=100.*dPAtEQ[:,iReal]/totalPressures[:,iReal]
       ##################################################
       # Number of wells with a meaningful contribution #
       ##################################################
@@ -1791,45 +1766,62 @@ class gistMC:
       allScenariosDF=pd.concat([allScenariosDF,scenarioDF],ignore_index=True)
     return allScenariosDF
 
-# Generic subroutines not inside the class
+############################################
+# Generic subroutines not inside the class #
+############################################
 
-def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None):
+def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,verbose=0):
   """
-  prepInj(consideredWells,injDF,endDate=None)
-  Produce numpy arrays of injection rates from 
-  well and injection dataframes. Missing data 
-  will be zeroes, assumes this data is regularized
-  in time to a common time increment!!
-  Inputs:
-    consideredWells - well dataframe from findWells
-    injDF - injection dataframe from findWells
-    dt    - time interval of injection data in days
-    eqDay - earthquake day, used for timing, optional
-    endDate - desired otuput
-    dxdyIn - grid values relative to EQ location - nx x ny, 2
-  Outputs:
-    wellIDs - well numbers in order of bpdArray
-    nwC - number of wells
-    dayArray - vector of day numbers
-    nt, ot - sampling of bpdArray in days
-    bpdArray(nw,nt) - rates in barrels per day
-    secArray(nt)
-    dx (nw)
-    dy (nw)
-    wellDistances (nw)
-    ieq, f - index of earthquake, interpolation weight (if eqDay provided)
-    dxdyArray(nw x nx x ny, 2) if dxdyIn provided
-
-  Rates in BPD, distances in m, time in days
-  Since we are taking differences, we prepend by one time sample with a zero
+  #######################################################
+  # prepInj(consideredWells,injDF,endDate=None,verbose) #
+  #######################################################
+  # Produce numpy arrays of injection rates from     #
+  # well and injection dataframes. Missing data      #
+  # will be zeroes, assumes this data is regularized #
+  # in time to a common time increment!!             #
+  ####################################################
+  # Inputs: ############################################################
+  #  consideredWells: well dataframe from findWells                    #
+  #  injDF:           injection dataframe from findWells               #
+  #  dt:              time interval of injection data in days          #
+  #  eqDay:           earthquake day, used for timing, optional        #
+  #  endDate:         desired output end date                          #
+  #  dxdyIn:          grid values relative to EQ location - nx x ny, 2 #
+  ######################################################################
+  # Outputs: ###########################################################
+  #  wellIDs:         well numbers in order of bpdArray                #
+  #  nwC:             number of wells                                  #
+  #  dayArray:        vector of day numbers                            #
+  #  nt:              number of time samples                           #
+  #  ot:              sampling interval of bpdArray in days            #
+  #  bpdArray:        rates in barrels per day [nw,nt]                 #
+  #  secArray:        times in seconds [nt]                            #
+  #  dx:              x-distances to eq in km [nw]                     #
+  #  dy:              y-distances to eq in km [nw]                     #
+  #  wellDistances:   total distances to eq in km [nw]                 #
+  #  ieq:             index of time sample in secArray before eq       #
+  #  f:               interpolation weight (if eqDay provided)         #
+  #  dxdyArray:       array of grid dx and dy in km [nw x nx x ny, 2]  #
+  #                   (only if dxdyIn provided)                        #
+  ##############################################################################
+  # Rates in BPD, distances in m, time in days                                 #
+  # Since we are taking differences, we prepend by one time sample with a zero #
+  ##############################################################################
   """
+  ###################
+  # Number of wells #
+  ###################
   nwC=consideredWells.shape[0]
-  # Form numpy arrays of well numbers, distances
+  ################################################
+  # Form numpy arrays of well numbers, distances #
+  ################################################
   wellIDs=consideredWells['ID'].to_numpy()
   wellDistances=1000.*consideredWells['Distances'].to_numpy()
   dx=1000.*consideredWells['DXs'].to_numpy()
   dy=1000.*consideredWells['DYs'].to_numpy()
-  # Create Grid Relative to Earthquake here
+  ######################################################
+  # Create Grid Relative to Earthquake here if desired #
+  ######################################################
   if dxdyIn is not None:
     dxdyArray=np.zeros([nwC, dxdyIn.shape[0],dxdyIn.shape[1],2])
     for iw in range(nwC):
@@ -1837,46 +1829,77 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None):
       dxdyArray[iw,:,:,0]=dx[iw]-1000.*dxdyIn[:,:,0]
       dxdyArray[iw,:,:,1]=dy[iw]-1000.*dxdyIn[:,:,1]
     dxdyArray=dxdyArray
-  # By default, make everything relative to the last injection date #
+  ############################################################
+  # Set beginning of bdpArray as the earliest injection date #
+  ############################################################
   minT=min(injDF['Days'])
-  # Need to prepend by a zero since we will take a difference
+  #########################################################
+  # We need to prepend by a zero since we use differences #
+  #########################################################
   ot=minT-dt
-  # If endDate is provided make it relative to that 
+  ##########################################################
+  # Set extent of bpdArray to endDate if provided          #
+  # Else make it one step after the earthquake if provided #
+  # Else set it to the last reported injection             #
+  ##########################################################
   if endDate is not None:
     maxT=endDate
   elif eqDay is not None:
     maxT=max(int((eqDay-ot)/dt)*dt,max(injDF['Days']))+dt
   else:
     maxT=max(injDF['Days'])+dt
+  ###################################################
+  # nt includes the prepended value and covers maxT #
+  ###################################################
   nt=int((maxT-ot)/dt)+1
-  #nt=nt1+1
-  # Form array (nWells x ntOut of input injection)
+  #####################
+  # Allocate bpdArray #
+  #####################
   bpdArray=np.zeros([nwC,nt])
-  # dayArray is the duration in days from each step to the end of the simulation
+  ##########################################################
+  # dayArray is the day of the injection relative to epoch #
+  ##########################################################
   dayArray=np.linspace(start=ot,stop=maxT,num=nt,endpoint=False)
-  # secArray is dayArray in seconds
+  ###################################
+  # secArray is dayArray in seconds #
+  ###################################
   secArray=24*60*60*dayArray
-  # Loop over wells
+  ###################
+  # Loop over wells #
+  ###################
   for iw in range(nwC):
-    # find BPD and Days values that match this well ID, make a list #
+    ############################################################
+    # Make list of BPD and Days values that match this well ID #
+    ############################################################
     bpds=injDF['BPD'][injDF['ID']==consideredWells['ID'][iw]].tolist()
     days=injDF['Days'][injDF['ID']==consideredWells['ID'][iw]].tolist()
-    # Check if we have any injection for this well
+    #############################################################
+    # Check if we have any injection for this well              #
     # Should I put a warning here if we have no injection data? #
+    #############################################################
     if len(days)>0:
       for id in range(len(days)):
+        #################################################
         # Get index of day value - this should be exact #
+        #################################################
         it=int((days[id]-ot)/dt)
         bpdArray[iw,it]=bpds[id]
-  # Evaluate dP at time of earthquake if eqDay provided
+  ######################################################
+  # Get index for time of earthquake if eqDay provided #
   if eqDay is not None:
-    # Get point on time axis in terms of indicies of the output (ot, not ot0)
+    ###########################################################################
+    # Get point on time axis in terms of indicies of the output (ot, not ot0) #
+    ###########################################################################
     feq=(eqDay-ot)/dt
-    # Get the first point
+    #######################
+    # Get the first point #
+    #######################
     ieq=int(feq)
-    # Get a linear interpolation weight
+    #####################################
+    # Get a linear interpolation weight #
+    #####################################
     f=feq-ieq
-    return (wellIDs,nwC,dayArray,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,feq)
+    return (wellIDs,nwC,dayArray,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,f)
   elif dxdyIn is not None:
     return (wellIDs,nwC,dayArray,nt,ot,bpdArray,secArray,dx,dy,wellDistances,dxdyArray)
   else:
@@ -1908,6 +1931,7 @@ def calcPPVals(kMD,hFt,alphav,beta,phi,rho,g,nta):
   #   C:       lumped compressibility   (1/Pa) #
   ##############################################
   """
+  ####################
   # Unit conversions #
   ####################################
   # Convert from Millidarcies to m^2 #
@@ -1972,6 +1996,7 @@ def calcPPAnisoVals(kMDTensor,hM,alphav,beta,phi,rho,g,nta):
   #   diffPP:  diffusivity       (2x2,m^2 / s) #
   ##############################################
   """
+  ####################
   # Unit conversions #
   ####################################
   # Convert from Millidarcies to m^2 #
@@ -2052,6 +2077,7 @@ def calcPEVals(mu,nu,nu_u,alpha,kapM2,nta):
   #   kappa:   Hydraulic conductivity (m^2/(Pa s) #
   #################################################
   """
+  #############################################
   # Compute drained Lame's parameter/constant #
   # from Poisson's Ratio and Shear Modulus    #
   #############################################
@@ -2186,6 +2212,7 @@ def haversine(lat1,lat2,lon1,lon2):
   #   Probably breaks near the poles #
   ##########################################
   """
+  ##########################################
   # Convert inputs from degrees to radians #
   ##########################################
 
@@ -2222,6 +2249,7 @@ def formEffectiveStressTensor(stresses,pressure):
   #   ss: Effective stress tensor [3,3] (same as stresses) #
   ##########################################################
   """
+  ############################
   # Initialize output tensor #
   ############################
   ss=np.zeros([3,3])
@@ -2262,9 +2290,9 @@ def projectStress(ss,nf,tf1,tf2):
   ##############################################
   """
   tr=np.matmul(ss,nf)
-  ######################
+  #######################
   # equations 4.14-4.16 #
-  ######################
+  #######################
   sn=np.sum(tr*nf)
   st1=np.sum(tr*tf1)
   st2=np.sum(tr*tf2)
