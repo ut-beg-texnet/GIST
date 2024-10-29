@@ -43,7 +43,7 @@ Injection processing, GIST computation, and visualization are broken up into sep
 
 # Disclaimer
 
-GIST aims to give the <i>gist of a wide range of potential scenarios and aid collective decision making when responding to seismicity.
+GIST aims to give the <i>gist</i> of a wide range of potential scenarios and aid collective decision making when responding to seismicity.
 
 The results of GIST are entirely dependent upon the inputs provided, which may be incomplete or inaccurate.
 
