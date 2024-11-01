@@ -15,6 +15,36 @@ import geopandas
 import contextily as cx
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+def histogramMCPP(MCDF):
+  """
+  histogramMCPP - plot histograms of Monte Carlo parameters for pore pressure
+  Inputs: MCDF - dataframe of differenct realizations
+  """
+  # Visualizations of parameter ranges
+  fig,axes=plt.subplots(5,2, sharey=True, figsize=(10,15))
+  sns.histplot(ax=axes[0,0],x=MCDF.rho)
+  axes[0,0].set_xlabel('Fluid Density (kg/m3)')
+  sns.histplot(ax=axes[0,1],x=MCDF.nta)
+  axes[0,1].set_xlabel('Fluid Viscosity (Pa·s)')
+  sns.histplot(ax=axes[1,0],x=MCDF.phi)
+  axes[1,0].set_xlabel('Porosity (percent)')
+  sns.histplot(ax=axes[1,1],x=MCDF.kMD)
+  axes[1,1].set_xlabel('Permeability (mD)')
+  sns.histplot(ax=axes[2,0],x=MCDF.diffPP)
+  axes[2,0].set_xlabel("Diffusivity (m2/s)")
+  sns.histplot(ax=axes[2,1],x=MCDF.h)
+  axes[2,1].set_xlabel('Thickness (ft)')
+  sns.histplot(ax=axes[3,0],x=MCDF.alphav)
+  axes[3,0].set_xlabel('Vertical Compressibility (1/Pa)')
+  sns.histplot(ax=axes[3,1],x=MCDF.beta)
+  axes[3,1].set_xlabel('Fluid Compressibility (1/Pa)')
+  sns.histplot(ax=axes[4,0],x=MCDF.S)
+  axes[4,0].set_xlabel('Storativity')
+  sns.histplot(ax=axes[4,1],x=MCDF.S)
+  axes[4,1].set_xlabel('Transmisivity')
+
+  plt.tight_layout(pad=1.2)
+  plt.show()
 
 def histogramMC(shallowM,deepM):
   """
@@ -77,6 +107,58 @@ def histogramMC(shallowM,deepM):
   plt.tight_layout(pad=1.2)
   plt.show()
 
+def rMinusTPlotPP(ppWellDF,minYear=-40,diffRange=(0.1,1.),sizeTuple=(10,300),title='Well Selection',zoom=False):
+  """
+  rMinusTPlotPP
+
+  Generate plot of injection prior to an earthquake, with well selections for a pore pressure case.
+  Distinguishes between wells:
+    1. With no volume disposed of in-zone (X)
+    2. With volume disposed of in-zone close enough in distance and long enough ago to look at (Circle)
+    3. Too far away or too recent to look at (Square)
+  Plots lines with minimum and maximum diffusivity envelope:
+    Minimum diffusivity means this well will always be considered
+    Maximum means wells beyond this will never be considered
+  To-do: automatically limit the spatial extent so that it doesn't show the entire Permian
+  Inputs:
+      ppWellDF    Dataframe of well selection for pore pressure case from gistMC
+                  Uses TotalBBL, YearsInjectingToEarthquake, Selected, Distances
+      minYear     How many years before the earthquake to plot
+      diffRange   Tuple (,) of smallest and largest diffusivity (m2/s)
+      sizeTuple   Tuple (,) of smallest and largest dots for wells sized by volume
+      title       Text for title of plot
+      zoom        Boolean to limit y-axis to maximum considered distance
+                  True - limit, False, show all wells
+
+"""
+  wellDF=ppWellDF.copy()
+  wellDF['MMBBL']=wellDF['TotalBBL']/1000000.
+  wellDF['YearsInjectingToEarthquake']=-wellDF['YearsInjecting']
+  wellDF['Selection']='Exclude'
+  wellDF.loc[wellDF['Selected'],'Selection']='Include'
+  wellDF.loc[wellDF['EncompassingDiffusivity']<diffRange[0],'Selection']='Always Include'
+  wellDF.loc[wellDF['MMBBL']==0.,'Selection']='0 bbl'
+  fig, ax = plt.subplots(figsize=(18,12))
+  plt.title(title)
+  # Do I need to create a dashed line in the r minus t plot?
+  time = np.linspace(minYear,0,500)
+  timeSec = -time * 365 * 24 * 60 * 60
+  rMin= np.sqrt(4.* np.pi * timeSec * diffRange[0])/1000.
+  rMax= np.sqrt(4.* np.pi * timeSec * diffRange[1])/1000.
+  r=np.concatenate([rMin,rMax])
+  t=np.concatenate([time,time])
+  d=np.concatenate([np.ones(len(rMin))*diffRange[0],np.ones(len(rMax))*diffRange[1]])
+  label=np.concatenate([['Minimum',]*len(rMin),['Maximum',] * len(rMax)])
+  rtDF = pd.DataFrame(data={'Distance':r,'d':d,'Years Before Earthquake':t,'Diffusivity':label})
+  sns.lineplot(data=rtDF,x='Years Before Earthquake',y='Distance',hue='Diffusivity',ax=ax)
+  sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "Include": "o", "Always Include": "o","0 bbl": "X"},hue='Selection',palette={"Exclude": "b", "Include": "m","Always Include":"r", "0 bbl": "g"},legend='auto',sizes=(30,300), ax=ax)
+  ax.set_xlabel('Years Before Earthquake')
+  ax.set_ylabel('Distance From Earthquake (km)')
+  if zoom: ax.set_ylim((0,max(rMax)))
+  sns.move_legend(ax, "upper left")
+  plt.xlim((minYear,0))
+
+
 def rMinusTPlot(ppWellDF,peWellDF,minYear=-40,sizeTuple=(10,300),title='Well Selection'):
   """
   rMinusTPlot
@@ -100,8 +182,8 @@ def rMinusTPlot(ppWellDF,peWellDF,minYear=-40,sizeTuple=(10,300),title='Well Sel
   wellDF.loc[wellDF['Selected'],'Selection']='Pore Pressure'
   fig, ax = plt.subplots(figsize=(18,12))
   plt.title(title)
-  sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',hue='Selection',palette={"None": "k", "Poroelastic": "m", "Pore Pressure": "g"},legend='auto',sizes=(10,300), ax=ax)
-  ax.set_xlabel('Years Since Earthquake')
+  sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',hue='Selection',palette={"None": "b", "Poroelastic": "m", "Pore Pressure": "g"},legend='auto',sizes=(10,300), ax=ax)
+  ax.set_xlabel('Years Before Earthquake')
   ax.set_ylabel('Distance From Earthquake (km)')
   sns.move_legend(ax, "upper left")
   plt.xlim((minYear,0))
@@ -139,6 +221,54 @@ def intervalWellMap(eventID,interval,PEWells,PPWells,eq):
   purpleStar = mlines.Line2D([], [], color='purple', marker='*', linestyle='None',
                           markersize=20, label=eventID)
   plt.legend(handles=[blueCircle, redCircle, purpleStar])
+  plt.show()
+
+
+def intervalWellMapPP(eventID,interval,minDiff,PPWells,eq,zoom=0.):
+  """
+  intervalWellMapPP - Map with earthquake and pore pressure well selection
+
+  Inputs:
+    eventID     String of event ID
+    interval    String of interval (deep or shallow)
+    minDiff     Minimum diffusivity of Monte Carlo models (m2/s)
+    PPWells     Dataframe of wells with pore pressure selection
+    eq          Dataframe of earthquake with one row
+    zoom        If zero, include all selected well.
+                If >0. distance in degrees from earthquake to map
+  """
+  wellDF=PPWells.copy()
+  wellDF['MMBBL']=wellDF['TotalBBL']/1000000.
+  if zoom>0.:
+    fig, ax = plt.subplots(figsize=(12,12))
+  else:
+    fig, ax = plt.subplots(figsize=(24,24))
+  plt.title('Earthquake '+eventID+' '+interval+' wells')
+  divider = make_axes_locatable(ax)
+  wellDF['Selection']='Exclude'
+  # Base symbols on encommpassing diffusivity
+  wellDF.loc[wellDF['Selected'],'Selection']='Sometimes Include'
+  wellDF.loc[wellDF['EncompassingDiffusivity']<minDiff,'Selection']='Always Include'
+  wellDF.loc[(wellDF['MMBBL']==0) & (wellDF['Selection']!='Exclude'),'Selection']= '0 bbl'
+  wellGDF = geopandas.GeoDataFrame(wellDF, geometry=geopandas.points_from_xy(wellDF['SurfaceHoleLongitude'], wellDF['SurfaceHoleLatitude']), crs="EPSG:4326")
+  if zoom>0.:
+    xlim=(eq['Longitude'][0]-zoom,eq['Longitude'][0]+zoom)
+    ylim=(eq['Latitude'][0]-zoom,eq['Latitude'][0]+zoom)
+  else:
+    xlim=(min(wellGDF['SurfaceHoleLongitude'])-0.1,max(wellGDF['SurfaceHoleLongitude'])+0.1)
+    ylim=(min(wellGDF['SurfaceHoleLatitude'])-0.1,max(wellGDF['SurfaceHoleLatitude'])+0.1)
+
+#  wellGDF.plot(ax=ax,column='Selection',marker='.',markersize='MMBBL',legend=True)
+  wellGDF.plot(ax=ax,column='Selection',marker='.',legend=True)
+  eq.plot(ax=ax,color='purple',marker='*',markersize=300)
+  plt.xlim(xlim)
+  plt.ylim(ylim)
+  ax.set_xlabel('Longitude')
+  ax.set_ylabel('Latitude')
+  if zoom>0.:
+    cx.add_basemap(ax,zoom=12,crs="EPSG:4326")
+  else:
+    cx.add_basemap(ax,zoom=10,crs="EPSG:4326")
   plt.show()
 
 def wellMap(ax,earthquake,wells,inj,zone,physics,dday):
@@ -250,3 +380,81 @@ def disaggregationPlot(ax,pp,pe,wells,title):
   sns.stripplot(data=both,x='Stresses',y='WellName',hue='Physics',dodge=True,jitter=True,alpha=0.1,ax=ax)
   ax.set_title(title+' Well Stresses')
   ax.set_xlabel('Stress (PSI)')
+
+def disaggregationPlotPP(ppDF,wells,title,verbose=0):
+  """
+  disaggregationPlotPP - create strip plot of resutls for pore pressure GIST
+  
+  Inputs:
+          ax - axis to put plots onto
+          pp - dataframe of pore pressure results
+            Contains
+          wells - dataframe of wells
+          title of plot
+  """
+  nReal = max(ppDF['Realization'])
+  # First get an ordered list of wells by maximum pressure contribution
+  winWellsDF=ppDF[ppDF['Pressures']>0.1]['ID'].unique()
+  if verbose>0: print(len(winWellsDF),' wells have a >0.1 psi pressure contribution in one scenario')
+  # We should make the figure as tall as the number of contributing wells
+  figureHeight=len(winWellsDF)*0.25
+  fig, ax = plt.subplots(figsize=(12,figureHeight))
+  filtPPScenariosDF=ppDF[ppDF['ID'].isin(winWellsDF)]
+  maxPressureListRef=[]
+  maxPressureDFRef=pd.DataFrame(columns=['Name','ID','MaxPressure'])
+  names=[]
+  ids=[]
+  maxps=[]
+  for ID in winWellsDF:
+    maxps.append(max(filtPPScenariosDF[filtPPScenariosDF['ID']==ID]['Pressures']))
+    names.append(filtPPScenariosDF[filtPPScenariosDF['ID']==ID]['Name'].iloc[0])
+    ids.append(ID)
+  maxPressureDictRef={'Name': names, 'ID':ids, 'MaxPressure': maxps} 
+  maxPressureDFRef=pd.DataFrame(maxPressureDictRef).sort_values(by='MaxPressure',ascending=False)
+  # Next generate a list of wells that aren't contributing much
+  # Generate separate list of wells that are not contributing much
+  smallWellPPDF=ppDF[~ppDF['ID'].isin(winWellsDF)]
+  smallWells=smallWellPPDF['ID'].unique()
+  nSmallWells=len(smallWells)
+  # Now create sum of "all small wells" for each scenario
+  sumSmallWellPPDF=pd.DataFrame(columns=['EventID','EventLatitude', 'EventLongitude','Pressures','TotalPressure', 'Percentages', 'Realization'])
+  ids=[]
+  names=[]
+  pressures=[]
+  percentages=[]
+  realizations=[]
+  totalPressures=[]
+  eventIDs=[]
+  eventLats=[]
+  eventLons=[]
+  for ir in range(nReal):
+    smallWellScenario=smallWellPPDF[smallWellPPDF['Realization']==float(ir)]
+    realizations.append(ir)
+    pressures.append(smallWellScenario['Pressures'].sum())
+    percentages.append(smallWellScenario['Percentages'].sum())
+    totalPressures.append(smallWellScenario['TotalPressure'])
+    eventIDs.append(smallWellScenario['EventID'])
+    eventLats.append(smallWellScenario['EventLatitude'])
+    eventLons.append(smallWellScenario['EventLongitude'])
+    names.append('All '+str(nSmallWells)+' Others')
+    ids.append(0)
+
+  sumSmallPPDF=pd.DataFrame()
+  sumSmallPPDF['Percentages']=percentages
+  sumSmallPPDF['Pressures']=pressures
+  sumSmallPPDF['Realization']=realizations
+  sumSmallPPDF['TotalPressure']=totalPressures
+  sumSmallPPDF['EventID']=eventIDs
+  sumSmallPPDF['EventLatitude']=eventLats
+  sumSmallPPDF['EventLongitude']=eventLons
+  sumSmallPPDF['Name']=names
+  sumSmallPPDF['ID']=ids
+  # Combine small sums with other wells
+  dPPScenarios=pd.concat([filtPPScenariosDF,sumSmallPPDF],ignore_index=True)
+  category_order = dPPScenarios.groupby('Name')['Pressures'].max().sort_values(ascending=False).index
+
+  sns.stripplot(data=dPPScenarios,x='Pressures',y='Name',hue='Percentages',dodge=True,jitter=True,alpha=0.7,linewidth=0,edgecolor='white',ax=ax,size=5, order=category_order)
+  ax.set_title('Pressure Ranges',fontsize=15)
+  ax.set_xlabel('Pressure Increase (PSI)',fontsize=15)
+  ax.set_ylabel('Well Name',fontsize=15)
+  plt.show()
