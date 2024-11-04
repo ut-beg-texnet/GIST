@@ -1,3 +1,9 @@
+#! pip install geopandas
+#! pip install geodatasets
+#
+# ! pip install folium matplotlib mapclassify contextily
+#basePath='/Workspace/Users/bill.curry@exxonmobil.com'
+
 """
 gistPlots.py
 
@@ -14,6 +20,7 @@ import seaborn as sns
 import geopandas
 import contextily as cx
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.colors import ListedColormap
 
 def histogramMCPP(MCDF):
   """
@@ -247,9 +254,9 @@ def intervalWellMapPP(eventID,interval,minDiff,PPWells,eq,zoom=0.):
   divider = make_axes_locatable(ax)
   wellDF['Selection']='Exclude'
   # Base symbols on encommpassing diffusivity
-  wellDF.loc[wellDF['Selected'],'Selection']='Sometimes Include'
-  wellDF.loc[wellDF['EncompassingDiffusivity']<minDiff,'Selection']='Always Include'
-  wellDF.loc[(wellDF['MMBBL']==0) & (wellDF['Selection']!='Exclude'),'Selection']= '0 bbl'
+  wellDF.loc[wellDF['Selected'],'Selection']='Could Include'
+  wellDF.loc[wellDF['EncompassingDiffusivity']<minDiff,'Selection']='Must Include'
+  wellDF.loc[(wellDF['MMBBL']==0) & (wellDF['Selection']!='Exclude'),'Selection']= '0bbl Disposal'
   wellGDF = geopandas.GeoDataFrame(wellDF, geometry=geopandas.points_from_xy(wellDF['SurfaceHoleLongitude'], wellDF['SurfaceHoleLatitude']), crs="EPSG:4326")
   if zoom>0.:
     xlim=(eq['Longitude'][0]-zoom,eq['Longitude'][0]+zoom)
@@ -258,8 +265,15 @@ def intervalWellMapPP(eventID,interval,minDiff,PPWells,eq,zoom=0.):
     xlim=(min(wellGDF['SurfaceHoleLongitude'])-0.1,max(wellGDF['SurfaceHoleLongitude'])+0.1)
     ylim=(min(wellGDF['SurfaceHoleLatitude'])-0.1,max(wellGDF['SurfaceHoleLatitude'])+0.1)
 
-#  wellGDF.plot(ax=ax,column='Selection',marker='.',markersize='MMBBL',legend=True)
-  wellGDF.plot(ax=ax,column='Selection',marker='.',legend=True)
+
+
+  # Create a dictionary of colors for each category
+  colors = { '0bbl Disposal': 'green', 'Could Include': 'blue', 'Exclude': 'black','Must Include': 'red'}
+
+  # Create a colormap from the dictionary
+  cmap = ListedColormap(colors.values())
+  #  wellGDF.plot(ax=ax,column='Selection',marker='.',markersize='MMBBL',legend=True)
+  wellGDF.plot(ax=ax,column='Selection',marker='.',cmap=cmap,vmin=0,vmax=3,legend=True)
   eq.plot(ax=ax,color='purple',marker='*',markersize=300)
   plt.xlim(xlim)
   plt.ylim(ylim)
@@ -381,24 +395,30 @@ def disaggregationPlot(ax,pp,pe,wells,title):
   ax.set_title(title+' Well Stresses')
   ax.set_xlabel('Stress (PSI)')
 
-def disaggregationPlotPP(ppDF,wells,title,verbose=0):
+def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   """
-  disaggregationPlotPP - create strip plot of resutls for pore pressure GIST
-  
+  summarizePPResults - summarize results of pore pressure GIST for disaggregation plot
+
   Inputs:
-          ax - axis to put plots onto
-          pp - dataframe of pore pressure results
-            Contains
-          wells - dataframe of wells
-          title of plot
+    ppDF - dataframe of pore pressure results with columns:
+        Realization,Pressures,Percentages,Name,ID,TotalPressure
+        eventID,eventLatitude,eventLongitude
+    wells - list of well names
+    threshold - threshold for inclusion of wells in disaggregation plot in PSI
+    nOrder - number of ordering categories for disaggregation plot
+    verbose - level of output
+
+  Outputs:
+    smallPPDF - Updated dataframe with small contributors collapsed to a single well name
+                Order column added
+    smallWellList - List of wells ordered by maximum potential contribution
+
   """
   nReal = max(ppDF['Realization'])
   # First get an ordered list of wells by maximum pressure contribution
-  winWellsDF=ppDF[ppDF['Pressures']>0.1]['ID'].unique()
-  if verbose>0: print(len(winWellsDF),' wells have a >0.1 psi pressure contribution in one scenario')
+  winWellsDF=ppDF[ppDF['Pressures']>threshold]['ID'].unique()
+  if verbose>0: print(len(winWellsDF),' disaggregationPlotPP: wells have a >0.1 psi pressure contribution in one scenario')
   # We should make the figure as tall as the number of contributing wells
-  figureHeight=len(winWellsDF)*0.25
-  fig, ax = plt.subplots(figsize=(12,figureHeight))
   filtPPScenariosDF=ppDF[ppDF['ID'].isin(winWellsDF)]
   maxPressureListRef=[]
   maxPressureDFRef=pd.DataFrame(columns=['Name','ID','MaxPressure'])
@@ -409,6 +429,7 @@ def disaggregationPlotPP(ppDF,wells,title,verbose=0):
     maxps.append(max(filtPPScenariosDF[filtPPScenariosDF['ID']==ID]['Pressures']))
     names.append(filtPPScenariosDF[filtPPScenariosDF['ID']==ID]['Name'].iloc[0])
     ids.append(ID)
+  if verbose>0: print(' disaggregationPlotPP: ',len(winWellsDF),' sorted')
   maxPressureDictRef={'Name': names, 'ID':ids, 'MaxPressure': maxps} 
   maxPressureDFRef=pd.DataFrame(maxPressureDictRef).sort_values(by='MaxPressure',ascending=False)
   # Next generate a list of wells that aren't contributing much
@@ -427,6 +448,7 @@ def disaggregationPlotPP(ppDF,wells,title,verbose=0):
   eventIDs=[]
   eventLats=[]
   eventLons=[]
+  smallName='All '+str(nSmallWells)+' Others Below '+str(threshold)+' PSI'
   for ir in range(nReal):
     smallWellScenario=smallWellPPDF[smallWellPPDF['Realization']==float(ir)]
     realizations.append(ir)
@@ -436,9 +458,9 @@ def disaggregationPlotPP(ppDF,wells,title,verbose=0):
     eventIDs.append(smallWellScenario['EventID'])
     eventLats.append(smallWellScenario['EventLatitude'])
     eventLons.append(smallWellScenario['EventLongitude'])
-    names.append('All '+str(nSmallWells)+' Others')
+    names.append(smallName)
     ids.append(0)
-
+  if verbose>0: print(' disaggregationPlotPP: ',len(smallWells),' minimally-contributing wells sorted')
   sumSmallPPDF=pd.DataFrame()
   sumSmallPPDF['Percentages']=percentages
   sumSmallPPDF['Pressures']=pressures
@@ -450,10 +472,32 @@ def disaggregationPlotPP(ppDF,wells,title,verbose=0):
   sumSmallPPDF['Name']=names
   sumSmallPPDF['ID']=ids
   # Combine small sums with other wells
-  dPPScenarios=pd.concat([filtPPScenariosDF,sumSmallPPDF],ignore_index=True)
-  category_order = dPPScenarios.groupby('Name')['Pressures'].max().sort_values(ascending=False).index
+  smallPPDF=pd.concat([filtPPScenariosDF,sumSmallPPDF],ignore_index=True)
+  # This mixed all other wells in the ordering, should we have it at the bottom?
+  smallWellList = smallPPDF[smallPPDF['Name']!=smallName].groupby('Name')['Pressures'].max().sort_values(ascending=False).index
+  smallWellList = smallWellList.append(smallPPDF[smallPPDF['Name']==smallName].groupby('Name')['Pressures'].max().index)
 
-  sns.stripplot(data=dPPScenarios,x='Pressures',y='Name',hue='Percentages',dodge=True,jitter=True,alpha=0.7,linewidth=0,edgecolor='white',ax=ax,size=5, order=category_order)
+  # Now come up with a category that colors it by relative contribution
+  smallPPDF['Order'] = smallPPDF.groupby('Realization')['Percentages'].rank(method='dense', ascending=False)
+  smallPPDF.loc[smallPPDF['Order']>nOrder,'Order'] = nOrder+1
+  return smallPPDF,smallWellList
+
+def disaggregationPlotPP(ppDF,wells,title,threshold=0.1,norder=20,verbose=0):
+  """
+  disaggregationPlotPP - create strip plot of resutls for pore pressure GIST
+  
+  Inputs:
+          ppDF - dataframe of pore pressure results
+            Contains
+          wells - dataframe of wells
+          title of plot
+  """
+  smallPPDF,smallWellList=summarizePPResults(ppDF,wells,threshold,norder,verbose)
+
+  figureHeight=len(smallWellList)*0.25
+  if verbose>0: print(' disaggregationPlotPP: figure height is ',figureHeight)
+  fig, ax = plt.subplots(figsize=(12,figureHeight))
+  sns.stripplot(data=smallPPDF,x='Pressures',y='Name',hue='Order',palette='viridis',dodge=False,jitter=True,alpha=0.5,linewidth=0,edgecolor='white',ax=ax,size=5, order=smallWellList)
   ax.set_title('Pressure Ranges',fontsize=15)
   ax.set_xlabel('Pressure Increase (PSI)',fontsize=15)
   ax.set_ylabel('Well Name',fontsize=15)
