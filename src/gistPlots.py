@@ -142,9 +142,9 @@ def rMinusTPlotPP(ppWellDF,minYear=-40,diffRange=(0.1,1.),sizeTuple=(10,300),tit
   wellDF['MMBBL']=wellDF['TotalBBL']/1000000.
   wellDF['YearsInjectingToEarthquake']=-wellDF['YearsInjecting']
   wellDF['Selection']='Exclude'
-  wellDF.loc[wellDF['Selected'],'Selection']='Include'
-  wellDF.loc[wellDF['EncompassingDiffusivity']<diffRange[0],'Selection']='Always Include'
-  wellDF.loc[wellDF['MMBBL']==0.,'Selection']='0 bbl'
+  wellDF.loc[wellDF['Selected'],'Selection']='May Include'
+  wellDF.loc[wellDF['EncompassingDiffusivity']<diffRange[0],'Selection']='Must Include'
+  wellDF.loc[wellDF['MMBBL']==0.,'Selection']='0bbl Disposal'
   fig, ax = plt.subplots(figsize=(18,12))
   plt.title(title)
   # Do I need to create a dashed line in the r minus t plot?
@@ -158,7 +158,8 @@ def rMinusTPlotPP(ppWellDF,minYear=-40,diffRange=(0.1,1.),sizeTuple=(10,300),tit
   label=np.concatenate([['Minimum',]*len(rMin),['Maximum',] * len(rMax)])
   rtDF = pd.DataFrame(data={'Distance':r,'d':d,'Years Before Earthquake':t,'Diffusivity':label})
   sns.lineplot(data=rtDF,x='Years Before Earthquake',y='Distance',hue='Diffusivity',ax=ax)
-  sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "Include": "o", "Always Include": "o","0 bbl": "X"},hue='Selection',palette={"Exclude": "b", "Include": "m","Always Include":"r", "0 bbl": "g"},legend='auto',sizes=(30,300), ax=ax)
+  sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "May Include": "o", "Must Include": "o","0bbl Disposal": "X"},hue='Selection',palette={"Exclude": "k", "May Include": "b","Must Include":"r", "0bbl Disposal": "g"},legend='auto',sizes=(30,300), ax=ax)
+  #colors = { '0bbl Disposal': 'green', 'Could Include': 'blue', 'Exclude': 'black','Must Include': 'red'}
   ax.set_xlabel('Years Before Earthquake')
   ax.set_ylabel('Distance From Earthquake (km)')
   if zoom: ax.set_ylim((0,max(rMax)))
@@ -254,7 +255,7 @@ def intervalWellMapPP(eventID,interval,minDiff,PPWells,eq,zoom=0.):
   divider = make_axes_locatable(ax)
   wellDF['Selection']='Exclude'
   # Base symbols on encommpassing diffusivity
-  wellDF.loc[wellDF['Selected'],'Selection']='Could Include'
+  wellDF.loc[wellDF['Selected'],'Selection']='May Include'
   wellDF.loc[wellDF['EncompassingDiffusivity']<minDiff,'Selection']='Must Include'
   wellDF.loc[(wellDF['MMBBL']==0) & (wellDF['Selection']!='Exclude'),'Selection']= '0bbl Disposal'
   wellGDF = geopandas.GeoDataFrame(wellDF, geometry=geopandas.points_from_xy(wellDF['SurfaceHoleLongitude'], wellDF['SurfaceHoleLatitude']), crs="EPSG:4326")
@@ -268,7 +269,7 @@ def intervalWellMapPP(eventID,interval,minDiff,PPWells,eq,zoom=0.):
 
 
   # Create a dictionary of colors for each category
-  colors = { '0bbl Disposal': 'green', 'Could Include': 'blue', 'Exclude': 'black','Must Include': 'red'}
+  colors = { '0bbl Disposal': 'green', 'Exclude': 'black', 'May Include': 'blue', 'Must Include': 'red'}
 
   # Create a colormap from the dictionary
   cmap = ListedColormap(colors.values())
