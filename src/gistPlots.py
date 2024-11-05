@@ -1,9 +1,3 @@
-#! pip install geopandas
-#! pip install geodatasets
-#
-# ! pip install folium matplotlib mapclassify contextily
-#basePath='/Workspace/Users/bill.curry@exxonmobil.com'
-
 """
 gistPlots.py
 
@@ -114,7 +108,7 @@ def histogramMC(shallowM,deepM):
   plt.tight_layout(pad=1.2)
   plt.show()
 
-def rMinusTPlotPP(ppWellDF,minYear=-40,diffRange=(0.1,1.),sizeTuple=(10,300),title='Well Selection',zoom=False):
+def rMinusTPlotPP(wellDF,rtDF,minYear=-40,sizeTuple=(10,300),title='Well Selection',zoom=False):
   """
   rMinusTPlotPP
 
@@ -128,48 +122,35 @@ def rMinusTPlotPP(ppWellDF,minYear=-40,diffRange=(0.1,1.),sizeTuple=(10,300),tit
     Maximum means wells beyond this will never be considered
   To-do: automatically limit the spatial extent so that it doesn't show the entire Permian
   Inputs:
-      ppWellDF    Dataframe of well selection for pore pressure case from gistMC
+      wellDF      Dataframe of well selection for pore pressure case from gistMC
                   Uses TotalBBL, YearsInjectingToEarthquake, Selected, Distances
+                  output of gistMC.prepRTPlot
+      rtDF        Dataframe two diffusivity curves generated from gistMC.prepRTplot
       minYear     How many years before the earthquake to plot
       diffRange   Tuple (,) of smallest and largest diffusivity (m2/s)
       sizeTuple   Tuple (,) of smallest and largest dots for wells sized by volume
       title       Text for title of plot
       zoom        Boolean to limit y-axis to maximum considered distance
                   True - limit, False, show all wells
-
-"""
-  wellDF=ppWellDF.copy()
-  wellDF['MMBBL']=wellDF['TotalBBL']/1000000.
-  wellDF['YearsInjectingToEarthquake']=-wellDF['YearsInjecting']
-  wellDF['Selection']='Exclude'
-  wellDF.loc[wellDF['Selected'],'Selection']='May Include'
-  wellDF.loc[wellDF['EncompassingDiffusivity']<diffRange[0],'Selection']='Must Include'
-  wellDF.loc[wellDF['MMBBL']==0.,'Selection']='0bbl Disposal'
+  """
+  # I need a function that takes the dataframe, minYear, and diffRange and outputs two dataframes for plotting
+  #rtDF,wellDF=prepRTPlot(ppWellDF,minYear,diffRange)
+  # Seaborn call here
   fig, ax = plt.subplots(figsize=(18,12))
   plt.title(title)
-  # Do I need to create a dashed line in the r minus t plot?
-  time = np.linspace(minYear,0,500)
-  timeSec = -time * 365 * 24 * 60 * 60
-  rMin= np.sqrt(4.* np.pi * timeSec * diffRange[0])/1000.
-  rMax= np.sqrt(4.* np.pi * timeSec * diffRange[1])/1000.
-  r=np.concatenate([rMin,rMax])
-  t=np.concatenate([time,time])
-  d=np.concatenate([np.ones(len(rMin))*diffRange[0],np.ones(len(rMax))*diffRange[1]])
-  label=np.concatenate([['Minimum',]*len(rMin),['Maximum',] * len(rMax)])
-  rtDF = pd.DataFrame(data={'Distance':r,'d':d,'Years Before Earthquake':t,'Diffusivity':label})
   sns.lineplot(data=rtDF,x='Years Before Earthquake',y='Distance',hue='Diffusivity',ax=ax)
   sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "May Include": "o", "Must Include": "o","0bbl Disposal": "X"},hue='Selection',palette={"Exclude": "k", "May Include": "b","Must Include":"r", "0bbl Disposal": "g"},legend='auto',sizes=(30,300), ax=ax)
   #colors = { '0bbl Disposal': 'green', 'Could Include': 'blue', 'Exclude': 'black','Must Include': 'red'}
   ax.set_xlabel('Years Before Earthquake')
   ax.set_ylabel('Distance From Earthquake (km)')
-  if zoom: ax.set_ylim((0,max(rMax)))
+  if zoom: ax.set_ylim((0,max(rtDF['Distance'])))
   sns.move_legend(ax, "upper left")
   plt.xlim((minYear,0))
-
+  return
 
 def rMinusTPlot(ppWellDF,peWellDF,minYear=-40,sizeTuple=(10,300),title='Well Selection'):
   """
-  rMinusTPlot
+  rMinusTPlot - includes poroelasticity - deprecated for now
 
   Generate plot of injection prior to an earthquake, with well selections.
 
@@ -232,32 +213,26 @@ def intervalWellMap(eventID,interval,PEWells,PPWells,eq):
   plt.show()
 
 
-def intervalWellMapPP(eventID,interval,minDiff,PPWells,eq,zoom=0.):
+def intervalWellMapPP(eq,interval,wellDF,zoom=0.):
   """
   intervalWellMapPP - Map with earthquake and pore pressure well selection
 
   Inputs:
-    eventID     String of event ID
-    interval    String of interval (deep or shallow)
-    minDiff     Minimum diffusivity of Monte Carlo models (m2/s)
-    PPWells     Dataframe of wells with pore pressure selection
     eq          Dataframe of earthquake with one row
+    interval    String of interval (deep or shallow)
+    wellDF      Dataframe of wells with pore pressure selection
+                output from gistMC.prepRTPlot
     zoom        If zero, include all selected well.
                 If >0. distance in degrees from earthquake to map
   """
-  wellDF=PPWells.copy()
-  wellDF['MMBBL']=wellDF['TotalBBL']/1000000.
+  
   if zoom>0.:
     fig, ax = plt.subplots(figsize=(12,12))
   else:
     fig, ax = plt.subplots(figsize=(24,24))
-  plt.title('Earthquake '+eventID+' '+interval+' wells')
+  plt.title('Earthquake '+eq['EventID'][0]+' '+interval+' wells')
   divider = make_axes_locatable(ax)
-  wellDF['Selection']='Exclude'
   # Base symbols on encommpassing diffusivity
-  wellDF.loc[wellDF['Selected'],'Selection']='May Include'
-  wellDF.loc[wellDF['EncompassingDiffusivity']<minDiff,'Selection']='Must Include'
-  wellDF.loc[(wellDF['MMBBL']==0) & (wellDF['Selection']!='Exclude'),'Selection']= '0bbl Disposal'
   wellGDF = geopandas.GeoDataFrame(wellDF, geometry=geopandas.points_from_xy(wellDF['SurfaceHoleLongitude'], wellDF['SurfaceHoleLatitude']), crs="EPSG:4326")
   if zoom>0.:
     xlim=(eq['Longitude'][0]-zoom,eq['Longitude'][0]+zoom)
@@ -265,9 +240,6 @@ def intervalWellMapPP(eventID,interval,minDiff,PPWells,eq,zoom=0.):
   else:
     xlim=(min(wellGDF['SurfaceHoleLongitude'])-0.1,max(wellGDF['SurfaceHoleLongitude'])+0.1)
     ylim=(min(wellGDF['SurfaceHoleLatitude'])-0.1,max(wellGDF['SurfaceHoleLatitude'])+0.1)
-
-
-
   # Create a dictionary of colors for each category
   colors = { '0bbl Disposal': 'green', 'Exclude': 'black', 'May Include': 'blue', 'Must Include': 'red'}
 
@@ -396,104 +368,19 @@ def disaggregationPlot(ax,pp,pe,wells,title):
   ax.set_title(title+' Well Stresses')
   ax.set_xlabel('Stress (PSI)')
 
-def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
-  """
-  summarizePPResults - summarize results of pore pressure GIST for disaggregation plot
 
-  Inputs:
-    ppDF - dataframe of pore pressure results with columns:
-        Realization,Pressures,Percentages,Name,ID,TotalPressure
-        eventID,eventLatitude,eventLongitude
-    wells - list of well names
-    threshold - threshold for inclusion of wells in disaggregation plot in PSI
-    nOrder - number of ordering categories for disaggregation plot
-    verbose - level of output
 
-  Outputs:
-    smallPPDF - Updated dataframe with small contributors collapsed to a single well name
-                Order column added
-    smallWellList - List of wells ordered by maximum potential contribution
-
-  """
-  nReal = max(ppDF['Realization'])
-  # First get an ordered list of wells by maximum pressure contribution
-  winWellsDF=ppDF[ppDF['Pressures']>threshold]['ID'].unique()
-  if verbose>0: print(len(winWellsDF),' disaggregationPlotPP: wells have a >0.1 psi pressure contribution in one scenario')
-  # We should make the figure as tall as the number of contributing wells
-  filtPPScenariosDF=ppDF[ppDF['ID'].isin(winWellsDF)]
-  maxPressureListRef=[]
-  maxPressureDFRef=pd.DataFrame(columns=['Name','ID','MaxPressure'])
-  names=[]
-  ids=[]
-  maxps=[]
-  for ID in winWellsDF:
-    maxps.append(max(filtPPScenariosDF[filtPPScenariosDF['ID']==ID]['Pressures']))
-    names.append(filtPPScenariosDF[filtPPScenariosDF['ID']==ID]['Name'].iloc[0])
-    ids.append(ID)
-  if verbose>0: print(' disaggregationPlotPP: ',len(winWellsDF),' sorted')
-  maxPressureDictRef={'Name': names, 'ID':ids, 'MaxPressure': maxps} 
-  maxPressureDFRef=pd.DataFrame(maxPressureDictRef).sort_values(by='MaxPressure',ascending=False)
-  # Next generate a list of wells that aren't contributing much
-  # Generate separate list of wells that are not contributing much
-  smallWellPPDF=ppDF[~ppDF['ID'].isin(winWellsDF)]
-  smallWells=smallWellPPDF['ID'].unique()
-  nSmallWells=len(smallWells)
-  # Now create sum of "all small wells" for each scenario
-  sumSmallWellPPDF=pd.DataFrame(columns=['EventID','EventLatitude', 'EventLongitude','Pressures','TotalPressure', 'Percentages', 'Realization'])
-  ids=[]
-  names=[]
-  pressures=[]
-  percentages=[]
-  realizations=[]
-  totalPressures=[]
-  eventIDs=[]
-  eventLats=[]
-  eventLons=[]
-  smallName='All '+str(nSmallWells)+' Others Below '+str(threshold)+' PSI'
-  for ir in range(nReal):
-    smallWellScenario=smallWellPPDF[smallWellPPDF['Realization']==float(ir)]
-    realizations.append(ir)
-    pressures.append(smallWellScenario['Pressures'].sum())
-    percentages.append(smallWellScenario['Percentages'].sum())
-    totalPressures.append(smallWellScenario['TotalPressure'])
-    eventIDs.append(smallWellScenario['EventID'])
-    eventLats.append(smallWellScenario['EventLatitude'])
-    eventLons.append(smallWellScenario['EventLongitude'])
-    names.append(smallName)
-    ids.append(0)
-  if verbose>0: print(' disaggregationPlotPP: ',len(smallWells),' minimally-contributing wells sorted')
-  sumSmallPPDF=pd.DataFrame()
-  sumSmallPPDF['Percentages']=percentages
-  sumSmallPPDF['Pressures']=pressures
-  sumSmallPPDF['Realization']=realizations
-  sumSmallPPDF['TotalPressure']=totalPressures
-  sumSmallPPDF['EventID']=eventIDs
-  sumSmallPPDF['EventLatitude']=eventLats
-  sumSmallPPDF['EventLongitude']=eventLons
-  sumSmallPPDF['Name']=names
-  sumSmallPPDF['ID']=ids
-  # Combine small sums with other wells
-  smallPPDF=pd.concat([filtPPScenariosDF,sumSmallPPDF],ignore_index=True)
-  # This mixed all other wells in the ordering, should we have it at the bottom?
-  smallWellList = smallPPDF[smallPPDF['Name']!=smallName].groupby('Name')['Pressures'].max().sort_values(ascending=False).index
-  smallWellList = smallWellList.append(smallPPDF[smallPPDF['Name']==smallName].groupby('Name')['Pressures'].max().index)
-
-  # Now come up with a category that colors it by relative contribution
-  smallPPDF['Order'] = smallPPDF.groupby('Realization')['Percentages'].rank(method='dense', ascending=False)
-  smallPPDF.loc[smallPPDF['Order']>nOrder,'Order'] = nOrder+1
-  return smallPPDF,smallWellList
-
-def disaggregationPlotPP(ppDF,wells,title,threshold=0.1,norder=20,verbose=0):
+def disaggregationPlotPP(smallPPDF,smallWellList,title,verbose=0):
   """
   disaggregationPlotPP - create strip plot of resutls for pore pressure GIST
   
   Inputs:
-          ppDF - dataframe of pore pressure results
+          ppDF - dataframe of summarized pore pressure results
             Contains
-          wells - dataframe of wells
+          wells - list of summarized wells
           title of plot
   """
-  smallPPDF,smallWellList=summarizePPResults(ppDF,wells,threshold,norder,verbose)
+  #smallPPDF,smallWellList=summarizePPResults(ppDF,wells,threshold,norder,verbose)
 
   figureHeight=len(smallWellList)*0.25
   if verbose>0: print(' disaggregationPlotPP: figure height is ',figureHeight)
@@ -503,3 +390,13 @@ def disaggregationPlotPP(ppDF,wells,title,threshold=0.1,norder=20,verbose=0):
   ax.set_xlabel('Pressure Increase (PSI)',fontsize=15)
   ax.set_ylabel('Well Name',fontsize=15)
   plt.show()
+
+
+
+  # I need a function that pre-processes disposal time series information
+
+  # I need a function to co-render disposal from one well and a range of pressures from that well
+
+  # I need a function to co-render disposal from many wells (stacked) and a range of total pressures from those wells
+
+  
