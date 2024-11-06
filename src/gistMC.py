@@ -591,7 +591,8 @@ class gistMC:
       #####################################################################
       # Get number of days from start of injection to the earthquake date #
       #####################################################################
-      injectionDays=(pd.to_datetime(eq['Origin Date'])-pd.to_datetime(self.wellDF['StartDate'][iw])).days
+      # Using unit='ms' to account for TexNet api_url returning unix time in ms.
+      injectionDays=(pd.to_datetime(eq['Origin Date'], unit='ms')-pd.to_datetime(self.wellDF['StartDate'][iw])).days
       wellDurations[iw]=injectionDays/365.25
       ###########################################################################
       # Find diffusion distance for each well at that date                      #
@@ -756,7 +757,7 @@ class gistMC:
     ######################################################
     # Convert earthquake origin date to days since epoch #
     ######################################################
-    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
+    eqDay=(pd.to_datetime(eq['Origin Date'], unit='ms')-self.epoch).days
     
     #nd=np.c(eqDay-self.injOT)
     #######################################################

@@ -5,7 +5,8 @@
             "LatitudeError": 0.17663684,
             "Longitude": -101.80521151,
             "LongitudeError": 0.18082184,
-            "Origin Date": 1722046267000
+            "Origin Date": 1722046267000,
+            "EventID": "texnet2024oqfb"
         },
         "depthType": "shallow"
     },
