@@ -18,6 +18,8 @@ Injection processing, GIST computation, and visualization are broken up into sep
 
 	gistPlots.py		    		- collection of plotting functions to visualize results
 
+	GIST_RegressionTests.ipynb		- Jupyter notebook reproducing FSP results for modeling regression tests, validation of pore pressure modeling.
+
 	GIST_Stanton_11-4-23_Compute.ipnyb	- Jupyter notebook for 11/4/23 Stanton earthquake - computation
 
 	GIST_Stanton_11-4-23Plots.ipynb		- Jupyter notebook for 11/4/23 Stanton earthquake - plotting
@@ -27,12 +29,8 @@ Injection processing, GIST computation, and visualization are broken up into sep
    	GIST_Stanton_TodayCompute.ipynb		- Jupyter notebook for a hypothetical present-day Stanton earthquake - computation
 
 # To-do (very incomplete list)
-
-	- Validate pore pressure modeling codes
   
 	- Include Matlab prototype code
-  
-	- Regression tests for Python code to match "Gold" results from Matlab code
 
  	- Rework series of discrete steps into a workflow:
   		- QC and edit injection data after well selection
@@ -41,3 +39,17 @@ Injection processing, GIST computation, and visualization are broken up into sep
 	- Anisotropy examples
   
 	- Incorporate BEG-checked data from Bob Reedy
+
+
+# Disclaimer
+
+GIST aims to give the <i>gist</i> of a wide range of potential scenarios and aid collective decision making when responding to seismicity.
+
+The results of GIST are entirely dependent upon the inputs provided, which may be incomplete or inaccurate.
+
+There are other potentially plausible inducement scenarios that are not considered, including fluid migration into the basement, out-of-zone poroelastic stressing, or hydraulic fracturing.
+
+None of the individual models produced by GIST accurately represent what happens in the subsurface and cannot be credibly used to accurately assign liability or responsibility for seismicity.
+
+"All models are wrong, but some are useful" - George Box, 1976
+

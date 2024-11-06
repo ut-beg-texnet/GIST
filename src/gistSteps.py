@@ -117,10 +117,10 @@ def step3(input, session):
     # gistMC_instance.runPressureScenarios(eq, considered_wells_df, inj_df, verbose=1)
 
     #save gist instance after add and find wells
-    obj = gistMC_instance.to_dict()
-    json_str = json.dumps(obj, cls=jsonEncoder)
+    # obj = gistMC_instance.to_dict()
+    # json_str = json.dumps(obj, cls=jsonEncoder)
 
-    session["gistInstance"] = json_str
+    # session["gistInstance"] = json_str
     return session
 
 #Determine List of Contributing Wells (Auto Filtering)
