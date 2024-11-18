@@ -82,10 +82,12 @@ def step2(input, session):
     print('Here is the earthquake details: ' + str(eq))
     considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq, verbose=1)
     # r-t plot combination of considered well and excluded wells df reference plots.py
-    smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, 1984, [0.1, 2])
+    smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, -40, [0.1, 2])
     print('==================')
     print(smallPPDF)
+    smallPPDF.to_csv('smallPPDF.csv', index=False)
     print(smallWellList)
+    smallWellList.to_csv('smallWellList.csv', index=False)
     print('==================')
     # gistMC_instance.runPressureScenarios(eq, considered_wells_df, inj_df, verbose=1)
 

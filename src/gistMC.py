@@ -231,6 +231,10 @@ class gistMC:
     # To-do - error checking - bounds of parameters, unphysical rock, etc. #
     ########################################################################
     return
+
+  def to_dict(self):
+    #del self.randomFloats
+    return self.__dict__
   
   def initPE(self,mu_min=19e9,mu_max=21e9,
              nu_min=0.23,nu_max=0.25,
