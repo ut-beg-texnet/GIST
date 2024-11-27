@@ -94,7 +94,7 @@ class gistMC:
   # poroAttr                - poroelastic disaggregation to wells    #
   ####################################################################
   """
-  def __init__(self,epoch=pd.to_datetime('01-01-1970'),nReal=100,seed=42,ntBin=51,pSession=None):
+  def __init__(self,epoch=pd.to_datetime('01-01-1970'),nReal=100,seed=42,ntBin=51):
     """
     Constructor for base class
     # Inputs:
@@ -105,54 +105,45 @@ class gistMC:
     #   ntBin: Factor of time interpolation needed for   #
     #          numerical integration for poroelastic eqn #
     """
-
-    if pSession is not None:
-      self.update_from_session(pSession)
-    else:
-      #############
-      # Constants #
-      #############
-      # Gravity #
-      ###########
-      self.g=9.81
-      ##################
-      # Set parameters #
-      ##################
-      self.ntBin=ntBin
-      self.epoch=epoch
-      self.nReal=nReal
-      ######################################
-      # Initialize random number generator #
-      ######################################
-      self.rng=np.random.default_rng(seed=seed)
-      ##############################
-      # Initialize well data frame #
-      ##############################
-      self.nw=0
-      self.wells=pd.DataFrame(columns=['ID','InjectionWellId','APINumber','UICNumber','Basin','SurfaceHoleLatitude','SurfaceHoleLongitude','WellName','InjectionType','CompletedWellDepthClassification','InjectionStatus','StartDate','PermittedMaxLiquidBPD','PermittedIntervalBottomFt','PermittedIntervalTopFt'])
-      ###################################
-      # Initialize injection data frame #
-      ###################################
-      self.inj=pd.DataFrame(columns=['ID','BPD','Days'])
-      ######################################################################
-      # Generate vector of nReal x 17 (number of parameters) random floats #
-      ######################################################################
-      self.randomFloats=self.rng.random(size=(self.nReal,17))
-      #####################################################
-      # Set initialization status for different scenarios #
-      #####################################################
-      self.runPP=False
-      self.runPE=False
-      self.runPPAniso=False
-      self.runPEAniso=False
-      #######################################
-      # To-do: error checking of parameters # 
-      #######################################
-
-  def update_from_session(self, pSession):
-    for key in pSession:
-      setattr(self, key, pSession[key])
-
+    # Constants #
+    #############
+    # Gravity #
+    ###########
+    self.g=9.81
+    ##################
+    # Set parameters #
+    ##################
+    self.ntBin=ntBin
+    self.epoch=epoch
+    self.nReal=nReal
+    ######################################
+    # Initialize random number generator #
+    ######################################
+    self.rng=np.random.default_rng(seed=seed)
+    ##############################
+    # Initialize well data frame #
+    ##############################
+    self.nw=0
+    self.wells=pd.DataFrame(columns=['ID','InjectionWellId','APINumber','UICNumber','Basin','SurfaceHoleLatitude','SurfaceHoleLongitude','WellName','InjectionType','CompletedWellDepthClassification','InjectionStatus','StartDate','PermittedMaxLiquidBPD','PermittedIntervalBottomFt','PermittedIntervalTopFt'])
+    ###################################
+    # Initialize injection data frame #
+    ###################################
+    self.inj=pd.DataFrame(columns=['ID','BPD','Days'])
+    ######################################################################
+    # Generate vector of nReal x 17 (number of parameters) random floats #
+    ######################################################################
+    self.randomFloats=self.rng.random(size=(self.nReal,17))
+    #####################################################
+    # Set initialization status for different scenarios #
+    #####################################################
+    self.runPP=False
+    self.runPE=False
+    self.runPPAniso=False
+    self.runPEAniso=False
+    #######################################
+    # To-do: error checking of parameters # 
+    #######################################
+  
   def initPP(self,rho0_min=980.,rho0_max=1020.,
              nta_min=0.9e-3,nta_max=1.1e-3,
              phi_min=5.,phi_max=20.,
@@ -590,8 +581,7 @@ class gistMC:
       #####################################################################
       # Get number of days from start of injection to the earthquake date #
       #####################################################################
-      # Using unit='ms' to account for TexNet api_url returning unix time in ms.
-      injectionDays=(pd.to_datetime(eq['Origin Date'], unit='ms')-pd.to_datetime(self.wellDF['StartDate'][iw])).days
+      injectionDays=(pd.to_datetime(eq['Origin Date'])-pd.to_datetime(self.wellDF['StartDate'][iw])).days
       wellDurations[iw]=injectionDays/365.25
       ###########################################################################
       # Find diffusion distance for each well at that date                      #
@@ -662,7 +652,6 @@ class gistMC:
     # criteria where we include responseYears        #
     ################################################## 
     consideredWellsDF=self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)
-    print('CHECK HERE: ' + str(self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)))
     consideredWellsDF['Distances']=wellDistances[diffusionDistances>(wellDistances-eqUncert)]
     consideredWellsDF['DXs']=dxs[diffusionDistances>(wellDistances-eqUncert)]
     consideredWellsDF['DYs']=dys[diffusionDistances>(wellDistances-eqUncert)]
@@ -763,7 +752,7 @@ class gistMC:
     ######################################################
     # Convert earthquake origin date to days since epoch #
     ######################################################
-    eqDay=(pd.to_datetime(eq['Origin Date'], unit='ms')-self.epoch).days
+    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
     
     #nd=np.c(eqDay-self.injOT)
     #######################################################
@@ -1827,7 +1816,9 @@ class gistMC:
     ##############################################################
     return (perc[:,0],CFF[:,0],CFFsum[:,0],thetaVec[:,0])
 
+  def runDisposalScenarios(self,futureTime,eq,consideredWells,injDF,verbose=0):
 
+    return disposalRatesDF
   def pressureScenariosToDF(self,eq,consideredWells,dPAtEQ,totalPressureAtEQ,percentages,verbose=0):
     """
     ##################################################################################
@@ -2491,15 +2482,15 @@ def saveTimeSeriesPressures(inNP,inWellIDs,filePrefix,threshold,verbose=0):
                    prefix/wells/smallWells.npz
 
   '''
-  smallDPWells=np.zeros([dPDeep.shape[1],dPDeep.shape[2]])
+  smallDPWells=np.zeros([inNP.shape[1],inNP.shape[2]])
   smallIDList=[]
   bigIDList=[]
   iwList=[]
-  for iw in range(len(wellIDs)):
-    dPDeepWell=dPDeep[iw,:,:]
+  for iw in range(len(inWellIDs)):
+    dPWell=inNP[iw,:,:]
     # Check to see what maximum value is:
-    maxdP=np.max(dPDeepWell)
-    if verbose>1: print(' Well # ',wellIDs[iw],' maximum pressure: ',maxdP)
+    maxdP=np.max(dPWell)
+    if verbose>1: print(' Well # ',inWellIDs[iw],' maximum pressure: ',maxdP)
     if maxdP>0.1:
       bigIDList.append(wellIDs[iw])
       iwList.append(iw)
@@ -2665,3 +2656,23 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   smallPPDF['Order'] = smallPPDF.groupby('Realization')['Percentages'].rank(method='dense', ascending=False)
   smallPPDF.loc[smallPPDF['Order']>nOrder,'Order'] = nOrder+1
   return smallPPDF,smallWellList
+
+def getWinWells(summaryDF,wellsDF,injDF,verbose=0):
+  """
+  getWinWells - use output of summarizePPResults to get inputs for more restricted time series calculations
+              Put the results of this into the time series code.
+  Inputs:
+    summaryDF - Updated dataframe with small contributors collapsed to a single well name
+                Assume summed small well contribution has ID=0
+    wellsDF   - Selected wells from findWells before summary
+    injDF     - Selected Injection from findWells
+  Outputs:
+    winWellsDF - dataframe of wells with nontrivial pressures
+    winInjDF   - dataframe of injection for winWellsDF
+  """
+  subsetIdx=summaryDF['ID'].unique()[summaryDF['ID'].unique()>0]
+  if verbose>0: print("getWinWells: Selected well numbers:",subsetIdx)
+  winWellsDF=wellsDF[wellsDF['ID'].isin(subsetIdx)].reset_index()
+  if verbose>0: print("getWinWells: Selected well information:",winWellsDF)
+  winInjDF=injDF[injDF['ID'].isin(subsetIdx)]
+  return winWellsDF,winInjDF
