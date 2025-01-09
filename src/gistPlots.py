@@ -1,3 +1,9 @@
+#! pip install geopandas
+#! pip install geodatasets
+#
+# ! pip install folium matplotlib mapclassify contextily
+#basePath='/Workspace/Users/bill.curry@exxonmobil.com'
+
 """
 gistPlots.py
 
