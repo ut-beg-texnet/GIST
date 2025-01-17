@@ -2931,7 +2931,7 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
     smallWellList - List of wells ordered by maximum potential contribution
 
   """
-  nReal = max(ppDF['Realization'])
+  nReal = max(ppDF['Realization'])+1
   # First get an ordered list of wells by maximum pressure contribution
   winWellsDF=ppDF[ppDF['Pressures']>threshold]['ID'].unique()
   if verbose>0: print(len(winWellsDF),' disaggregationPlotPP: wells have a ',str(threshold),' psi pressure contribution in one scenario')
@@ -2998,6 +2998,38 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   smallPPDF['Order'] = smallPPDF.groupby('Realization')['Percentages'].rank(method='dense', ascending=False)
   smallPPDF.loc[smallPPDF['Order']>nOrder,'Order'] = nOrder+1
   return smallPPDF,smallWellList
+
+def prepDisaggregationPlot(smallPPDF,smallWellList,jitter=0.,verbose=0):
+  """
+  prepDisaggregationPlot - prepare data for disaggregation plot
+  Inputs:
+    smallPPDF - dataframe of pore pressure results with columns:
+        Realization,Pressures,Percentages,Name,ID
+    smallWellList - List of wells ordered by maximum potential contribution
+  Outputs:
+    disaggregationDF - dataframe of input to scatterplot
+          columns: Pressure,WellNo,Order,Name
+  """
+  # Make new dataframe
+  disaggregationPlotDF=pd.DataFrame(columns=['Pressures','WellNo','Order','Name','Realization'])
+  nReal=max(smallPPDF['Realization'])+1
+  if verbose>0: print(' prepDisaggregationPlot: ',len(smallWellList),' wells in disaggregation plot with ',nReal,' realizations')
+  # Loop over smallWellList
+  for iw in range(len(smallWellList)):
+    # Calculate y value with or without jitter
+    if jitter>0.:
+      jitterVec=np.random.uniform(-jitter,jitter,(nReal))
+      wellNo = np.zeros(nReal,)-iw+jitterVec
+    else:
+      wellNo = np.zeros(nReal,)-iw
+    # Get rows for this well
+    wellDF = smallPPDF[smallPPDF['Name']==smallWellList[iw]][['Realization','Pressures','Order','Name']]
+    if verbose>0: print(' prepDisaggregationPlot: ',len(wellDF),' rows for ',smallWellList[iw])
+    # create a new dataframe for this well
+    wellDF['WellNo']=wellNo
+    # append to new dataframe
+    disaggregationPlotDF=pd.concat([disaggregationPlotDF,wellDF],ignore_index=True)
+  return disaggregationPlotDF
 
 def getWinWells(summaryDF,wellsDF,injDF,verbose=0):
   """
