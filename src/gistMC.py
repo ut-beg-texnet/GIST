@@ -3050,3 +3050,134 @@ def getWinWells(summaryDF,wellsDF,injDF,verbose=0):
   if verbose>0: print("getWinWells: Selected well information:",winWellsDF)
   winInjDF=injDF[injDF['ID'].isin(subsetIdx)]
   return winWellsDF,winInjDF
+
+def getPerWellPressureTimeSeriesQuantiles(deltaPP,dayVec,wellIDs,nQuantiles=11,epoch=pd.to_datetime('01-01-1970')):
+  '''
+  Generate input to a time series line plot from numpy array of time series pressures.
+  Inputs:
+    deltaPP    - output from runTimeSeries (nw, nReal, nt)
+    dayVec     - vector of length nt with days from start of epoch (1970)
+    wellIDs    - vector of integer well identifiers (nw)
+    nQuantiles - number of curves to generate evenly distributed around the number of 
+                 realizations, default 11. This should be odd to get the median.
+  Outputs:
+    PPQuantilesDF - dataframe with columns: Day,WellID,Pressure,Percentile
+  '''
+  nReal=deltaPP.shape[1]
+  nt=deltaPP.shape[2]
+  nw=deltaPP.shape[0]
+  #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
+  # Calculate order ofdeltaPP for each value to get percentiles
+  deltaPPArgSort=np.argsort(deltaPP,axis=1)
+  deltaPPSorted=np.zeros(deltaPP.shape)
+  deltaPPOrder=np.zeros(deltaPP.shape)
+  deltaPPPercentile=np.zeros(deltaPP.shape)
+  for iw in range(nw):
+    for it in range(nt):
+      for iR in range(nReal):
+        deltaPPSorted[iw,deltaPPArgSort[iw,iR,it],it]=deltaPP[iw,iR,it]
+        deltaPPPercentile[iw,deltaPPArgSort[iw,iR,it],it]=round(100.*iR/(nReal-1),1)
+        deltaPPOrder[iw,deltaPPArgSort[iw,iR,it],it]=iR
+  deltaPPPercentile=np.round(100.*deltaPPOrder/(nReal-1),decimals=1)
+  d={'DeltaPressure':deltaPP[:,:,:].flatten(), 'Days':np.tile(dayVec,nw*nReal), 'Realization':np.tile(np.arange(nReal).repeat(nt),nw),'Order':deltaPPOrder[:,:,:].flatten(),'Percentile':deltaPPPercentile[:,:,:].flatten(),'WellID':np.repeat(wellIDs,nReal*nt)}
+  PPDF=pd.DataFrame(d)
+  PPDF['Date']=epoch+pd.to_timedelta(PPDF['Days'],unit='d')
+  ptiles_list=list(range(0,nReal))
+  ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
+  indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
+  quantiles=[ptiles[i] for i in indices]
+  PPQuantilesDF=PPDF[PPDF['Percentile'].isin(quantiles)]
+  return PPQuantilesDF
+
+def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,wellsDF,injDF,wellNames,verbose=0):
+  '''
+  prepPressureAndDisposalTimeSeriesPlots - take output from getPerWellPressureTimeSeriesQuantiles
+                                           and produce two dataframes for each well
+  inputs:
+            PPQuantilesDF - dataframe of pressures output from getPerWellPressureTimeSeriesQuantiles
+            wellDF        - dataframe with information from all wells
+            injDF         - dataframe with injection data and columns ID, Date, BPD
+            wellNames     - list of strings of well names to pull from wellDF and PPQuantilesDF
+  output:
+          outPerWellDict  - dictionary with one entry per well
+                            each well has:
+                                PPQuantiles - dataframe of pressures for that well
+                                Disposal    - dataframe of disposal for that well
+                                WellInfo    - Name, ID, Distance, ...
+  '''
+  # Initialize output dictionary
+  outPerWellDict={}
+  # Loop over wells of interest:
+  for iw in range(len(wellNames)):
+    wellName=wellNames[iw]
+    wellID=wellsDF[wellsDF['WellName']==wellName]['ID'].iloc[0]
+    wellInfo=wellsDF[wellsDF['WellName']==wellName]
+    if verbose>0: print("prepPressureAndDisposalTimeSeriesPlots",wellName,' ID: ',wellID)
+    # isolate disposal from this well
+    oneWellInjDF=injDF[injDF['ID']==wellID]
+    oneWellInjDF=oneWellInjDF[oneWellInjDF['Date'].notnull()]
+    oneWellQuantilesPPDF=PPQuantilesDF[PPQuantilesDF['WellID']==wellID]
+    oneWellQuantilesPPWinDF=oneWellQuantilesPPDF[oneWellQuantilesPPDF['Date']>oneWellInjDF.Date.min()]
+    outPerWellDict[wellName]={'PPQuantiles': oneWellQuantilesPPWinDF, 'Disposal': oneWellInjDF, 'WellInfo': wellInfo}
+  return outPerWellDict
+
+def prepTotalPressureTimeSeriesPlot(deltaPP,dayVec,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'),verbose=0):
+  '''
+  Generate input to a time series line plot from numpy array of time series pressures.
+  Inputs:
+    deltaPP    - output from runTimeSeries (nw, nReal, nt)
+    dayVec     - vector of length nt with days from start of epoch (1970)
+    nQuantiles - number of curves to generate evenly distributed around the number of 
+                 realizations, default 11. This should be odd to get the median.
+  Outputs:
+    totalPPQuantilesDF - dataframe with columns: Day,WellID,Pressure,Percentile
+  '''
+  if verbose>0:
+    print('prepTotalPressureTimeSeriesPlot: deltaPP.shape=',deltaPP.shape,' dayVec.shape=',dayVec.shape)
+  nReal=deltaPP.shape[1]
+  nt=deltaPP.shape[2]
+  totalDeltaPP=deltaPP.sum(axis=0)
+  if verbose>0:
+    print('prepTotalPressureTimeSeriesPlot: totalDeltaPP.shape=',totalDeltaPP.shape)
+  #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
+  # Calculate order of totalDeltaPP for each value to get percentiles
+  totalDeltaPPArgSort=np.argsort(totalDeltaPP,axis=0)
+  totalDeltaPPSorted=np.zeros(totalDeltaPP.shape)
+  totalDeltaPPOrder=np.zeros(totalDeltaPP.shape)
+  totalDeltaPPPercentile=np.zeros(totalDeltaPP.shape)
+  for it in range(nt):
+    for iR in range(nReal):
+      totalDeltaPPSorted[totalDeltaPPArgSort[iR,it],it]=totalDeltaPP[iR,it]
+      totalDeltaPPOrder[totalDeltaPPArgSort[iR,it],it]=iR
+  totalDeltaPPPercentile=np.round(100.*totalDeltaPPOrder/(nReal-1),decimals=1)
+  #td={'DeltaPressure':totalDeltaPP[:,:].flatten(), 'Days':np.repeat(dayVec,nReal),'Date':np.repeat(dateVec,nReal), 'Realization':np.tile(np.arange(nReal),nt),'Percentile':totalDeltaPPPercentile[:,:].flatten()}
+  #td={'DeltaPressure':np.ravel(totalDeltaPP[:,:],order='F'), 'Days':np.tile(dayVec,nReal),'Date':np.tile(dateVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Percentile':np.ravel(totalDeltaPPPercentile[:,:],order='F')}
+  td={'DeltaPressure':totalDeltaPP[:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.repeat(np.arange(nReal),nt),'Percentile':totalDeltaPPPercentile[:,:].flatten(),'Ordering':totalDeltaPPOrder[:,:].flatten()}
+  totalPPDF=pd.DataFrame(td)
+  totalPPDF['Date']=epoch+pd.to_timedelta(totalPPDF['Days'],unit='d')
+  ptiles_list=list(range(0,nReal))
+  ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
+  indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
+  quantiles=[ptiles[i] for i in indices]
+  if verbose>0: print("prepTotalPressureTimeSeriesPlot: quantiles:",quantiles)
+  totalPPQuantilesDF=totalPPDF[totalPPDF['Percentile'].isin(quantiles)]
+  return totalPPQuantilesDF
+
+
+  def extendDisposal(wellDF,injDF,startDay,endDay,rates,wellIDs,epoch=pd.to_datetime('1970-01-01'),verbose=0):
+    '''
+    extendDisposal: Produce injection forecast dataframe with set rates at wells
+
+    Inputs:
+              wellDF   - dataframe of wells to extend injection for
+                         get this by running findWells with an earthquake date
+                         of endDay or later
+              injDF
+              startDay
+              endDay
+              rates
+              wellIDs
+              verbose
+    '''
+    #
+    return
