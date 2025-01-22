@@ -2113,21 +2113,21 @@ class gistMC:
     if verbose>1:
       print('getPressureSensitivity: per-well pressures: ',sensitivityAllWellsDF.Pressures.min(),sensitivityAllWellsDF.Pressures.max())
       print('getPressureSensitivity: total pressures: ',sensitivityAllWellsDF.TotalPressure.min(),sensitivityAllWellsDF.TotalPressure.max())
-    sensitivityDF=pd.DataFrame(columns=['EventID', 'EventLatitude', 'EventLongitude', 'ID', 'Name', 'API', 'Latitude', 'Longitude', 'NumWells', 'Pressures', 'TotalPressure', 'Percentages', 'Realization','Parameter','Value','DeltaPressure'])
-    #sensitivityDF['Parameter']=''
-    #sensitivityDF['Value']=''
-    #sensitivityDF['DeltaPressure']=0.
-    #sensitivityDF.iloc[:,'Realization']=np.arange(21)
-    #pLoc=sensitivityDF.columns.get_loc('Parameter')
-    #vLoc=sensitivityDF.columns.get_loc('Value')
-    #dpLoc=sensitivityDF.columns.get_loc('DeltaPressure')
-    parameterList=['Density','Density','Density','Viscosity','Viscosity','Viscosity','Porosity','Porosity','Porosity','Interval Thickness','Interval Thickness','Interval Thickness','Vertical Compressibility','Vertical Compressibility','Vertical Compressibility','Fluid Compressibility','Fluid Compressibility','Fluid Compressibility','Permeability','Permeability','Permeability']
-    valueList=['Min','Mean','Max']*7
+    sensitivityDF=pd.DataFrame(columns=['EventID', 'EventLatitude', 'EventLongitude', 'ID', 'Name', 'API', 'Latitude', 'Longitude', 'NumWells', 'MinValDP','MeanValDP','MaxValDP','MinVal','MeanVal','MaxVal','Parameter'])
+    parameterList=['Density','Viscosity','Porosity','Interval Thickness','Vertical Compressibility','Fluid Compressibility','Permeability']
     # Loop over rows and build a new column with the delta pressure
     wellIDs=sensitivityAllWellsDF['ID'].unique()
+    minValSumDP=np.zeros([7,])
+    maxValSumDP=np.zeros([7,])
+    meanValSumDP=np.zeros([7,])
+    meanSumDP=np.zeros([7,])
+    minVal=[self.rho_min,self.nta_min,self.phi_min,self.h_min,self.alphav_min,self.beta_min,self.kMD_min]
+    maxVal=[self.rho_max,self.nta_max,self.phi_max,self.h_max,self.alphav_max,self.beta_max,self.kMD_max]
+    meanVal=[self.rho_max,self.nta_max,self.phi_max,self.h_max,self.alphav_max,self.beta_max,self.kMD_max]
     for wellID in wellIDs:
+      wellDF=pd.DataFrame(columns=['EventID', 'EventLatitude', 'EventLongitude', 'ID', 'Name', 'API', 'Latitude', 'Longitude', 'NumWells', 'MinValDP','MeanValDP','MaxValDP','MinVal','MeanVal','MaxVal','Parameter'])
       #wSDF=sensitivityDF.copy()
-      wSDF=sensitivityAllWellsDF[sensitivityAllWellsDF['ID']==wellID].copy(deep=True)
+      wSDF=sensitivityAllWellsDF[sensitivityAllWellsDF['ID']==wellID].copy()
       #wSDF.drop('index',axis=1,inplace=True)
       # Generate dP vector
       dp=np.zeros([21,])
@@ -2146,19 +2146,49 @@ class gistMC:
       dp[17]=pressures[17]-pressures[16]
       dp[18]=pressures[18]-pressures[19]
       dp[20]=pressures[20]-pressures[19]
-      wSDF['DeltaPressure']=dp
-      wSDF['Parameter']=parameterList
-      wSDF['Value']=valueList
-      wSDF.reset_index(inplace=True)
-      print('wSDF',wSDF)
-      print('sensitivityDF',sensitivityDF)
-      print('wsDF.index:',wSDF.index)
-      print('wsDF.columns:',wSDF.columns)
-      print('sensitivityDF.index',sensitivityDF.index)
+      minValDP=dp[0::3]
+      maxValDP=dp[2::3]
+      meanValDP=dp[1::3]
+      minValSumDP=minValSumDP+minValDP
+      maxValSumDP=maxValSumDP+maxValDP
+      meanValSumDP=meanValSumDP+meanValDP
+      meanSumDP=meanSumDP+pressures[1]
+      # Now generate an output dataframe with seven rows per well
+      wellDF['EventID']=[wSDF['EventID'].iloc[0]] * 7
+      wellDF['EventLatitude']=[wSDF['EventLatitude'].iloc[0]] * 7
+      wellDF['EventLongitude']=[wSDF['EventLongitude'].iloc[0]] * 7
+      wellDF['ID']=[wSDF['ID'].iloc[0]] * 7
+      wellDF['Name']=[wSDF['Name'].iloc[0]] * 7
+      wellDF['API']=[wSDF['API'].iloc[0]] * 7
+      wellDF['Latitude']=[wSDF['Latitude'].iloc[0]] * 7
+      wellDF['Longitude']=[wSDF['Longitude'].iloc[0]] * 7
+      wellDF['NumWells']=[wSDF['NumWells'].iloc[0]] *7
+      wellDF['MinValDP']=minValDP
+      wellDF['MeanValDP']=meanValDP
+      wellDF['MaxValDP']=maxValDP
+      wellDF['MinVal']=minVal
+      wellDF['MeanVal']=meanVal
+      wellDF['MaxVal']=maxVal
+      wellDF['Parameter']=parameterList
+      wellDF['MedianPressure']=[pressures[1]] * 7
       sensitivityDF.reset_index(drop=True, inplace=True)
-      wSDF.reset_index(drop=True,inplace=True)
-      sensitivityDF=pd.concat([sensitivityDF,wSDF],ignore_index=True)
-    return sensitivityDF
+      sensitivityDF=pd.concat([sensitivityDF,wellDF],ignore_index=True)
+    # Finally generate a dataframe with total pressures and seven rows in total
+    sensitivitySumDict={}
+    sensitivitySumDict['EventID']=[wellDF['EventID'].iloc[0]] * 7
+    sensitivitySumDict['EventLatitude']=[wellDF['EventLatitude'].iloc[0]] * 7
+    sensitivitySumDict['EventLongitude']=[wellDF['EventLongitude'].iloc[0]] * 7
+    sensitivitySumDict['MinValDP']=minValSumDP
+    sensitivitySumDict['MaxValDP']=maxValSumDP
+    sensitivitySumDict['MeanValDP']=meanValSumDP
+    sensitivitySumDict['MinVal']=minVal
+    sensitivitySumDict['MaxVal']=maxVal
+    sensitivitySumDict['MeanVal']=meanVal
+    sensitivitySumDict['Parameter']=parameterList
+    sensitivitySumDict['MedianPressure']=meanSumDP
+    sensitivitySumDF=pd.DataFrame(sensitivitySumDict)
+    sensitivitySumDF=sensitivitySumDF.sort_values(by='MaxVal',ascending=False)
+    return sensitivityDF,sensitivitySumDF
   
   def pressureScenariosToDF(self,eq,consideredWells,dPAtEQ,totalPressureAtEQ,percentages,verbose=0):
     """
@@ -2993,7 +3023,6 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   # This mixed all other wells in the ordering, should we have it at the bottom?
   smallWellList = smallPPDF[smallPPDF['Name']!=smallName].groupby('Name')['Pressures'].max().sort_values(ascending=False).index
   smallWellList = smallWellList.append(smallPPDF[smallPPDF['Name']==smallName].groupby('Name')['Pressures'].max().index)
-
   # Now come up with a category that colors it by relative contribution
   smallPPDF['Order'] = smallPPDF.groupby('Realization')['Percentages'].rank(method='dense', ascending=False)
   smallPPDF.loc[smallPPDF['Order']>nOrder,'Order'] = nOrder+1
