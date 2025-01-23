@@ -666,7 +666,6 @@ class gistMC:
     # criteria where we include responseYears        #
     ################################################## 
     consideredWellsDF=self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)
-    print('CHECK HERE: ' + str(self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)))
     consideredWellsDF['Distances']=wellDistances[diffusionDistances>(wellDistances-eqUncert)]
     consideredWellsDF['DXs']=dxs[diffusionDistances>(wellDistances-eqUncert)]
     consideredWellsDF['DYs']=dys[diffusionDistances>(wellDistances-eqUncert)]
