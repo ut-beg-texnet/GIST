@@ -2995,7 +2995,7 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   eventIDs=[]
   eventLats=[]
   eventLons=[]
-  smallName='All '+str(nSmallWells)+' Others Below '+str(threshold)+' PSI'
+  smallName='Sum of All '+str(nSmallWells)+' Others Below '+str(threshold)+' PSI'
   for ir in range(nReal):
     smallWellScenario=smallWellPPDF[smallWellPPDF['Realization']==float(ir)]
     realizations.append(ir)
