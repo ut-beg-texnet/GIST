@@ -1,8 +1,8 @@
-#! pip install geopandas
-#! pip install geodatasets
+# ! pip install geopandas
+# ! pip install geodatasets
 #
-# ! pip install folium matplotlib mapclassify contextily
-#basePath='/Workspace/Users/bill.curry@exxonmobil.com'
+#! pip install folium matplotlib mapclassify contextily
+basePath='/Workspace/Users/bill.curry@exxonmobil.com'
 
 """
 gistPlots.py
@@ -28,7 +28,7 @@ def histogramMCPP(MCDF):
   Inputs: MCDF - dataframe of differenct realizations
   """
   # Visualizations of parameter ranges
-  fig,axes=plt.subplots(5,2, sharey=True, figsize=(10,15))
+  fig,axes=plt.subplots(5,2, sharey=True, figsize=(10,10))
   sns.histplot(ax=axes[0,0],x=MCDF.rho)
   axes[0,0].set_xlabel('Fluid Density (kg/m3)')
   sns.histplot(ax=axes[0,1],x=MCDF.nta)
@@ -114,7 +114,7 @@ def histogramMC(shallowM,deepM):
   plt.tight_layout(pad=1.2)
   plt.show()
 
-def rMinusTPlotPP(wellDF,rtDF,minYear=-40,sizeTuple=(10,300),title='Well Selection',zoom=False):
+def rMinusTPlotPP(wellDF,rtDF,minYear=-40,sizeTuple=(10,300),title='Well Selection',zoom=False,future=False):
   """
   rMinusTPlotPP
 
@@ -144,11 +144,18 @@ def rMinusTPlotPP(wellDF,rtDF,minYear=-40,sizeTuple=(10,300),title='Well Selecti
   # Seaborn call here
   fig, ax = plt.subplots(figsize=(18,12))
   plt.title(title)
-  sns.lineplot(data=rtDF,x='Years Before Earthquake',y='Distance',hue='Diffusivity',ax=ax)
-  sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "May Include": "o", "Must Include": "o","0bbl Disposal": "X"},hue='Selection',palette={"Exclude": "k", "May Include": "b","Must Include":"r", "0bbl Disposal": "g"},legend='auto',sizes=(30,300), ax=ax)
-  #colors = { '0bbl Disposal': 'green', 'Could Include': 'blue', 'Exclude': 'black','Must Include': 'red'}
-  ax.set_xlabel('Years Before Earthquake')
-  ax.set_ylabel('Distance From Earthquake (km)')
+  if future:
+    sns.lineplot(data=rtDF,x='Year sTo Forecast End',y='Distance',hue='Diffusivity',ax=ax)
+    sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "Include in Forecast": "o", "May Include": "o", "Must Include": "o","0bbl Disposal": "X"},hue='Selection',palette={"Exclude": "k", "Include in Forecast": "c", "May Include": "b","Must Include":"r", "0bbl Disposal": "g"},legend='auto',sizes=(30,300), ax=ax)
+    #colors = { '0bbl Disposal': 'green', 'Could Include': 'blue', 'Exclude': 'black','Must Include': 'red'}
+    ax.set_xlabel('Years To Forecast End')
+    ax.set_ylabel('Distance From Earthquake (km)')
+  else:
+    sns.lineplot(data=rtDF,x='Years Before Earthquake',y='Distance',hue='Diffusivity',ax=ax)
+    sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "May Include": "o", "Must Include": "o","0bbl Disposal": "X"},hue='Selection',palette={"Exclude": "k", "May Include": "b","Must Include":"r", "0bbl Disposal": "g"},legend='auto',sizes=(30,300), ax=ax)
+    #colors = { '0bbl Disposal': 'green', 'Could Include': 'blue', 'Exclude': 'black','Must Include': 'red'}
+    ax.set_xlabel('Years Before Earthquake')
+    ax.set_ylabel('Distance From Earthquake (km)')
   if zoom: ax.set_ylim((0,max(rtDF['Distance'])))
   sns.move_legend(ax, "upper left")
   plt.xlim((minYear,0))
@@ -397,12 +404,58 @@ def disaggregationPlotPP(smallPPDF,smallWellList,title,verbose=0):
   ax.set_ylabel('Well Name',fontsize=15)
   plt.show()
 
+def totalPressurePlot(totalPPQuantilesDF,startDate=None):
+  DF=totalPPQuantilesDF
+  DF['Date']=pd.to_datetime(DF['Date'])
+  f, ax = plt.subplots(figsize=(18,4))
+  if startDate==None:
+    sns.lineplot(data=DF, x="Date", y="DeltaPressure",hue="Percentile",palette="icefire",ax=ax)
+  else:
+    sns.lineplot(data=DF[DF['Date']>=pd.to_datetime(startDate)], x="Date", y="DeltaPressure",hue="Percentile",palette="icefire",ax=ax)
+  sns.diverging_palette(250, 30, l=65, center="dark", as_cmap=True)
+  ax.set(title="Total Pressure from Relevant Wells")
+  ax.set(ylabel="Total Additional Pressure (PSI)")
+  plt.show()
 
-
+def disposalAndPressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize=(20,3),forecast=False,verbose=0):
+  wellInjDF=oneWellInjDF
+  wellQuantilesPPDF=oneWellQuantilesPPDF
+  wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
+  wellQuantilesPPDF['Date']=pd.to_datetime(wellQuantilesPPDF['Date'])
+  wellQuantilesPPWinDF=oneWellQuantilesPPDF[oneWellQuantilesPPDF['Date']>oneWellInjDF.Date.min()]
+  wellID=wellInfoDF['ID'].iloc[0]
+  wellName=wellInfoDF['WellName'].iloc[0]
+  wellDistance=wellInfoDF['Distances'].iloc[0]
+  fig,axis=plt.subplots(figsize=figSize)
+  if forecast:
+    sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, hue='Type' ,marker='.')
+  else:
+    sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, color='green',marker='.')
+  axis.set_ylabel('Injection (BPD)')
+  ax2=axis.twinx()
+  sns.lineplot(wellQuantilesPPWinDF,x="Date",y="DeltaPressure",hue="Percentile",palette="icefire",ax=ax2)
+  ax2.set_ylabel('Additional Pressure (PSI) @ '+str(np.round(wellDistance,decimals=1))+' km')
+  axis.set(title="Injection and Pressure History for "+wellName)
+  plt.show()
+  return
   # I need a function that pre-processes disposal time series information
-
-  # I need a function to co-render disposal from one well and a range of pressures from that well
-
-  # I need a function to co-render disposal from many wells (stacked) and a range of total pressures from those wells
-
   
+def totalTornadoPlot(inputSensitivityDF):
+  plt.figure(figsize=(10, 2))
+  sensitivityDF=inputSensitivityDF.copy()
+  # Sort data by the absolute difference for a better visual
+  sensitivityDF['Spread']=sensitivityDF['MaxValDP']-sensitivityDF['MinValDP']
+  sensitivityDF = sensitivityDF.sort_values(by='Spread', ascending=False,key=abs)
+  medianPressurePSI=sensitivityDF['MedianPressure'].to_list()[0]
+  # Plot the low differences
+  sns.barplot(data=sensitivityDF, x=sensitivityDF['MinValDP'].to_numpy(), y='Parameter', orient='h', color='blue', label='Lower')
+  # Plot the high differences
+  sns.barplot(data=sensitivityDF, x=sensitivityDF['MaxValDP'].to_numpy(), y='Parameter', orient='h', color='red', label='Higher')
+  plt.axvline(0, color='black', linestyle='--',label='Mean')
+  plt.xlabel('Pressure Difference from Median of '+str(round(medianPressurePSI,1))+' PSI')
+  plt.ylabel('')
+  plt.title('Tornado Plot for Total Estimated Pressure Increase for '+sensitivityDF['EventID'].iloc[0])
+  plt.legend(frameon = False, loc='lower right')
+  plt.tight_layout()
+  plt.show()
+  return
