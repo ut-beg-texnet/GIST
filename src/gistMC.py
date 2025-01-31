@@ -535,7 +535,26 @@ class gistMC:
       print(' gistMC.addWells: injection file last day: ',injWellDayMax)
       print(' gistMC.addWells: injection file day interval: ',self.injDT)
       print(' gistMC.addWells: injection file number of time samples: ',self.injNT)
+    # Error checking for column names:
+    requiredColumns=['StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','StartDate','ID','WellName','APINumber']
+    for col in requiredColumns:
+      if col not in self.wellDF.columns:  print(' gistMC.addWells: ERROR: ',col,' not in well file')
     self.runAddWells=True
+    return
+
+  def checkWells(self):
+    '''
+    checkWells - gistMC subroutine to check validity of wells .csv file
+    and injection file.
+    addWells already checks column names, we need more here
+    '''
+    return
+
+  def checkInj(self):
+    '''
+    '''
+    # open self.injFile and check that all wells have injection
+    #and all injection has a well
     return
 
   def findWells(self,eq,PE=False,responseYears=0.,verbose=0):
@@ -698,6 +717,7 @@ class gistMC:
       injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
       # Collect injection data for unselected wells
       injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
+    injDF['Date']=pd.to_datetime(injDF['Date'])
     ############################################################
     # Get the number of wells selected from the injection file #
     ############################################################
@@ -2894,18 +2914,19 @@ def saveTimeSeriesPressures(inNP,inWellIDs,filePrefix,threshold,verbose=0):
 # Functions to prep data for plotting #
 #######################################
 
-def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False):
+def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False,future=False,verbose=0):
   """
   prepRTPlot - calculates diffusivity curves and categorizes wells for analysis
 
   Inputs -  selectedWellDF - output of findWells, contains columns
-                             TotalBBL, YearsInjecting, Selected
+                             TotalBBL, YearsInjecting, Selection
             ignoredWellDF  - output of findWells, same columns
             minYear        - Extent to calculate diffusion curve for
                              optionally what to clip early dates to
             diffRange      - tuple of minimum and maximum diffusivity
                              for curves and categorization
             clipYear       - boolean, if true, clip all wells to minYear
+            future         - boolean, if true, look for Added column and include that
   
   Outputs - wellDF         - merged dataframe of selected and ignored wells
                              added columns MMBBL, YearsInjectingToEarthquake
@@ -2919,6 +2940,8 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False):
   sWells=selectedWellDF.copy()
   sWells['Selection']='May Include'
   sWells.loc[sWells['EncompassingDiffusivity']<diffRange[0],'Selection']='Must Include'
+  if future:
+    sWells.loc[sWells['Added']==True,'Selection']='Include in Forecast'
   sWells.loc[sWells['TotalBBL']==0.,'Selection']='0bbl Disposal'
   iWells=ignoredWellDF.copy()
   iWells['Selection']='Exclude'
@@ -3080,7 +3103,7 @@ def getWinWells(summaryDF,wellsDF,injDF,verbose=0):
   winInjDF=injDF[injDF['ID'].isin(subsetIdx)]
   return winWellsDF,winInjDF
 
-def getPerWellPressureTimeSeriesQuantiles(deltaPP,dayVec,wellIDs,nQuantiles=11,epoch=pd.to_datetime('01-01-1970')):
+def getPerWellPressureTimeSeriesQuantiles(deltaPP,dayVec,wellIDs,nQuantiles=11,epoch=pd.to_datetime('01-01-1970'),verbose=0):
   '''
   Generate input to a time series line plot from numpy array of time series pressures.
   Inputs:
@@ -3095,27 +3118,36 @@ def getPerWellPressureTimeSeriesQuantiles(deltaPP,dayVec,wellIDs,nQuantiles=11,e
   nReal=deltaPP.shape[1]
   nt=deltaPP.shape[2]
   nw=deltaPP.shape[0]
+  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - sizes: ',nReal,nt,nw)
+  PPQuantilesDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
   #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
   # Calculate order ofdeltaPP for each value to get percentiles
   deltaPPArgSort=np.argsort(deltaPP,axis=1)
   deltaPPSorted=np.zeros(deltaPP.shape)
   deltaPPOrder=np.zeros(deltaPP.shape)
   deltaPPPercentile=np.zeros(deltaPP.shape)
+  ptiles_list=list(range(0,nReal))
+  ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
+  indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
+  quantiles=[ptiles[i] for i in indices]
+  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - quantiles: ',quantiles)
   for iw in range(nw):
+    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - well: ',iw,' of ',nw)
     for it in range(nt):
       for iR in range(nReal):
         deltaPPSorted[iw,deltaPPArgSort[iw,iR,it],it]=deltaPP[iw,iR,it]
         deltaPPPercentile[iw,deltaPPArgSort[iw,iR,it],it]=round(100.*iR/(nReal-1),1)
         deltaPPOrder[iw,deltaPPArgSort[iw,iR,it],it]=iR
-  deltaPPPercentile=np.round(100.*deltaPPOrder/(nReal-1),decimals=1)
-  d={'DeltaPressure':deltaPP[:,:,:].flatten(), 'Days':np.tile(dayVec,nw*nReal), 'Realization':np.tile(np.arange(nReal).repeat(nt),nw),'Order':deltaPPOrder[:,:,:].flatten(),'Percentile':deltaPPPercentile[:,:,:].flatten(),'WellID':np.repeat(wellIDs,nReal*nt)}
-  PPDF=pd.DataFrame(d)
-  PPDF['Date']=epoch+pd.to_timedelta(PPDF['Days'],unit='d')
-  ptiles_list=list(range(0,nReal))
-  ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
-  indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
-  quantiles=[ptiles[i] for i in indices]
-  PPQuantilesDF=PPDF[PPDF['Percentile'].isin(quantiles)]
+    # Now just extract dataframe for this well
+    #deltaPPPercentile=np.round(100.*deltaPPOrder[iw,:,:]/(nReal-1),decimals=1)
+    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - array sizes: ',deltaPP[iw,:,:].shape,deltaPPPercentile[iw,:,:].shape,deltaPPOrder[iw,:,:].shape),np.tile(dayVec,nReal).shape,np.arange(nReal).repeat(nt).shape,np.repeat(wellIDs[iw],nReal*nt)
+    d={'DeltaPressure':deltaPP[iw,:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Order':deltaPPOrder[iw,:,:].flatten(),'Percentile':deltaPPPercentile[iw,:,:].flatten(),'WellID':np.repeat(wellIDs[iw],nReal*nt)}
+    wellPPDF=pd.DataFrame(d)
+    winWellPPDF=wellPPDF[wellPPDF['Percentile'].isin(quantiles)]
+    PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
+  #d={'DeltaPressure':deltaPP[:,:,:].flatten(), 'Days':np.tile(dayVec,nw*nReal), 'Realization':np.tile(np.arange(nReal).repeat(nt),nw),'Order':deltaPPOrder[:,:,:].flatten(),'Percentile':deltaPPPercentile[:,:,:].flatten(),'WellID':np.repeat(wellIDs,nReal*nt)}
+  #PPQuantilesDF=PPDF[PPDF['Percentile'].isin(quantiles)]
+  PPQuantilesDF['Date']=epoch+pd.to_timedelta(PPQuantilesDF['Days'],unit='d')
   return PPQuantilesDF
 
 def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,wellsDF,injDF,wellNames,verbose=0):
@@ -3210,3 +3242,4 @@ def prepTotalPressureTimeSeriesPlot(deltaPP,dayVec,nQuantiles=11,epoch=pd.to_dat
     '''
     #
     return
+  
