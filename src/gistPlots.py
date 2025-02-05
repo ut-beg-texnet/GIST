@@ -417,6 +417,20 @@ def totalPressurePlot(totalPPQuantilesDF,startDate=None):
   ax.set(ylabel="Total Additional Pressure (PSI)")
   plt.show()
 
+def totalPressureSpaghettiPlot(totalPPSpaghettiDF,startDate=None):
+  # To-do in future - add diffusivity to DF and make hue based on that.
+  DF=totalPPSpaghettiDF
+  DF['Date']=pd.to_datetime(DF['Date'])
+  f, ax = plt.subplots(figsize=(18,4))
+  if startDate==None:
+    sns.lineplot(data=DF, x="Date", y="DeltaPressure",hue="Realization",alpha=0.1,palette="icefire",ax=ax)
+  else:
+    sns.lineplot(data=DF[DF['Date']>=pd.to_datetime(startDate)], x="Date", y="DeltaPressure",hue="Diffusivity",alpha=0.1,palette="icefire",ax=ax)
+  sns.diverging_palette(250, 30, l=65, center="dark", as_cmap=True)
+  ax.set(title="Total Pressure from Relevant Wells")
+  ax.set(ylabel="Total Additional Pressure (PSI)")
+  plt.show()
+
 def disposalAndPressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize=(20,3),forecast=False,verbose=0):
   wellInjDF=oneWellInjDF
   wellQuantilesPPDF=oneWellQuantilesPPDF
@@ -429,6 +443,9 @@ def disposalAndPressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize
   fig,axis=plt.subplots(figsize=figSize)
   if forecast:
     sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, hue='Type' ,marker='.')
+    # Need to set hue of injection to be green and purple, not orange
+    # Add dotted line at EQ time
+    plt.axvline(0, color='black', linestyle='--',label='Event')
   else:
     sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, color='green',marker='.')
   axis.set_ylabel('Injection (BPD)')
@@ -436,6 +453,83 @@ def disposalAndPressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize
   sns.lineplot(wellQuantilesPPWinDF,x="Date",y="DeltaPressure",hue="Percentile",palette="icefire",ax=ax2)
   ax2.set_ylabel('Additional Pressure (PSI) @ '+str(np.round(wellDistance,decimals=1))+' km')
   axis.set(title="Injection and Pressure History for "+wellName)
+  plt.show()
+  return
+
+# Need disposalAndSpaghettiPlot
+def disposalAndSpaghettiPlot(wellInfoDF,oneWellInjDF,oneWellSpaghettiPPDF,figSize=(20,3),forecast=False,verbose=0):
+  wellInjDF=oneWellInjDF
+  wellSpaghettiPPDF=oneWellSpaghettiPPDF
+  wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
+  wellSpaghettiPPDF['Date']=pd.to_datetime(wellSpaghettiPPDF['Date'])
+  wellSpaghettiPPWinDF=oneWellSpaghettiPPDF[oneWellSpaghettiPPDF['Date']>oneWellInjDF.Date.min()]
+  wellID=wellInfoDF['ID'].iloc[0]
+  wellName=wellInfoDF['WellName'].iloc[0]
+  wellDistance=wellInfoDF['Distances'].iloc[0]
+  fig,axis=plt.subplots(figsize=figSize)
+  if forecast:
+    sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, hue='Type' ,marker='.')
+    # Need to set hue of injection to be green and purple, not orange
+    # Add dotted line at EQ time
+    plt.axvline(0, color='black', linestyle='--',label='Event')
+  else:
+    sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, color='green',marker='.')
+  axis.set_ylabel('Injection (BPD)')
+  ax2=axis.twinx()
+  sns.lineplot(wellSpaghettiPPWinDF,x="Date",y="DeltaPressure",hue="Diffusivity",alpha=0.1,palette="icefire",ax=ax2)
+  ax2.set_ylabel('Additional Pressure (PSI) @ '+str(np.round(wellDistance,decimals=1))+' km')
+  axis.set(title="Injection and Pressure History for "+wellName)
+  plt.show()
+  return
+
+# Need spaghettiPlot
+def spaghettiPlot(wellInfoDF,oneWellInjDF,oneWellSpaghettiPPDF,figSize=(20,3),forecast=False,verbose=0):
+  wellInjDF=oneWellInjDF
+  wellSpaghettiPPDF=oneWellSpaghettiPPDF
+  wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
+  wellSpaghettiPPDF['Date']=pd.to_datetime(wellSpaghettiPPDF['Date'])
+  wellSpaghettiPPWinDF=wellSpaghettiPPDF[wellSpaghettiPPDF['Date']>oneWellInjDF.Date.min()]
+  wellID=wellInfoDF['ID'].iloc[0]
+  wellName=wellInfoDF['WellName'].iloc[0]
+  wellDistance=wellInfoDF['Distances'].iloc[0]
+  fig,axis=plt.subplots(figsize=figSize)
+  #if forecast:     # add dotted line at EQ time
+  sns.lineplot(wellSpaghettiPPWinDF,x="Date",y="DeltaPressure",hue="Diffusivity",alpha=0.1,palette="icefire",ax=axis)
+  axis.set_ylabel('Additional Pressure (PSI) @ '+str(np.round(wellDistance,decimals=1))+' km')
+  axis.set(title="Pressure Models for "+wellName)
+  plt.show()
+  return
+
+def pressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize=(20,3),forecast=False,verbose=0):
+  wellInjDF=oneWellInjDF
+  wellQuantilesPPDF=oneWellQuantilesPPDF
+  wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
+  wellQuantilesPPDF['Date']=pd.to_datetime(wellQuantilesPPDF['Date'])
+  wellQuantilesPPWinDF=wellQuantilesPPDF[wellQuantilesPPDF['Date']>wellInjDF.Date.min()]
+  wellID=wellInfoDF['ID'].iloc[0]
+  wellName=wellInfoDF['WellName'].iloc[0]
+  wellDistance=wellInfoDF['Distances'].iloc[0]
+  fig,axis=plt.subplots(figsize=figSize)
+  #if forecast:     # add dotted line at EQ time
+  sns.lineplot(wellQuantilesPPWinDF,x="Date",y="DeltaPressure",hue="Percentile",palette="icefire",ax=axis)
+  axis.set_ylabel('Additional Pressure (PSI) @ '+str(np.round(wellDistance,decimals=1))+' km')
+  axis.set(title="Pressure Quantiles for "+wellName)
+  plt.show()
+  return
+
+def disposalPlot(wellInfoDF,oneWellInjDF,figSize=(20,3),forecast=False,verbose=0):
+  wellInjDF=oneWellInjDF
+  wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
+  wellID=wellInfoDF['ID'].iloc[0]
+  wellName=wellInfoDF['WellName'].iloc[0]
+  wellDistance=wellInfoDF['Distances'].iloc[0]
+  fig,axis=plt.subplots(figsize=figSize)
+  if forecast:
+    sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, hue='Type' ,marker='.')
+  else:
+    sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, color='green',marker='.')
+  axis.set_ylabel('Injection (BPD)')
+  axis.set(title="Injection History for "+wellName)
   plt.show()
   return
   # I need a function that pre-processes disposal time series information
@@ -459,3 +553,24 @@ def totalTornadoPlot(inputSensitivityDF):
   plt.tight_layout()
   plt.show()
   return
+
+def perWellTornadoPlot(inputSensitivityDF,verbose=0):
+  wellNames=inputSensitivityDF['Name'].drop_duplicates().to_list()
+  for wellName in wellNames:
+    if verbose>0: print(wellName)
+    wellID=inputSensitivityDF[inputSensitivityDF['Name']==wellName]['ID'].to_list()[0]
+    plt.figure(figsize=(10, 2))
+    wellSensitivityDF=inputSensitivityDF[inputSensitivityDF['ID']==wellID].copy()
+    wellName=wellSensitivityDF['Name'].iloc[0]
+    medianPressurePSI=wellSensitivityDF['MedianPressure'].to_list()[0]
+    wellSensitivityDF['Spread']=wellSensitivityDF['MaxValDP']-wellSensitivityDF['MinValDP']
+    wellSensitivityDF=wellSensitivityDF.sort_values(by='Spread', ascending=False,key=abs)
+    sns.barplot(data=wellSensitivityDF, x=wellSensitivityDF['MinValDP'].to_numpy(), y='Parameter', orient='h', color='blue', label='Lower')
+    sns.barplot(data=wellSensitivityDF, x=wellSensitivityDF['MaxValDP'].to_numpy(), y='Parameter', orient='h', color='red', label='Higher')
+    plt.axvline(0, color='black', linestyle='--',label='Mean')
+    plt.xlabel('Pressure Difference from Median of '+str(round(medianPressurePSI,2))+' PSI')
+    plt.ylabel('')
+    plt.title('Tornado Plot for Pressure from Well '+wellName+' at '+inputSensitivityDF['EventID'].iloc[0])
+    plt.legend(frameon = False, loc='lower right')
+    plt.tight_layout()
+    plt.show()
