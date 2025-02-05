@@ -10,7 +10,8 @@ Code is written as classes and subroutines in one .py file, with a second .py fi
 
 Injection processing, GIST computation, and visualization are broken up into separate steps and separate branches.
 
-Main has been deprecated!
+# Main branch has been deprecated!
+# Comute and plotting branches are active.
 
 # Contents:
 
