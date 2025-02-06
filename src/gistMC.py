@@ -500,46 +500,103 @@ class gistMC:
     return
   
 
-  def addWells(self,wellFile,injFile,verbose=0):  
+  def addWells(self,wellFile=None,injFile=None,userWellFile=None,userInjFile=None,verbose=0):  
     """
     ##############################################
     # Input csv files of well and injection data #
     ##############################################
-    # Inputs: ################################################
-    #     wellFile : full path + name of well .csv file      #
-    #      injFile : full path + name of injection .csv file #
-    ##########################################################
+    # Inputs: ########################################################
+    #     wellFile : full path + name of well .csv file              #
+    #      injFile : full path + name of injection .csv file         #
+    # userWellFile : full path + name of user-supplied well.csv file #
+    #  userInjFile : full path + name of user-supplied inj.csv file  #
+    ##################################################################
     # Assumptions: #################################
     #     Runs after init, inputs from injectionV3 #
     #     - wells merged, filtered and regularized #
+    #     - wells first 
     ################################################
     """
-    self.wellFile=wellFile
-    self.injFile=injFile
-    #####################
-    # Read in well file #
-    #####################
-    self.wellDF=pd.read_csv(wellFile)
-    self.nw=self.wellDF.shape[0]
-    # Check sanity of injection file
-    injWellCount=pd.read_csv(self.injFile,usecols=['ID']).nunique()
-    # This part is probably very slow
-    injWellDays=pd.read_csv(self.injFile,usecols=['Days'])
-    injWellDayMin=injWellDays.min()
-    injWellDayMax=float(injWellDays.max())
-    injWellDDay=injWellDays[injWellDays>injWellDayMin].min()-injWellDayMin
-    self.injDT=float(injWellDDay)
-    self.injOT=float(injWellDayMin)
-    self.injNT=1+int((injWellDayMax-injWellDayMin)/injWellDDay)
-    if verbose>0:
-      print(' gistMC.addWells: well file added with ',self.nw,' wells')
-      print(' gistMC.addWells: well columns:',self.wellDF.columns)
-      print(' gistMC.addWells: injection file has ',injWellCount[0],' unique wells')
-      print(' gistMC.addWells: injection file first day: ',self.injOT)
-      print(' gistMC.addWells: injection file last day: ',injWellDayMax)
-      print(' gistMC.addWells: injection file day interval: ',self.injDT)
-      print(' gistMC.addWells: injection file number of time samples: ',self.injNT)
+    # Switches for user-defined files or existing files
+    if wellFile==None and userWellFile==None:
+      print(' gistMC.addWells: no user or default well file given')
+      return 'Error: gistMC.addWells: no user or default well file given'
+    elif wellFile!=None and injFile==None:
+      print (' gistMC.addWells: default well given but no default injection file given')
+      return 'Error: gistMC.addWells: no user or default injection file given'
+    elif userWellFile!=None and userInjFile==None:
+      print (' gistMC.addWells: user well given but no user injection file given')
+      return 'Error: gistMC.addWells: user well given but no user injection file given'
+    elif wellFile==None and injFile!=None:
+      print (' gistMC.addWells: default well not given but default injection file given')
+      return 'Error: gistMC.addWells: default well not given but default injection file given'
+    elif userWellFile==None and userInjFile!=None:
+      print (' gistMC.addWells: user well not given but user injection file given')
+      return 'Error: gistMC.addWells: user well not given but user injection file given'
+    elif userWellFile!=None and userInjFile!=None and wellFile==None and injFile==None:
+      if verbose>0: print (' gistMC.addWells: user wells and injection provided, no default wells/injection')
+      if verbose>0: print (' gistMC.addWells: no user wells and injection provided, only default wells/injection')
+      self.wellFile=userWellFile
+      self.injFile=userInjFile
+      case='OneSet'
+    elif userWellFile==None and userInjFile==None and wellFile!=None and injFile!=None:
+      if verbose>0: print (' gistMC.addWells: no user wells and injection provided, only default wells/injection')
+      self.wellFile=wellFile
+      self.injFile=injFile
+      case='OneSet'
+
+    elif userWellFile!=None and userInjFile!=None and wellFile!=None and injFile!=None:
+      if verbose>0: print (' gistMC.addWells: both default and user wells and injection provided, merging required!')
+      case='TwoSets'
+    else:
+      print (' gistMC.addWells: unconsidered case')
+      return 'Error: gistMC.addWells: user well unconsidered case'
+    if case=='OneSet':
+      #####################
+      # Read in well file #
+      #####################
+      self.wellDF=pd.read_csv(wellFile)
+      self.nw=self.wellDF.shape[0]
+      # Check sanity of injection file
+      injWellCount=pd.read_csv(self.injFile,usecols=['ID']).nunique()
+      # This part is probably very slow
+      injWellDays=pd.read_csv(self.injFile,usecols=['Days'])
+      injWellDayMin=injWellDays.min()
+      injWellDayMax=float(injWellDays.max())
+      injWellDDay=injWellDays[injWellDays>injWellDayMin].min()-injWellDayMin
+      self.injDT=float(injWellDDay)
+      self.injOT=float(injWellDayMin)
+      self.injNT=1+int((injWellDayMax-injWellDayMin)/injWellDDay)
+      if verbose>0:
+        print(' gistMC.addWells: well file added with ',self.nw,' wells')
+        print(' gistMC.addWells: well columns:',self.wellDF.columns)
+        print(' gistMC.addWells: injection file has ',injWellCount[0],' unique wells')
+        print(' gistMC.addWells: injection file first day: ',self.injOT)
+        print(' gistMC.addWells: injection file last day: ',injWellDayMax)
+        print(' gistMC.addWells: injection file day interval: ',self.injDT)
+        print(' gistMC.addWells: injection file number of time samples: ',self.injNT)
+      # Error checking for column names:
+      requiredColumns=['StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','StartDate','ID','WellName','APINumber']
+      for col in requiredColumns:
+        if col not in self.wellDF.columns:  print(' gistMC.addWells: ERROR: ',col,' not in well file')
+    elif case=='TwoSets':
+      print(' gistMC.addWells: Two sets - need to develop merge.')
     self.runAddWells=True
+    return
+
+  def checkWells(self):
+    '''
+    checkWells - gistMC subroutine to check validity of wells .csv file
+    and injection file.
+    addWells already checks column names, we need more here
+    '''
+    return
+
+  def checkInj(self):
+    '''
+    '''
+    # open self.injFile and check that all wells have injection
+    #and all injection has a well
     return
 
   def findWells(self,eq,PE=False,responseYears=0.,verbose=0):
@@ -702,6 +759,7 @@ class gistMC:
       injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
       # Collect injection data for unselected wells
       injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
+    injDF['Date']=pd.to_datetime(injDF['Date'])
     ############################################################
     # Get the number of wells selected from the injection file #
     ############################################################
@@ -2898,18 +2956,19 @@ def saveTimeSeriesPressures(inNP,inWellIDs,filePrefix,threshold,verbose=0):
 # Functions to prep data for plotting #
 #######################################
 
-def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False):
+def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False,future=False,verbose=0):
   """
   prepRTPlot - calculates diffusivity curves and categorizes wells for analysis
 
   Inputs -  selectedWellDF - output of findWells, contains columns
-                             TotalBBL, YearsInjecting, Selected
+                             TotalBBL, YearsInjecting, Selection
             ignoredWellDF  - output of findWells, same columns
             minYear        - Extent to calculate diffusion curve for
                              optionally what to clip early dates to
             diffRange      - tuple of minimum and maximum diffusivity
                              for curves and categorization
             clipYear       - boolean, if true, clip all wells to minYear
+            future         - boolean, if true, look for Added column and include that
   
   Outputs - wellDF         - merged dataframe of selected and ignored wells
                              added columns MMBBL, YearsInjectingToEarthquake
@@ -2923,6 +2982,8 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False):
   sWells=selectedWellDF.copy()
   sWells['Selection']='May Include'
   sWells.loc[sWells['EncompassingDiffusivity']<diffRange[0],'Selection']='Must Include'
+  if future:
+    sWells.loc[sWells['Added']==True,'Selection']='Include in Forecast'
   sWells.loc[sWells['TotalBBL']==0.,'Selection']='0bbl Disposal'
   iWells=ignoredWellDF.copy()
   iWells['Selection']='Exclude'
@@ -2999,7 +3060,7 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   eventIDs=[]
   eventLats=[]
   eventLons=[]
-  smallName='All '+str(nSmallWells)+' Others Below '+str(threshold)+' PSI'
+  smallName='Sum of All '+str(nSmallWells)+' Others Below '+str(threshold)+' PSI'
   for ir in range(nReal):
     smallWellScenario=smallWellPPDF[smallWellPPDF['Realization']==float(ir)]
     realizations.append(ir)
@@ -3084,57 +3145,70 @@ def getWinWells(summaryDF,wellsDF,injDF,verbose=0):
   winInjDF=injDF[injDF['ID'].isin(subsetIdx)]
   return winWellsDF,winInjDF
 
-def getPerWellPressureTimeSeriesQuantiles(deltaPP,dayVec,wellIDs,nQuantiles=11,epoch=pd.to_datetime('01-01-1970')):
+def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,wellIDs,nQuantiles=11,epoch=pd.to_datetime('01-01-1970'),verbose=0):
   '''
   Generate input to a time series line plot from numpy array of time series pressures.
   Inputs:
     deltaPP    - output from runTimeSeries (nw, nReal, nt)
     dayVec     - vector of length nt with days from start of epoch (1970)
+    diffPPVec  - vector of diffusivities for different realizations (nReal)
     wellIDs    - vector of integer well identifiers (nw)
     nQuantiles - number of curves to generate evenly distributed around the number of 
                  realizations, default 11. This should be odd to get the median.
   Outputs:
-    PPQuantilesDF - dataframe with columns: Day,WellID,Pressure,Percentile
+    PPQuantilesDF - dataframe with columns: Day,WellID,DeltaPressure,Percentile
+    PPSpaghettiDF - dataframe with columns: Day,WellID,DeltaPressure,Realization,Diffusivity
   '''
   nReal=deltaPP.shape[1]
   nt=deltaPP.shape[2]
   nw=deltaPP.shape[0]
+  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - sizes: ',nReal,nt,nw)
+  PPQuantilesDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
+  PPSpaghettiDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
   #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
   # Calculate order ofdeltaPP for each value to get percentiles
   deltaPPArgSort=np.argsort(deltaPP,axis=1)
   deltaPPSorted=np.zeros(deltaPP.shape)
   deltaPPOrder=np.zeros(deltaPP.shape)
   deltaPPPercentile=np.zeros(deltaPP.shape)
+  ptiles_list=list(range(0,nReal))
+  ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
+  indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
+  quantiles=[ptiles[i] for i in indices]
+  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - quantiles: ',quantiles)
   for iw in range(nw):
+    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - well: ',iw,' of ',nw)
     for it in range(nt):
       for iR in range(nReal):
         deltaPPSorted[iw,deltaPPArgSort[iw,iR,it],it]=deltaPP[iw,iR,it]
         deltaPPPercentile[iw,deltaPPArgSort[iw,iR,it],it]=round(100.*iR/(nReal-1),1)
         deltaPPOrder[iw,deltaPPArgSort[iw,iR,it],it]=iR
-  deltaPPPercentile=np.round(100.*deltaPPOrder/(nReal-1),decimals=1)
-  d={'DeltaPressure':deltaPP[:,:,:].flatten(), 'Days':np.tile(dayVec,nw*nReal), 'Realization':np.tile(np.arange(nReal).repeat(nt),nw),'Order':deltaPPOrder[:,:,:].flatten(),'Percentile':deltaPPPercentile[:,:,:].flatten(),'WellID':np.repeat(wellIDs,nReal*nt)}
-  PPDF=pd.DataFrame(d)
-  PPDF['Date']=epoch+pd.to_timedelta(PPDF['Days'],unit='d')
-  ptiles_list=list(range(0,nReal))
-  ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
-  indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
-  quantiles=[ptiles[i] for i in indices]
-  PPQuantilesDF=PPDF[PPDF['Percentile'].isin(quantiles)]
-  return PPQuantilesDF
+    # Now just extract dataframe for this well
+    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - array sizes: ',deltaPP[iw,:,:].shape,deltaPPPercentile[iw,:,:].shape,deltaPPOrder[iw,:,:].shape),np.tile(dayVec,nReal).shape,np.arange(nReal).repeat(nt).shape,np.repeat(wellIDs[iw],nReal*nt)
+    d={'DeltaPressure':deltaPP[iw,:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Order':deltaPPOrder[iw,:,:].flatten(),'Percentile':deltaPPPercentile[iw,:,:].flatten(),'WellID':np.repeat(wellIDs[iw],nReal*nt), 'Diffusivity':diffPPVec.repeat(nt)}
+    wellPPDF=pd.DataFrame(d)
+    winWellPPDF=wellPPDF[wellPPDF['Percentile'].isin(quantiles)]
+    PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
+    PPSpaghettiDF=pd.concat([PPSpaghettiDF,wellPPDF[['DeltaPressure','Days','Realization','WellID','Diffusivity']]],ignore_index=True)
+  PPQuantilesDF['Date']=epoch+pd.to_timedelta(PPQuantilesDF['Days'],unit='d')
+  PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
+  return PPQuantilesDF,PPSpaghettiDF
 
-def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,wellsDF,injDF,wellNames,verbose=0):
+def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,injDF,wellNames,verbose=0):
   '''
   prepPressureAndDisposalTimeSeriesPlots - take output from getPerWellPressureTimeSeriesQuantiles
                                            and produce two dataframes for each well
   inputs:
-            PPQuantilesDF - dataframe of pressures output from getPerWellPressureTimeSeriesQuantiles
+            PPQuantilesDF - dataframe of pressure quantiles output from getPerWellPressureTimeSeriesQuantiles
+            PPSpaghettiDF - dataframe of pressures output from getPerWellPressureTimeSeriesQuantiles
             wellDF        - dataframe with information from all wells
             injDF         - dataframe with injection data and columns ID, Date, BPD
             wellNames     - list of strings of well names to pull from wellDF and PPQuantilesDF
   output:
           outPerWellDict  - dictionary with one entry per well
                             each well has:
-                                PPQuantiles - dataframe of pressures for that well
+                                PPQuantiles - dataframe of pressure quantiles for that well
+                                Spaghetti   - dataframe of all pressure models for that well
                                 Disposal    - dataframe of disposal for that well
                                 WellInfo    - Name, ID, Distance, ...
   '''
@@ -3149,9 +3223,13 @@ def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,wellsDF,injDF,wellNames
     # isolate disposal from this well
     oneWellInjDF=injDF[injDF['ID']==wellID]
     oneWellInjDF=oneWellInjDF[oneWellInjDF['Date'].notnull()]
+    # isolate pressure quantiles from this well
     oneWellQuantilesPPDF=PPQuantilesDF[PPQuantilesDF['WellID']==wellID]
     oneWellQuantilesPPWinDF=oneWellQuantilesPPDF[oneWellQuantilesPPDF['Date']>oneWellInjDF.Date.min()]
-    outPerWellDict[wellName]={'PPQuantiles': oneWellQuantilesPPWinDF, 'Disposal': oneWellInjDF, 'WellInfo': wellInfo}
+    # isolate spaghetti from this well
+    oneWellSpaghettiPPDF=PPSpaghettiDF[PPSpaghettiDF['WellID']==wellID]
+    oneWellSpaghettiPPWinDF=oneWellSpaghettiPPDF[oneWellSpaghettiPPDF['Date']>oneWellInjDF.Date.min()]
+    outPerWellDict[wellName]={'PPQuantiles': oneWellQuantilesPPWinDF, 'Spaghetti': oneWellSpaghettiPPWinDF, 'Disposal': oneWellInjDF, 'WellInfo': wellInfo}
   return outPerWellDict
 
 def prepTotalPressureTimeSeriesPlot(deltaPP,dayVec,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'),verbose=0):
@@ -3196,21 +3274,109 @@ def prepTotalPressureTimeSeriesPlot(deltaPP,dayVec,nQuantiles=11,epoch=pd.to_dat
   totalPPQuantilesDF=totalPPDF[totalPPDF['Percentile'].isin(quantiles)]
   return totalPPQuantilesDF
 
+def prepTotalPressureTimeSeriesSpaghettiPlot(deltaPP,dayVec,diffPPVec,epoch=pd.to_datetime('1970-01-01'),verbose=0):
+  '''
+  Generate input to a time series line plot from numpy array of time series pressures.
+  Inputs:
+    deltaPP    - output from runTimeSeries (nw, nReal, nt)
+    dayVec     - vector of length nt with days from start of epoch (1970)
+    diffPPVec  - vector of length nReal with diffusivities for each realization
+  Outputs:
+    totalPPSpaghettiDF - dataframe with columns: Day,WellID,Pressure,Realization,Diffusivity
+  '''
+  if verbose>0:
+    print('prepTotalPressureTimeSeriesSpaghettiPlot: deltaPP.shape=',deltaPP.shape,' dayVec.shape=',dayVec.shape)
+  nReal=deltaPP.shape[1]
+  nt=deltaPP.shape[2]
+  totalDeltaPP=deltaPP.sum(axis=0)
+  if verbose>0:
+    print('prepTotalPressureTimeSeriesSpaghettiPlot: totalDeltaPP.shape=',totalDeltaPP.shape)
+  #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
+  # Calculate order of totalDeltaPP for each value to get percentiles
+  td={'DeltaPressure':totalDeltaPP[:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.repeat(np.arange(nReal),nt), 'Diffusivity':diffPPVec.repeat(nt)}
+  totalPPDF=pd.DataFrame(td)
+  totalPPDF['Date']=epoch+pd.to_timedelta(totalPPDF['Days'],unit='d')
+  return totalPPDF
 
-  def extendDisposal(wellDF,injDF,startDay,endDay,rates,wellIDs,epoch=pd.to_datetime('1970-01-01'),verbose=0):
-    '''
-    extendDisposal: Produce injection forecast dataframe with set rates at wells
-
-    Inputs:
-              wellDF   - dataframe of wells to extend injection for
-                         get this by running findWells with an earthquake date
-                         of endDay or later
-              injDF
-              startDay
-              endDay
-              rates
-              wellIDs
-              verbose
-    '''
-    #
-    return
+def extendDisposal(injDF,startDate,endDate,rateDict,dDays=10,epoch=pd.to_datetime('1970-01-01'),verbose=0):
+  '''
+  extendDisposal: Produce injection forecast dataframe with set rates at wells
+  Inputs:
+            injDF    - dataframe of injection from findWells set to future date
+            startDate- date to switch over to injection forecast
+            endDate  - last date to extend forecast to - same as in findWells
+            rateDict - dictionary of IDs and rates for wells in response
+            dDays    - time sampling of injection in days
+            epoch    - start point for day number
+            verbose 
+  Outputs:
+            forecastInjDF - dataframe with injection forecast for wells in wellIDs,
+                            extrapolations of other wells with disposal
+  '''
+  # Convert dates to integer days from epoch #
+  ############################################
+  startDay=int((startDate-epoch).days)
+  endDay=int((endDate-epoch).days)
+  # Pull injection DF for updated well selection from forecastInjDF
+  # Stop time at "startDate" or startDay
+  # Isolate injection before startDate in injDF #
+  ###############################################
+  pastInjDF=injDF[injDF['Days']<startDay]
+  ########################################################
+  # Get last disposal value for all wells, rate and time #
+  # Assume time is regularized for all wells             #
+  ########################################################
+  lastDay=int(pastInjDF['Days'].max())
+  if verbose>0: print(' gist.extendDisposal - lastDay: ',lastDay)
+  lastInjDF=injDF[injDF['Days']==lastDay]
+  #############################################
+  # Generate future time series for each well #
+  # Here is where the input well rates come into play #
+  #####################################################
+  futureDays=np.arange(lastDay+dDay,endDay+dDays,float(dDays))
+  futureDates=[epoch+pd.to_timedelta(d,unit='D') for d in futureDays]
+  futureInjDF=pd.DataFrame(columns=['ID','Days','BPD','Date','Type'])
+  if verbose>0: print(' gist.extendDisposal - future time horizon: ',lastDay+dDay,endDay+dDays,float(dDays))
+  #####################
+  # Get list of wells #
+  #####################
+  wellIDList=injDF['ID'].unique().to_list()
+  ######################################
+  # Loop over all wells in input injDF #
+  ######################################
+  for wellID in wellIDList:
+    IDs=[wellID]*len(futureDays)
+    if verbose>1: print(' gist.extendDisposal - wellID: ',wellID)
+    ##############################################
+    # If this well has a prescribed rate, set it #
+    ##############################################
+    if wellID in rateDict.keys():
+      #######################
+      # Get prescribed rate #
+      #######################
+      BPD=rateDict[wellID]
+      if verbose>1: print(' gist.extendDisposal setting ',wellID,' with ',rateDict[wellID])
+      rateType=['Set'] * len(futureDays)
+    elif len(lastInjDF[lastInjDF['ID']==wellID])>0:
+      ######################################################
+      # If the well isn't listed but has prior disposal,   #
+      # extend the disposal immediately prior to startDate #
+      ######################################################
+      BPD=lastInjDF[lastInjDF['ID']==wellID]['BPD'].to_list()[0]
+      if verbose>1: print(' gist.extendDisposal extrapolating ',wellID,' with ',BPD)
+      rateType=['Extrapolated'] * len(futureDays)
+    else:
+      ################################################
+      # If we don't have prior disposal, set to zero #
+      ################################################
+      BPD=0.
+      if verbose>1: print(' gist.extendDisposal setting ',wellID,' to zero')
+      rateType=['No Data'] * len(futureDays)
+    BPDs=np.ones(len(futureDays))*BPD
+    futureWellInjDF=pd.DataFrame({'ID':IDs,'Days':futureDays,'BPD':BPDs,'Date':futureDates,'Type':rateType})
+    futureInjDF=pd.concat([futureInjDF,futureWellInjDF])
+  # Create updated dataframe with new wells
+  pastInjDF['Type']='Original'
+  forecastInjDF=pd.concat([pastInjDF,futureInjDF])
+  return forecastInjDF
+  

@@ -6,39 +6,35 @@ Dependencies: Python (3.9.10), numpy (1.21.4), scipy (1.7.3), pandas (1.3.5)
 
 Additional dependencies for plotting: seaborn, matplotlib, geopandas, contextily
 
-Code is written as classes and subroutines in one .py file, with a second .py file or Jupyter notebook as a driver script
+Code is structured as classes and subroutines in one .py file, with a second .py file or Jupyter notebook as a driver script
 
 Injection processing, GIST computation, and visualization are broken up into separate steps
 
 # Contents of compute branch:
 
-	gistMC.py               		- GIST class built for version 3 of the B3 data
+	gistMC.py               			- GIST class built for version 4 of the B3 data
   
-	gistMCLiveTarzan.py         		- driver script built around the Range Hill earthquake
+	GIST_RunTemplate_texnet2024oqfb_deep.ipynb      - Jupyter notebook of all compute for one example
 
-	gistPlots.py		    		- collection of plotting functions to visualize results
+	GIST_RegressionTests.ipynb			- Jupyter notebook reproducing FSP results for modeling regression tests,
+ 							  validation of pore pressure modeling.
 
-	GIST_RegressionTests.ipynb		- Jupyter notebook reproducing FSP results for modeling regression tests, validation of pore pressure modeling.
+	gistSteps.py					- Individual steps from Jupyter notebook broken out for web tools.
 
-	GIST_Stanton_11-4-23_Compute.ipnyb	- Jupyter notebook for 11/4/23 Stanton earthquake - computation
+	gistStepsDriver.py				- Driver script for gistSteps to run discrete steps matching web tool.
 
-	GIST_Stanton_11-4-23Plots.ipynb		- Jupyter notebook for 11/4/23 Stanton earthquake - plotting
+ 	Geomechanics_GF.py				- Recently developed Green's functions for out-of-zone stressing.
+  							  Documentation in progress.
 
-	GIST_TestAnisotropy.ipynb		- Jupyter notebook for testing azimuthal permeability anisotropy in gistMCLive
-
-   	GIST_Stanton_TodayCompute.ipynb		- Jupyter notebook for a hypothetical present-day Stanton earthquake - computation
-
+    	gold/						- Directory of .csv files with results from Fault Slip Potential used as
+     							  references for GIST_RegressionTests.
 # To-do (very incomplete list)
   
 	- Include Matlab prototype code
-
- 	- Rework series of discrete steps into a workflow:
-  		- QC and edit injection data after well selection
-    		- Update GIST parameterization after plots
   
 	- Anisotropy examples
   
-	- Incorporate BEG-checked data from Bob Reedy
+	- Incorporate BEG-checked data
 
 
 # Disclaimer
