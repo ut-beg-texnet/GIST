@@ -11,13 +11,14 @@ import pathlib
 
 from gistMC import gistMC
 from gistMC import prepRTPlot
+from gistMC import prepDisaggregationPlot
 
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 def step2(input):
     # Initialize gistMC class
-    gistMC_instance = gistMC(nReal=input.get('realizationCount'))
-    gistMC_instance.initPP(**input.get('porePressureParams'))
+    gistMC_instance = gistMC()
+    gistMC_instance.initPP()
     wellcsv = 'C:/Users/peter/Documents/workspace/GIST/src/gist_well_data.csv'
     injectioncsv = 'C:/Users/peter/Documents/workspace/GIST/src/gist_injection_data.csv'
     gistMC_instance.addWells(wellcsv, injectioncsv)
@@ -26,43 +27,52 @@ def step2(input):
             "LatitudeError": 0.17663684,
             "Longitude": -101.80521151,
             "LongitudeError": 0.18082184,
-            "Origin Date": 1722046267000,
+            "Origin Date": "2024-07-27",
             "EventID": "texnet2024oqfb"
     }
-    considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq)
+    considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq,PE=False,verbose=2)
+
     # r-t plot combination of considered well and excluded wells df reference plots.py
-    smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, -40, [0.1, 2], True)
-    # smallPPDF.to_csv('smallPPDF.csv', index=False)
-    # smallWellList.to_csv('smallWellList.csv', index=False)
-    return smallPPDF,smallWellList
+    # smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, -40, [0.1, 2], True)
+    
+    considered_wells_df.to_csv('consideredWells.csv', index=False)
+    excluded_wells_df.to_csv('excludedWells.csv', index=False)
+
+    # disaggregationPlotDF = prepDisaggregationPlot(smallPPDF, smallWellList)
+
+    return considered_wells_df
 
 
-scratchPath = sys.argv[1]
+# scratchPath = sys.argv[1]
 
-#instantiate the helper
-helper = TexNetWebToolLaunchHelper(scratchPath)
+# #instantiate the helper
+# helper = TexNetWebToolLaunchHelper(scratchPath)
 
-#Get the args data out of it.
-argsData = helper.argsData
-#getParameterValueWithStepIndexAndParamName
-realizationCount = helper.getParameterValueWithStepIndexAndParamName(1,"realizationCount")
-rho0_min = helper.getParameterValueWithStepIndexAndParamName(1,"rho0_min")
-rho0_max = helper.getParameterValueWithStepIndexAndParamName(1,"rho0_max")
-# print(f"test: {realizationCount} {rho0_min} {rho0_max}")
+# #Get the args data out of it.
+# argsData = helper.argsData
+# #getParameterValueWithStepIndexAndParamName
+# realizationCount = helper.getParameterValueWithStepIndexAndParamName(1,"realizationCount")
+# rho0_min = helper.getParameterValueWithStepIndexAndParamName(1,"rho0_min")
+# rho0_max = helper.getParameterValueWithStepIndexAndParamName(1,"rho0_max")
+# # print(f"test: {realizationCount} {rho0_min} {rho0_max}")
 
+# input = {
+#     "realizationCount": realizationCount,
+#     "porePressureParams" : {
+#         "rho0_min": rho0_min,
+#         "rho0_max": rho0_max
+#     }
+# }
 input = {
-    "realizationCount": realizationCount,
-    "porePressureParams" : {
-        "rho0_min": rho0_min,
-        "rho0_max": rho0_max
-    }
+    "realizationCount": 50,
+    "porePressureParams" : {}
 }
 
-smallPPDF, smallWellList = step2(input)
+considered_wells_df = step2(input)
 
-# print(f"test: {smallPPDF} {smallWellList}")
+print(f"test: {considered_wells_df}")
 
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
+# helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
+# helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
 
-helper.writeResultsFile()
+# helper.writeResultsFile()
