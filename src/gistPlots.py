@@ -114,7 +114,7 @@ def histogramMC(shallowM,deepM):
   plt.tight_layout(pad=1.2)
   plt.show()
 
-def rMinusTPlotPP(wellDF,rtDF,minYear=-40,sizeTuple=(10,300),title='Well Selection',zoom=False,future=False):
+def rMinusTPlotPP(wellDF,rtDF,minYear=1985,sizeTuple=(10,300),title='Well Selection',zoom=False,future=True):
   """
   rMinusTPlotPP
 
@@ -129,10 +129,10 @@ def rMinusTPlotPP(wellDF,rtDF,minYear=-40,sizeTuple=(10,300),title='Well Selecti
   To-do: automatically limit the spatial extent so that it doesn't show the entire Permian
   Inputs:
       wellDF      Dataframe of well selection for pore pressure case from gistMC
-                  Uses TotalBBL, YearsInjectingToEarthquake, Selected, Distances
+                  Uses TotalBBL, YearsInjectingToEarthquake, Selected, Distances, Date
                   output of gistMC.prepRTPlot
-      rtDF        Dataframe two diffusivity curves generated from gistMC.prepRTplot
-      minYear     How many years before the earthquake to plot
+      rtDF        Dataframe two diffusivity curves generated from gistMC.prepRTplot, Date
+      minYear     First Year to plot
       diffRange   Tuple (,) of smallest and largest diffusivity (m2/s)
       sizeTuple   Tuple (,) of smallest and largest dots for wells sized by volume
       title       Text for title of plot
@@ -141,24 +141,25 @@ def rMinusTPlotPP(wellDF,rtDF,minYear=-40,sizeTuple=(10,300),title='Well Selecti
   """
   # I need a function that takes the dataframe, minYear, and diffRange and outputs two dataframes for plotting
   #rtDF,wellDF=prepRTPlot(ppWellDF,minYear,diffRange)
+  maxDate=max(rtDF.Date.max(),wellDF.Date.max())+pd.Timedelta(days=365)
   # Seaborn call here
   fig, ax = plt.subplots(figsize=(18,12))
   plt.title(title)
   if future:
-    sns.lineplot(data=rtDF,x='Year sTo Forecast End',y='Distance',hue='Diffusivity',ax=ax)
-    sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "Include in Forecast": "o", "May Include": "o", "Must Include": "o","0bbl Disposal": "X"},hue='Selection',palette={"Exclude": "k", "Include in Forecast": "c", "May Include": "b","Must Include":"r", "0bbl Disposal": "g"},legend='auto',sizes=(30,300), ax=ax)
+    sns.lineplot(data=rtDF,x='Date',y='Distance',hue='Diffusivity',ax=ax)
+    sns.scatterplot(data=wellDF,x='Date', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "Include in Forecast": "o", "May Include": "o", "Must Include": "o","0bbl Disposal": "X"},hue='Selection',palette={"Exclude": "k", "Include in Forecast": "c", "May Include": "b","Must Include":"r", "0bbl Disposal": "g"},legend='auto',sizes=(30,300), ax=ax)
     #colors = { '0bbl Disposal': 'green', 'Could Include': 'blue', 'Exclude': 'black','Must Include': 'red'}
-    ax.set_xlabel('Years To Forecast End')
+    ax.set_xlabel('Date')
     ax.set_ylabel('Distance From Earthquake (km)')
   else:
-    sns.lineplot(data=rtDF,x='Years Before Earthquake',y='Distance',hue='Diffusivity',ax=ax)
-    sns.scatterplot(data=wellDF,x='YearsInjectingToEarthquake', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "May Include": "o", "Must Include": "o","0bbl Disposal": "X"},hue='Selection',palette={"Exclude": "k", "May Include": "b","Must Include":"r", "0bbl Disposal": "g"},legend='auto',sizes=(30,300), ax=ax)
+    sns.lineplot(data=rtDF,x='Date',y='Distance',hue='Diffusivity',ax=ax)
+    sns.scatterplot(data=wellDF,x='Date', y='Distances',size='MMBBL',style='Selection',markers={"Exclude": "s", "May Include": "o", "Must Include": "o","0bbl Disposal": "X"},hue='Selection',palette={"Exclude": "k", "May Include": "b","Must Include":"r", "0bbl Disposal": "g"},legend='auto',sizes=(30,300), ax=ax)
     #colors = { '0bbl Disposal': 'green', 'Could Include': 'blue', 'Exclude': 'black','Must Include': 'red'}
-    ax.set_xlabel('Years Before Earthquake')
+    ax.set_xlabel('Date')
     ax.set_ylabel('Distance From Earthquake (km)')
   if zoom: ax.set_ylim((0,max(rtDF['Distance'])))
   sns.move_legend(ax, "upper left")
-  plt.xlim((minYear,0))
+  plt.xlim((pd.to_datetime('01-01-'+str(minYear)),maxDate))
   return
 
 def rMinusTPlot(ppWellDF,peWellDF,minYear=-40,sizeTuple=(10,300),title='Well Selection'):
@@ -399,39 +400,49 @@ def disaggregationPlotPP(smallPPDF,smallWellList,title,verbose=0):
   if verbose>0: print(' disaggregationPlotPP: figure height is ',figureHeight)
   fig, ax = plt.subplots(figsize=(12,figureHeight))
   sns.stripplot(data=smallPPDF,x='Pressures',y='Name',hue='Order',palette='viridis',dodge=False,jitter=True,alpha=0.5,linewidth=0,edgecolor='white',ax=ax,size=5, order=smallWellList)
-  ax.set_title('Pressure Ranges',fontsize=15)
+  ax.set_title(title,fontsize=15)
   ax.set_xlabel('Pressure Increase (PSI)',fontsize=15)
   ax.set_ylabel('Well Name',fontsize=15)
   plt.show()
 
-def totalPressurePlot(totalPPQuantilesDF,startDate=None):
+def totalPressurePlot(totalPPQuantilesDF,eq=None,startDate=None):
   DF=totalPPQuantilesDF
   DF['Date']=pd.to_datetime(DF['Date'])
   f, ax = plt.subplots(figsize=(18,4))
-  if startDate==None:
+  if startDate is None:
     sns.lineplot(data=DF, x="Date", y="DeltaPressure",hue="Percentile",palette="icefire",ax=ax)
   else:
     sns.lineplot(data=DF[DF['Date']>=pd.to_datetime(startDate)], x="Date", y="DeltaPressure",hue="Percentile",palette="icefire",ax=ax)
+  if eq is None:
+    pass
+  else:
+    # Add dotted line at EQ time
+    plt.axvline(eq['Origin Date'], color='black', linestyle='--',label='Event')
   sns.diverging_palette(250, 30, l=65, center="dark", as_cmap=True)
   ax.set(title="Total Pressure from Relevant Wells")
   ax.set(ylabel="Total Additional Pressure (PSI)")
   plt.show()
 
-def totalPressureSpaghettiPlot(totalPPSpaghettiDF,startDate=None):
+def totalPressureSpaghettiPlot(totalPPSpaghettiDF,eq=None,startDate=None):
   # To-do in future - add diffusivity to DF and make hue based on that.
   DF=totalPPSpaghettiDF
   DF['Date']=pd.to_datetime(DF['Date'])
   f, ax = plt.subplots(figsize=(18,4))
-  if startDate==None:
+  if startDate is None:
     sns.lineplot(data=DF, x="Date", y="DeltaPressure",hue="Realization",alpha=0.1,palette="icefire",ax=ax)
   else:
     sns.lineplot(data=DF[DF['Date']>=pd.to_datetime(startDate)], x="Date", y="DeltaPressure",hue="Diffusivity",alpha=0.1,palette="icefire",ax=ax)
+  if eq is None:
+    pass
+  else:
+    # Add dotted line at EQ time
+    plt.axvline(eq['Origin Date'], color='black', linestyle='--',label='Event')
   sns.diverging_palette(250, 30, l=65, center="dark", as_cmap=True)
   ax.set(title="Total Pressure from Relevant Wells")
   ax.set(ylabel="Total Additional Pressure (PSI)")
   plt.show()
 
-def disposalAndPressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize=(20,3),forecast=False,verbose=0):
+def disposalAndPressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize=(20,3),forecast=False,eq=None,verbose=0):
   wellInjDF=oneWellInjDF
   wellQuantilesPPDF=oneWellQuantilesPPDF
   wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
@@ -442,12 +453,15 @@ def disposalAndPressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize
   wellDistance=wellInfoDF['Distances'].iloc[0]
   fig,axis=plt.subplots(figsize=figSize)
   if forecast:
-    sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, hue='Type' ,marker='.')
+    sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, hue='Type' ,palette=['green', 'purple'],marker='o')
     # Need to set hue of injection to be green and purple, not orange
-    # Add dotted line at EQ time
-    plt.axvline(0, color='black', linestyle='--',label='Event')
   else:
     sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, color='green',marker='.')
+  if eq is None:
+    pass
+  else:
+    # Add dotted line at EQ time
+    plt.axvline(eq['Origin Date'], color='black', linestyle='--',label='Event')
   axis.set_ylabel('Injection (BPD)')
   ax2=axis.twinx()
   sns.lineplot(wellQuantilesPPWinDF,x="Date",y="DeltaPressure",hue="Percentile",palette="icefire",ax=ax2)
@@ -457,7 +471,7 @@ def disposalAndPressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize
   return
 
 # Need disposalAndSpaghettiPlot
-def disposalAndSpaghettiPlot(wellInfoDF,oneWellInjDF,oneWellSpaghettiPPDF,figSize=(20,3),forecast=False,verbose=0):
+def disposalAndSpaghettiPlot(wellInfoDF,oneWellInjDF,oneWellSpaghettiPPDF,figSize=(20,3),forecast=False,eq=None,verbose=0):
   wellInjDF=oneWellInjDF
   wellSpaghettiPPDF=oneWellSpaghettiPPDF
   wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
@@ -474,6 +488,11 @@ def disposalAndSpaghettiPlot(wellInfoDF,oneWellInjDF,oneWellSpaghettiPPDF,figSiz
     plt.axvline(0, color='black', linestyle='--',label='Event')
   else:
     sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, color='green',marker='.')
+  if eq is None:
+    pass
+  else:
+    # Add dotted line at EQ time
+    plt.axvline(eq['Origin Date'], color='black', linestyle='--',label='Event')
   axis.set_ylabel('Injection (BPD)')
   ax2=axis.twinx()
   sns.lineplot(wellSpaghettiPPWinDF,x="Date",y="DeltaPressure",hue="Diffusivity",alpha=0.1,palette="icefire",ax=ax2)
@@ -483,7 +502,7 @@ def disposalAndSpaghettiPlot(wellInfoDF,oneWellInjDF,oneWellSpaghettiPPDF,figSiz
   return
 
 # Need spaghettiPlot
-def spaghettiPlot(wellInfoDF,oneWellInjDF,oneWellSpaghettiPPDF,figSize=(20,3),forecast=False,verbose=0):
+def spaghettiPlot(wellInfoDF,oneWellInjDF,oneWellSpaghettiPPDF,figSize=(20,3),forecast=False,eq=None,verbose=0):
   wellInjDF=oneWellInjDF
   wellSpaghettiPPDF=oneWellSpaghettiPPDF
   wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
@@ -495,12 +514,17 @@ def spaghettiPlot(wellInfoDF,oneWellInjDF,oneWellSpaghettiPPDF,figSize=(20,3),fo
   fig,axis=plt.subplots(figsize=figSize)
   #if forecast:     # add dotted line at EQ time
   sns.lineplot(wellSpaghettiPPWinDF,x="Date",y="DeltaPressure",hue="Diffusivity",alpha=0.1,palette="icefire",ax=axis)
+  if eq is None:
+    pass
+  else:
+    # Add dotted line at EQ time
+    plt.axvline(eq['Origin Date'], color='black', linestyle='--',label='Event')
   axis.set_ylabel('Additional Pressure (PSI) @ '+str(np.round(wellDistance,decimals=1))+' km')
   axis.set(title="Pressure Models for "+wellName)
   plt.show()
   return
 
-def pressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize=(20,3),forecast=False,verbose=0):
+def pressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize=(20,3),forecast=False,eq=None,verbose=0):
   wellInjDF=oneWellInjDF
   wellQuantilesPPDF=oneWellQuantilesPPDF
   wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
@@ -512,12 +536,17 @@ def pressurePlot(wellInfoDF,oneWellInjDF,oneWellQuantilesPPDF,figSize=(20,3),for
   fig,axis=plt.subplots(figsize=figSize)
   #if forecast:     # add dotted line at EQ time
   sns.lineplot(wellQuantilesPPWinDF,x="Date",y="DeltaPressure",hue="Percentile",palette="icefire",ax=axis)
+  if eq is None:
+    pass
+  else:
+    # Add dotted line at EQ time
+    plt.axvline(eq['Origin Date'], color='black', linestyle='--',label='Event')
   axis.set_ylabel('Additional Pressure (PSI) @ '+str(np.round(wellDistance,decimals=1))+' km')
   axis.set(title="Pressure Quantiles for "+wellName)
   plt.show()
   return
 
-def disposalPlot(wellInfoDF,oneWellInjDF,figSize=(20,3),forecast=False,verbose=0):
+def disposalPlot(wellInfoDF,oneWellInjDF,figSize=(20,3),forecast=False,eq=None,verbose=0):
   wellInjDF=oneWellInjDF
   wellInjDF['Date']=pd.to_datetime(wellInjDF['Date'])
   wellID=wellInfoDF['ID'].iloc[0]
@@ -528,6 +557,11 @@ def disposalPlot(wellInfoDF,oneWellInjDF,figSize=(20,3),forecast=False,verbose=0
     sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, hue='Type' ,marker='.')
   else:
     sns.lineplot(x='Date', y='BPD', data=wellInjDF, ax=axis, color='green',marker='.')
+  if eq is None:
+    pass
+  else:
+    # Add dotted line at EQ time
+    plt.axvline(eq['Origin Date'], color='black', linestyle='--',label='Event')
   axis.set_ylabel('Injection (BPD)')
   axis.set(title="Injection History for "+wellName)
   plt.show()
