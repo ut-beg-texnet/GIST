@@ -555,7 +555,7 @@ class gistMC:
       #####################
       # Read in well file #
       #####################
-      self.wellDF=pd.read_csv(wellFile)
+      self.wellDF=pd.read_csv(self.wellFile)
       self.nw=self.wellDF.shape[0]
       # Check sanity of injection file
       injWellCount=pd.read_csv(self.injFile,usecols=['ID']).nunique()
@@ -612,6 +612,8 @@ class gistMC:
     ################################################################################
     # Outputs:                                        #
     #    consideredWells: dataframe of selected wells #
+    #                     this includes wells in forecast
+    #                     use 'encompassingDay'>0 to filter
     #       ignoredWells: dataframe of ignored wells  #
     #              injDF: dataframe of injection data #
     ###################################################
@@ -619,6 +621,7 @@ class gistMC:
     #     Runs after init, addWells #
     #################################
     """
+    #####################
     # Initialize arrays #
     #####################
     wellDistances=np.zeros([self.nw])
@@ -642,7 +645,9 @@ class gistMC:
       #####################################################################
       # Get number of days from start of injection to the earthquake date #
       #####################################################################
+      if verbose>1: print(' gistMC.findWells: iw=',iw,' of ',self.nw,' start date is ',self.wellDF['StartDate'][iw])
       injectionDays=(pd.to_datetime(eq['Origin Date'])-pd.to_datetime(self.wellDF['StartDate'][iw])).days
+      if verbose>1: print(' gistMC.findWells injectionDays',injectionDays)
       wellDurations[iw]=injectionDays/365.25
       ###########################################################################
       # Find diffusion distance for each well at that date                      #
@@ -673,7 +678,7 @@ class gistMC:
       injWellDaysToEpicenter=(1000000.*wellDistances[iw]*wellDistances[iw] /(4. * np.pi * self.diffPPMax))/(24*60*60)
       ##############################################################
       # Now add that number of days to the well time to get a date #
-      # This is overflowing pd datetime.
+      # This is overflowing pd datetime, so clip things at 100 years #
       ##############################################################
       if injWellDaysToEpicenter>36500:
         injWellDateAtEpicenter=pd.to_datetime(self.wellDF['StartDate'][iw]) + pd.DateOffset(days=36500)
@@ -683,7 +688,7 @@ class gistMC:
       # Then subtract off the date of the earthquake to #
       # get a number of days relative to the earthquake #
       ###################################################
-      encompassingDays[iw]=(pd.to_datetime(eq['Origin Date'])-injWellDateAtEpicenter).days
+      encompassingDays[iw]=(injWellDateAtEpicenter-pd.to_datetime(eq['Origin Date'])).days
       #############################################################
       # Compute encompassing diffusivity - the diffusivity needed #
       # for this well to have been included in the analysis.      #
@@ -712,28 +717,34 @@ class gistMC:
     # To-do- Change this distance criteria to a time # 
     # criteria where we include responseYears        #
     ################################################## 
-    consideredWellsDF=self.wellDF[diffusionDistances>(wellDistances-eqUncert)].reset_index(drop=True)
-    consideredWellsDF['Distances']=wellDistances[diffusionDistances>(wellDistances-eqUncert)]
-    consideredWellsDF['DXs']=dxs[diffusionDistances>(wellDistances-eqUncert)]
-    consideredWellsDF['DYs']=dys[diffusionDistances>(wellDistances-eqUncert)]
-    consideredWellsDF['DDRatio']=ddRatios[diffusionDistances>(wellDistances-eqUncert)]
+    # First generate mask - based on encompassingDays but could be distance
+    consideredMask = encompassingDays<(responseYears*365.25)
+    if verbose>0: print('gistMC.findWells:  Selecting ',sum(consideredMask),' and excluding ',sum(~consideredMask),' wells')
+    # Prior mask
+    # diffusionDistances>(wellDistances-eqUncert)
+    consideredWellsDF=self.wellDF[consideredMask].reset_index(drop=True)
+
+    consideredWellsDF['Distances']=wellDistances[consideredMask]
+    consideredWellsDF['DXs']=dxs[consideredMask]
+    consideredWellsDF['DYs']=dys[consideredMask]
+    consideredWellsDF['DDRatio']=ddRatios[consideredMask]
     # Add a column with the time injecting prior to the earthquake
-    consideredWellsDF['YearsInjecting']=wellDurations[diffusionDistances>(wellDistances-eqUncert)]
-    consideredWellsDF['EncompassingDay']=encompassingDays[diffusionDistances>(wellDistances-eqUncert)]
-    consideredWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[diffusionDistances>(wellDistances-eqUncert)]
+    consideredWellsDF['YearsInjecting']=wellDurations[consideredMask]
+    consideredWellsDF['EncompassingDay']=encompassingDays[consideredMask]
+    consideredWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[consideredMask]
     consideredWellsDF['EventID']=eq['EventID']
     ################################################################################
     # Create dataframe of wells that are ignored - this needs to be output as a QC #
     ################################################################################
-    excludedWellsDF=self.wellDF[diffusionDistances<(wellDistances-eqUncert)].reset_index(drop=True)
-    excludedWellsDF['Distances']=wellDistances[diffusionDistances<(wellDistances-eqUncert)]
-    excludedWellsDF['DXs']=dxs[diffusionDistances<(wellDistances-eqUncert)]
-    excludedWellsDF['DYs']=dys[diffusionDistances<(wellDistances-eqUncert)]
-    excludedWellsDF['DDRatio']=ddRatios[diffusionDistances<(wellDistances-eqUncert)]
+    excludedWellsDF=self.wellDF[~consideredMask].reset_index(drop=True)
+    excludedWellsDF['Distances']=wellDistances[~consideredMask]
+    excludedWellsDF['DXs']=dxs[~consideredMask]
+    excludedWellsDF['DYs']=dys[~consideredMask]
+    excludedWellsDF['DDRatio']=ddRatios[~consideredMask]
     # Add a column with the time injecting prior to the earthquake
-    excludedWellsDF['YearsInjecting']=wellDurations[diffusionDistances<(wellDistances-eqUncert)]
-    excludedWellsDF['EncompassingDay']=encompassingDays[diffusionDistances<(wellDistances-eqUncert)]
-    excludedWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[diffusionDistances<(wellDistances-eqUncert)]
+    excludedWellsDF['YearsInjecting']=wellDurations[~consideredMask]
+    excludedWellsDF['EncompassingDay']=encompassingDays[~consideredMask]
+    excludedWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[~consideredMask]
     excludedWellsDF['EventID']=eq['EventID']
     ##########################################################################
     # Step 3: Pull injection data from injection file that matches well list #
@@ -834,6 +845,7 @@ class gistMC:
     #######################################################
     # Post number of wells considered for this earthquake #
     #######################################################
+
     nwC=consideredWells.shape[0]
     if verbose>0: print(" gistMC.runPressureScenarios: Number of wells considered: ",nwC)
     #################################
@@ -927,7 +939,138 @@ class gistMC:
     ####################
     return scenarios
 
-  
+  def runPressureScenariosVectorized(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
+    """
+    ###########################################
+    # Run all Monte Carlo pore pressure cases #
+    ###########################################
+    # Inputs: ##############################################
+    #                 eq: earthquake dictionary            #
+    #    consideredWells: dataframe of selected wells      #
+    #              injDF: dataframe of injection for wells #
+    #################################################################
+    # Outputs:  scenarios: dataframe of scenarios split by operator #
+    # Assumptions: ##################################################
+    #     Runs after initMCPP, findWells                            #
+    #     Faster than runPressureScenariosTimeSeries but only works #
+    #     at the earthquake time                                    #
+    #################################################################
+    """
+    if SVec is None:
+      SVec=self.SVec
+      nReal=self.nReal
+    else:
+      SVec=SVec
+      nReal=len(SVec)
+    if TVec is None:
+      TVec=self.TVec
+    else:
+      TVec=TVec
+    if rhoVec is None:
+      rhoVec=self.rhoVec
+    else:
+      rhoVec=rhoVec
+    ######################################################
+    # Convert earthquake origin date to days since epoch #
+    ######################################################
+    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
+    ########################################################################
+    # Prep injection data to get arrays needed for vectorized calculations #
+    ########################################################################
+    (wellIDs,nwC,dayVec,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,f)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None)
+    if verbose>1: print('runPressureScenariosVectorized time axis information - nt:',nt,'; ot:',ot,'; dt:',self.injDT,' earthquake index: ',ieq)
+    if verbose>1: print('runPressureScenariosVectorized: f:',f)
+    ###########################################
+    # Convert bpdArray to Q - m3/s [nt+1,nwC] #
+    ###########################################
+    QArray=1.84013e-6 *bpdArray
+    #######################################################
+    # Take a derivative of QArray along the time (0) axis #
+    # This array now has one fewer time samples [nwC,nt]#
+    #######################################################
+    dQdtArray=np.diff(QArray,axis=1)
+    ##############################################
+    # Compute r squared for all wells [nwC] #
+    ##############################################
+    r2=wellDistances*wellDistances
+    if verbose>1: print('runPressureScenariosTimeSeries r2 min/max: ',min(r2),max(r2))
+    #####################################################
+    # Compute property-related part of ppp [nReal] #
+    #####################################################
+    TSOver4TT=self.TVec*self.SVec/(4.*self.TVec*self.TVec)
+    if verbose>1: print('runPressureScenariosTimeSeries TSOver4TT min/max: ',min(TSOver4TT.flatten()),max(TSOver4TT.flatten()))
+    #######################################################################
+    # Compute outer product of r2 and TSOver4TT to get ppp [nwC,nReal] #
+    #######################################################################
+    ppp=np.outer(r2,TSOver4TT)
+    if verbose>1: print('runPressureScenariosTimeSeries ppp min/max: ',min(ppp.flatten()),max(ppp.flatten()))
+    #############################
+    # Compute gRhoOverT [nReal] #
+    #############################
+    gRhoOverT=self.rhoVec*self.g/(4.*np.pi*self.TVec)
+    ########################
+    # Initialize output dP #
+    ########################
+    ######################################
+    # Convert injDT from days to seconds #
+    ###################################### 
+    dts=self.injDT*24*60*60
+    #######################################################################################
+    # Create a vector of injection durations starting with all time and ending with dt.   #
+    # Variable-injection Theis modeling sums a shortening series of boxcars with          #
+    # different heights corresponding to changes in injection rates over time - dQdtArray #
+    #######################################################################################
+    durations=np.max(secArray)-secArray+dts
+    if verbose>1: print('runPressureScenariosTimeSeries durations min/max: ',min(durations),max(durations))
+    #######################################################################################
+    # This has the well function in it - sc.exp1. Moving this out of the loop speeds up   #
+    # computation vs. FSP for a time series by O(nt). epp is [nwC,nReal,nt].              #
+    # We reuse parts of this array in the summation as we assume that dt is fixed.        #
+    # I'm sure that there are better ways to broadcast these shapes but I don't know how! #
+    #######################################################################################
+    epp=sc.exp1(ppp.reshape((nwC,self.nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(self.nReal,1))
+    if verbose>1: print('runPressureScenariosTimeSeries epp min/max: ',min(epp.flatten()),max(epp.flatten()))
+    ##########################
+    # Loop over output time: #
+    ##########################
+    #########################################################
+    # Get output of well function x the change in injection #
+    # We take the last 'it' values of epp that is a series  #
+    # of boxcars ranging from it*dt to dt and dot product   #
+    # it with the first 'it' values of the dQdtArray to get #
+    # the time series output at 'it'. This is really a      #
+    # convolution of epp and dQdtArray on the last axis and #
+    # there should be a way to make this more efficient!    #
+    # scipy.ndimage.convolve1d(dQdtarray.reshape((nwC,1,it)).repeat(self.nReal,1), epp, axis=-1, mode='constant')
+    #########################################################
+    timeStepsSum1=np.sum(epp[:,:,-ieq:] * dQdtArray[:,:ieq].reshape((nwC,1,ieq)).repeat(self.nReal,1),axis=2)
+    timeStepsSum2=np.sum(epp[:,:,-(ieq+1):] * dQdtArray[:,:ieq+1].reshape((nwC,1,ieq+1)).repeat(self.nReal,1),axis=2)
+    ########################################################################
+    # Multiply the sum of the time steps with gRhoOverT and convert to PSI #
+    # dP is the change in pressure from the first time step [nw,nReal,nt]  #
+    ########################################################################
+    dP1=timeStepsSum1 * gRhoOverT.reshape((1,self.nReal)).repeat(nwC,0) / 6894.76
+    dP2=timeStepsSum2 * gRhoOverT.reshape((1,self.nReal)).repeat(nwC,0) / 6894.76
+    ###################################################
+    # Linear interpolation between the two time steps #
+    # bounding the EQ time dPatEQ [nw,nReal]          #
+    ###################################################
+    dPatEQ=((1.-f)*dP1)+(f*dP2)
+    ###########################################################
+    # Sum over wells to get total Pressure at EQ time [nReal] #
+    ###########################################################
+    totalPressureAtEQ=np.sum(dPatEQ,axis=0,keepdims=True)
+    #########################################################
+    # Calculate percentages for each realization [nw,nReal] #
+    #########################################################
+    percentages=100.* dPatEQ / totalPressureAtEQ.repeat(nwC,0)
+    ##########################################
+    # Get dataframe of output scenarios from #
+    # input numpy arrays and well dataframe  #
+    ##########################################
+    scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
+    return scenarioDF
+
   def runPressureScenariosTimeSeries(self,eq,consideredWells,injDF,verbose=0):
     """
     ###############################################################################
@@ -2956,7 +3099,7 @@ def saveTimeSeriesPressures(inNP,inWellIDs,filePrefix,threshold,verbose=0):
 # Functions to prep data for plotting #
 #######################################
 
-def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False,future=False,verbose=0):
+def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,eq,clipYear=False,futureYear=0.,verbose=0):
   """
   prepRTPlot - calculates diffusivity curves and categorizes wells for analysis
 
@@ -2965,8 +3108,10 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False,fut
             ignoredWellDF  - output of findWells, same columns
             minYear        - Extent to calculate diffusion curve for
                              optionally what to clip early dates to
+                             string
             diffRange      - tuple of minimum and maximum diffusivity
                              for curves and categorization
+            eq             - dataframe with earthquake information
             clipYear       - boolean, if true, clip all wells to minYear
             future         - boolean, if true, look for Added column and include that
   
@@ -2979,11 +3124,15 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False,fut
   Both outputs get input to rMinusTPlotPP - which plots wells and selection criteria
 
   """
+  minYearFloat=(pd.to_datetime(str(minYear))-pd.to_datetime(eq['Origin Date'])).days / 365.25
+  if verbose>0: print(' prepRTPlot: years before earthquake to plot:',minYearFloat)
   sWells=selectedWellDF.copy()
   sWells['Selection']='May Include'
+  if verbose>0: print(' prepRTPlot: # of must include wells :',sum(sWells['EncompassingDiffusivity']<diffRange[0]))
   sWells.loc[sWells['EncompassingDiffusivity']<diffRange[0],'Selection']='Must Include'
-  if future:
-    sWells.loc[sWells['Added']==True,'Selection']='Include in Forecast'
+  if verbose>0: print(' prepRTPlot: # of wells to add to forecast :',sum(sWells['EncompassingDay']>0.))
+  sWells.loc[sWells['EncompassingDay']>0.,'Selection']='Include in Forecast'
+  if verbose>0: print(' prepRTPlot: # of wells with 0 BBL disposal :',sum(sWells['TotalBBL']==0.))
   sWells.loc[sWells['TotalBBL']==0.,'Selection']='0bbl Disposal'
   iWells=ignoredWellDF.copy()
   iWells['Selection']='Exclude'
@@ -2991,12 +3140,14 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False,fut
   wellDF=pd.concat([sWells,iWells],ignore_index=True)
   wellDF['MMBBL']=wellDF['TotalBBL']/1000000.
   wellDF['YearsInjectingToEarthquake']=-wellDF['YearsInjecting']
+  wellDF['Date']=pd.to_datetime(wellDF['StartDate'])
   if clipYear:
     wellDF['Clipped']=False
-    wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYear,'YearsInjectingToEarthquake']=minYear
-    wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYear,'Clipped']=True
+    wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'YearsInjectingToEarthquake']=minYearFloat
+    wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'Date']=pd.to_datetime(eq['Origin Date'].dt.year+minYearFloat)
+    wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'Clipped']=True
   # Do I need to create a dashed line in the r minus t plot?
-  time = np.linspace(minYear,0,500)
+  time = np.linspace(minYearFloat,0,500)
   timeSec = -time * 365 * 24 * 60 * 60
   rMin= np.sqrt(4.* np.pi * timeSec * diffRange[0])/1000.
   rMax= np.sqrt(4.* np.pi * timeSec * diffRange[1])/1000.
@@ -3005,6 +3156,7 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,clipYear=False,fut
   d=np.concatenate([np.ones(len(rMin))*diffRange[0],np.ones(len(rMax))*diffRange[1]])
   label=np.concatenate([['Minimum',]*len(rMin),['Maximum',] * len(rMax)])
   rtDF = pd.DataFrame(data={'Distance':r,'d':d,'Years Before Earthquake':t,'Diffusivity':label})
+  rtDF['Date']=pd.to_datetime(eq['Origin Date'])+(365.25*rtDF['Years Before Earthquake']).astype('timedelta64[D]')
   return rtDF,wellDF
 
 def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
@@ -3333,14 +3485,15 @@ def extendDisposal(injDF,startDate,endDate,rateDict,dDays=10,epoch=pd.to_datetim
   # Generate future time series for each well #
   # Here is where the input well rates come into play #
   #####################################################
-  futureDays=np.arange(lastDay+dDay,endDay+dDays,float(dDays))
+  futureDays=np.arange(lastDay+dDays,endDay+dDays,float(dDays))
   futureDates=[epoch+pd.to_timedelta(d,unit='D') for d in futureDays]
   futureInjDF=pd.DataFrame(columns=['ID','Days','BPD','Date','Type'])
-  if verbose>0: print(' gist.extendDisposal - future time horizon: ',lastDay+dDay,endDay+dDays,float(dDays))
+  if verbose>0: print(' gist.extendDisposal - future time horizon: ',lastDay+dDays,endDay+dDays,float(dDays))
   #####################
   # Get list of wells #
   #####################
-  wellIDList=injDF['ID'].unique().to_list()
+  wellIDList=injDF['ID'].unique()
+  if verbose>0: print(' extendDisposal - wellIDList: ',wellIDList)
   ######################################
   # Loop over all wells in input injDF #
   ######################################
