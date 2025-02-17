@@ -1,10 +1,13 @@
+from ast import Dict
+from email import message
 import json
+
 import os
-from typing import final
 
 import pandas as pd
 
 from .Constants import *
+from .Message import Message
 
 class TexNetWebToolLaunchHelper(object):
     """description of class"""
@@ -14,6 +17,8 @@ class TexNetWebToolLaunchHelper(object):
     _origArgsData = None
     _resultsFilePath = None
     _argsData = None
+    _success = True
+    _messages = []
 
     @property
     def scratchPath(self):
@@ -61,13 +66,13 @@ class TexNetWebToolLaunchHelper(object):
                 step = self._origArgsData["SessionState"]["StepState"][stepIndex]
                 
                 for param in step["InputParameterStates"]:
-                    if param["processStepParameterName"] == paramName:
+                    if param["ProcessStepParameterName"] == paramName:
                         ret = param
                         break
 
                 if ret == None:
                     for param2 in step["OutputParameterStates"]:
-                        if param2["processStepParameterName"] == paramName:
+                        if param2["ProcessStepParameterName"] == paramName:
                             ret = param2
                             break
             except:
@@ -82,17 +87,17 @@ class TexNetWebToolLaunchHelper(object):
         
         param = self.getParameterStateWithStepIndexAndParamName(stepIndex, paramName)
         
-        if param != None and param["value"] != None:
+        if param != None and param["Value"] != None:
             
             #For each 
-            if param["dataType"] == PARAMETER_TYPE_INT:
-                ret = int(param["value"])
-            elif param["dataType"] == PARAMETER_TYPE_FLOAT:
-                ret = float(param["value"])
-            elif param["dataType"] == PARAMETER_TYPE_BOOLEAN:
-                ret = bool(param["value"])
+            if param["DataType"] == PARAMETER_TYPE_INT:
+                ret = int(param["Value"])
+            elif param["DataType"] == PARAMETER_TYPE_FLOAT:
+                ret = float(param["Value"])
+            elif param["DataType"] == PARAMETER_TYPE_BOOLEAN:
+                ret = bool(param["Value"])
             else:
-                ret = param["value"]
+                ret = param["Value"]
 
         return ret
 
@@ -124,10 +129,10 @@ class TexNetWebToolLaunchHelper(object):
         param = self.getParameterStateWithStepIndexAndParamName(stepIndex, paramName)
         
         if param != None:
-            if param["dataType"] == PARAMETER_TYPE_USER_DATASET_ROW:
-                param["value"] = value
+            if param["DataType"] == PARAMETER_TYPE_USER_DATASET_ROW:
+                param["Value"] = value
             else:
-                param["value"] = str(value)
+                param["Value"] = str(value)
         else:
             raise Exception("Parameter was not found.")
         
@@ -169,11 +174,31 @@ class TexNetWebToolLaunchHelper(object):
         
         origArgsData = self._origArgsData
 
-        sResultsData = json.dumps(self._origArgsData)
+        sResultsData = json.dumps(origArgsData, sort_keys=True, indent=4)
         
         outputPath = os.path.join(self.scratchPath, "results.json")
 
         with open(outputPath, "w") as fh:
             fh.write(sResultsData)
+            
+    def setSuccessForStepIndex(self, stepIndex, newSuccessState):
+        step = self._origArgsData["SessionState"]["StepState"][stepIndex]
+        
+        step["Success"] = newSuccessState
+            
+    def addMessageWithStepIndex(self, stepIndex, messageContent, messageLevel):
+        
+        if self._origArgsData != None and len(self._origArgsData["SessionState"]["StepState"]) > stepIndex:
+            try:
+                step = self._origArgsData["SessionState"]["StepState"][stepIndex]
+
+                msg = {}
+                msg["MessageContent"] = messageContent
+                msg["MessageLevel"] = messageLevel
+                
+                step["Messages"].append(msg)
+            except ex:
+                pass
+        
             
         

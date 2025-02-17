@@ -11,4 +11,8 @@ ARGS_FILE_NAME = "args.json"
 
 RESULTS_FILE_NAME = "results.json"
 
+MESSAGE_LEVEL_INFO = 0
+MESSAGE_LEVEL_WARNING = 1
+MESSAGE_LEVEL_ERROR = 2
+
 from .TexNetWebToolLaunchHelper import TexNetWebToolLaunchHelper
