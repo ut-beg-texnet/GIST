@@ -30,31 +30,28 @@ def step2(input):
             "Origin Date": "2024-07-27",
             "EventID": "texnet2024oqfb"
     }
-    considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq,PE=False,verbose=2)
+    considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq,PE=False)
 
     # r-t plot combination of considered well and excluded wells df reference plots.py
-    # smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, -40, [0.1, 2], True)
-    
-    considered_wells_df.to_csv('consideredWells.csv', index=False)
-    excluded_wells_df.to_csv('excludedWells.csv', index=False)
+    smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, 1980, [0.1, 2], eq, True)
 
     # disaggregationPlotDF = prepDisaggregationPlot(smallPPDF, smallWellList)
 
-    return considered_wells_df
+    return smallPPDF, smallWellList
 
 
-# scratchPath = sys.argv[1]
+scratchPath = sys.argv[1]
 
 # #instantiate the helper
-# helper = TexNetWebToolLaunchHelper(scratchPath)
+helper = TexNetWebToolLaunchHelper(scratchPath)
 
-# #Get the args data out of it.
-# argsData = helper.argsData
-# #getParameterValueWithStepIndexAndParamName
-# realizationCount = helper.getParameterValueWithStepIndexAndParamName(1,"realizationCount")
+#Get the args data out of it.
+argsData = helper.argsData
+#getParameterValueWithStepIndexAndParamName
+realizationCount = helper.getParameterValueWithStepIndexAndParamName(1,"realizationCount")
 # rho0_min = helper.getParameterValueWithStepIndexAndParamName(1,"rho0_min")
 # rho0_max = helper.getParameterValueWithStepIndexAndParamName(1,"rho0_max")
-# # print(f"test: {realizationCount} {rho0_min} {rho0_max}")
+# print(f"test: {realizationCount} {rho0_min} {rho0_max}")
 
 # input = {
 #     "realizationCount": realizationCount,
@@ -64,15 +61,15 @@ def step2(input):
 #     }
 # }
 input = {
-    "realizationCount": 50,
+    "realizationCount": realizationCount,
     "porePressureParams" : {}
 }
 
-considered_wells_df = step2(input)
+smallPPDF, smallWellList = step2(input)
 
-print(f"test: {considered_wells_df}")
+print(f"test: {smallPPDF} {smallWellList}")
 
-# helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
-# helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
 
-# helper.writeResultsFile()
+helper.writeResultsFile()
