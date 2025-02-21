@@ -3144,7 +3144,7 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,eq,clipYear=False,
   if clipYear:
     wellDF['Clipped']=False
     wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'YearsInjectingToEarthquake']=minYearFloat
-    wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'Date']=pd.to_datetime(pd.to_datetime(eq['Origin Date']).dt.year+minYearFloat)
+    wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'Date']=pd.to_datetime(pd.to_datetime(eq['Origin Date']).year+minYearFloat)
     wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'Clipped']=True
   # Do I need to create a dashed line in the r minus t plot?
   time = np.linspace(minYearFloat,0,500)
