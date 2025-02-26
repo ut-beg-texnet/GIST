@@ -50,8 +50,7 @@ def interpolate_colors(vals, min_val, max_val, color_list):
     # Convert RGB values back to hex
     return np.array([mcolors.to_hex(rgb) for rgb in interp_rgbs])
 
-
-def step2(input):
+def step5(input):
     # Initialize gistMC class
     gistMC_instance = gistMC()
     gistMC_instance.initPP()
@@ -113,14 +112,14 @@ formattedEarthquake = {
     "EventID": Earthquake.get("EventID")
 }
 
-realizationCount = helper.getParameterValueWithStepIndexAndParamName(1,"realizationCount")
-rho0 = helper.getParameterValueWithStepIndexAndParamName(1,"rho0")
-phi = helper.getParameterValueWithStepIndexAndParamName(1,"phi")
-nta = helper.getParameterValueWithStepIndexAndParamName(1,"nta")
-kMD = helper.getParameterValueWithStepIndexAndParamName(1,"kMD")
-h = helper.getParameterValueWithStepIndexAndParamName(1,"h")
-alphav = helper.getParameterValueWithStepIndexAndParamName(1,"alphav")
-beta = helper.getParameterValueWithStepIndexAndParamName(1,"beta")
+realizationCount = helper.getParameterValueWithStepIndexAndParamName(4,"realizationCount")
+rho0 = helper.getParameterValueWithStepIndexAndParamName(4,"rho0")
+phi = helper.getParameterValueWithStepIndexAndParamName(4,"phi")
+nta = helper.getParameterValueWithStepIndexAndParamName(4,"nta")
+kMD = helper.getParameterValueWithStepIndexAndParamName(4,"kMD")
+h = helper.getParameterValueWithStepIndexAndParamName(4,"h")
+alphav = helper.getParameterValueWithStepIndexAndParamName(4,"alphav")
+beta = helper.getParameterValueWithStepIndexAndParamName(4,"beta")
 
 input = {
     "realizationCount": realizationCount,
@@ -143,12 +142,12 @@ input = {
     "eq": formattedEarthquake
 }
 
-smallPPDF, smallWellList, disaggregationDF = step2(input)
+smallPPDF, smallWellList, disaggregationDF = step5(input)
 
 
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "disaggregationDF", disaggregationDF)
-# helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPQuantilesDF", totalPPQuantilesDF)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF", smallPPDF)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList", smallWellList)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF", disaggregationDF)
+# helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF", totalPPQuantilesDF)
 
 helper.writeResultsFile()
