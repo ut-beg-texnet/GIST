@@ -16,7 +16,7 @@ from gistMC import prepRTPlot
 from gistMC import prepDisaggregationPlot
 from gistMC import getWinWells
 from gistMC import summarizePPResults
-from gistMC import prepTotalPressureTimeSeriesPlot
+from gistMC import prepTotalPressureTimeSeriesQuantilesPlot
 
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
@@ -71,7 +71,7 @@ def step2(input):
     dPCutoff=0.5
     nWells=50
     filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,threshold=dPCutoff,nOrder=nWells)
-    disaggregationDF = prepDisaggregationPlot(filteredDF,orderedWellList,jitter=0.1)
+    disaggregationDF = prepDisaggregationPlot(filteredDF,orderedWellList,jitter=0.1, verbose=1)
     # update order column to force type int prevent upload failure
     disaggregationDF['Order'] = disaggregationDF['Order'].astype(int)
     min_order = disaggregationDF['Order'].min()
@@ -85,7 +85,7 @@ def step2(input):
     # time series plot
     # winWellsDF,winInjDF = getWinWells(filteredDF,currentWellsDF,inj_df)
     # scenarioTSRDF,dPTimeSeriesR,wellIDsR,dayVecR = gistMC_instance.runPressureScenariosTimeSeries(eq,winWellsDF,winInjDF, verbose=2)
-    # totalPPQuantilesDF = prepTotalPressureTimeSeriesPlot(dPTimeSeriesR,dayVecR,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'), )
+    # totalPPQuantilesDF = prepTotalPressureTimeSeriesQuantilesPlot(dPTimeSeriesR,dayVecR,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'), )
 
     return smallPPDF, smallWellList, disaggregationDF
 
