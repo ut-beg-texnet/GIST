@@ -222,11 +222,15 @@ class gistMC:
     # To-do - error checking - bounds of parameters, unphysical rock, etc. #
     ########################################################################
     return
-
+  
   def to_dict(self):
+    '''
+    to_dict: return dictionary of class variables
+    for webtools portal connections
+    '''
     #del self.randomFloats
     return self.__dict__
-  
+
   def initPE(self,mu_min=19e9,mu_max=21e9,
              nu_min=0.23,nu_max=0.25,
              nu_u_min=0.28,nu_u_max=0.32,
@@ -599,7 +603,7 @@ class gistMC:
     #and all injection has a well
     return
 
-  def findWells(self,eq,PE=False,responseYears=0.,verbose=0):
+  def findWells(self,eq,PE=False,responseYears=0.,endDate=None,verbose=0):
     """
     ###########################################################
     # Get subset of wells within contribution distance/time   #
@@ -608,7 +612,8 @@ class gistMC:
     #               eq: Earthquake dictionary - TexNet csv output                  #
     #               PE: if using poroelasticity, multiply diffusion distances by 6 #
     #    responseYears: Duration of response in years. Extend the time of the well #
-    #                   selection by this amount. NOT CURRENTLY USED               #
+    #                   selection by this amount.                #
+    #          endDate: if given, use this as the time for the selection           #
     ################################################################################
     # Outputs:                                        #
     #    consideredWells: dataframe of selected wells #
@@ -718,7 +723,12 @@ class gistMC:
     # criteria where we include responseYears        #
     ################################################## 
     # First generate mask - based on encompassingDays but could be distance
-    consideredMask = encompassingDays<(responseYears*365.25)
+    if endDate is None:
+      consideredMask = encompassingDays<(responseYears*365.25)
+    else:
+      responseDays=(pd.to_datetime(endDate)-pd.to_datetime(eq['Origin Date'])).days
+      consideredMask = encompassingDays<responseDays
+    # Now I need to generate one with an end Date
     if verbose>0: print('gistMC.findWells:  Selecting ',sum(consideredMask),' and excluding ',sum(~consideredMask),' wells')
     # Prior mask
     # diffusionDistances>(wellDistances-eqUncert)
@@ -770,7 +780,9 @@ class gistMC:
       injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
       # Collect injection data for unselected wells
       injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
-    # injDF['Date']=pd.to_datetime(injDF['Date'])
+    # Do we need this?
+    # Peter commented it out - Bill had it in
+    injDF['Date']=pd.to_datetime(injDF['Date'])
     ############################################################
     # Get the number of wells selected from the injection file #
     ############################################################
@@ -1089,7 +1101,7 @@ class gistMC:
     # Outputs:                                                                   #
     #        scenarioDF:       dataframe of pore pressure contribution scenarios #
     #                          with many columns at earthquake date              #
-    #        dP:               pressure time series at eq location               #
+    #        dP:               delta pressure time series at eq location         #
     #                          nwC x nReal is pretty big                         #
     #                          size(nwC x nReal x nt)                            #
     ##############################################################################
@@ -3136,7 +3148,8 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,eq,clipYear=False,
   sWells.loc[sWells['TotalBBL']==0.,'Selection']='0bbl Disposal'
   iWells=ignoredWellDF.copy()
   iWells['Selection']='Exclude'
-  iWells.loc[iWells['TotalBBL']==0.,'Selection']='0bbl Disposal'
+  # Commenting this out as it make the r-t plots look weird when we didn't download all of the injection data for all wells.
+  #iWells.loc[iWells['TotalBBL']==0.,'Selection']='0bbl Disposal'
   wellDF=pd.concat([sWells,iWells],ignore_index=True)
   wellDF['MMBBL']=wellDF['TotalBBL']/1000000.
   wellDF['YearsInjectingToEarthquake']=-wellDF['YearsInjecting']
@@ -3144,7 +3157,7 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,eq,clipYear=False,
   if clipYear:
     wellDF['Clipped']=False
     wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'YearsInjectingToEarthquake']=minYearFloat
-    wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'Date']=pd.to_datetime(pd.to_datetime(eq['Origin Date']).year+minYearFloat)
+    wellDF.loc[wellDF['Date']<pd.to_datetime(str(minYear)),'Date']=pd.to_datetime(pd.to_datetime(pd.to_datetime(str(minYear))))
     wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'Clipped']=True
   # Do I need to create a dashed line in the r minus t plot?
   time = np.linspace(minYearFloat,0,500)
@@ -3319,25 +3332,27 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
   PPSpaghettiDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
   #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
   # Calculate order ofdeltaPP for each value to get percentiles
-  deltaPPArgSort=np.argsort(deltaPP,axis=1)
-  deltaPPSorted=np.zeros(deltaPP.shape)
-  deltaPPOrder=np.zeros(deltaPP.shape)
-  deltaPPPercentile=np.zeros(deltaPP.shape)
+  #deltaPPArgSort=np.argsort(deltaPP,axis=1)
+  if verbose>1: print('getPerWellPressureTimeSeriesQuantiles - after argsort: ',nReal,nt,nw)
+  deltaPPSorted=np.zeros([nReal,nt])
+  deltaPPOrder=np.zeros([nReal,nt])
+  deltaPPPercentile=np.zeros([nReal,nt])
   ptiles_list=list(range(0,nReal))
   ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
   indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
   quantiles=[ptiles[i] for i in indices]
   if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - quantiles: ',quantiles)
   for iw in range(nw):
+    deltaPPArgSort=np.argsort(deltaPP[iw,:,:].reshape([nReal,nt]),axis=0)
     if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - well: ',iw,' of ',nw)
     for it in range(nt):
       for iR in range(nReal):
-        deltaPPSorted[iw,deltaPPArgSort[iw,iR,it],it]=deltaPP[iw,iR,it]
-        deltaPPPercentile[iw,deltaPPArgSort[iw,iR,it],it]=round(100.*iR/(nReal-1),1)
-        deltaPPOrder[iw,deltaPPArgSort[iw,iR,it],it]=iR
+        deltaPPSorted[deltaPPArgSort[iR,it],it]=deltaPP[iw,iR,it]
+        deltaPPPercentile[deltaPPArgSort[iR,it],it]=round(100.*iR/(nReal-1),1)
+        deltaPPOrder[deltaPPArgSort[iR,it],it]=iR
     # Now just extract dataframe for this well
-    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - array sizes: ',deltaPP[iw,:,:].shape,deltaPPPercentile[iw,:,:].shape,deltaPPOrder[iw,:,:].shape),np.tile(dayVec,nReal).shape,np.arange(nReal).repeat(nt).shape,np.repeat(wellIDs[iw],nReal*nt)
-    d={'DeltaPressure':deltaPP[iw,:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Order':deltaPPOrder[iw,:,:].flatten(),'Percentile':deltaPPPercentile[iw,:,:].flatten(),'WellID':np.repeat(wellIDs[iw],nReal*nt), 'Diffusivity':diffPPVec.repeat(nt)}
+    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - array sizes: ',deltaPP[iw,:,:].shape,deltaPPPercentile[:,:].shape,deltaPPOrder[:,:].shape),np.tile(dayVec,nReal).shape,np.arange(nReal).repeat(nt).shape,np.repeat(wellIDs[iw],nReal*nt)
+    d={'DeltaPressure':deltaPP[iw,:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Order':deltaPPOrder[:,:].flatten(),'Percentile':deltaPPPercentile[:,:].flatten(),'WellID':np.repeat(wellIDs[iw],nReal*nt), 'Diffusivity':diffPPVec.repeat(nt)}
     wellPPDF=pd.DataFrame(d)
     winWellPPDF=wellPPDF[wellPPDF['Percentile'].isin(quantiles)]
     PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
@@ -3346,6 +3361,71 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
   PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
   return PPQuantilesDF,PPSpaghettiDF
 
+def getPerWellPressureTimeSeriesQuantiles(deltaPP,dayVec,wellIDs,nQuantiles=11,epoch=pd.to_datetime('01-01-1970'),verbose=0):
+  '''
+  Generate input to a time series line plot from numpy array of time series pressures.
+  Inputs:
+    deltaPP    - output from runTimeSeries (nw, nReal, nt)
+    dayVec     - vector of length nt with days from start of epoch (1970)
+    wellIDs    - vector of integer well identifiers (nw)
+    nQuantiles - number of curves to generate evenly distributed around the number of 
+                 realizations, default 11. This should be odd to get the median.
+  Outputs:
+    PPQuantilesDF - dataframe with columns: Day,WellID,DeltaPressure,Percentile
+  '''
+  nReal=deltaPP.shape[1]
+  nt=deltaPP.shape[2]
+  nw=deltaPP.shape[0]
+  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - sizes: ',nReal,nt,nw)
+  PPQuantilesDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
+  #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
+  # Calculate order ofdeltaPP for each value to get percentiles
+  #deltaPPArgSort=np.argsort(deltaPP,axis=1)
+  if verbose>1: print('getPerWellPressureTimeSeriesQuantiles - after argsort: ',nReal,nt,nw)
+  deltaPPSorted=np.zeros([nReal,nt])
+  deltaPPOrder=np.zeros([nReal,nt])
+  deltaPPPercentile=np.zeros([nReal,nt])
+  ptiles_list=list(range(0,nReal))
+  ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
+  indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
+  quantiles=[ptiles[i] for i in indices]
+  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - quantiles: ',quantiles)
+  for iw in range(nw):
+    deltaPPArgSort=np.argsort(deltaPP[iw,:,:].reshape([nReal,nt]),axis=0)
+    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - well: ',iw,' of ',nw)
+    for it in range(nt):
+      for iR in range(nReal):
+        deltaPPSorted[deltaPPArgSort[iR,it],it]=deltaPP[iw,iR,it]
+        deltaPPPercentile[deltaPPArgSort[iR,it],it]=round(100.*iR/(nReal-1),1)
+        deltaPPOrder[deltaPPArgSort[iR,it],it]=iR
+    # Now just extract dataframe for this well
+    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - array sizes: ',deltaPP[iw,:,:].shape,deltaPPPercentile[:,:].shape,deltaPPOrder[:,:].shape),np.tile(dayVec,nReal).shape,np.arange(nReal).repeat(nt).shape,np.repeat(wellIDs[iw],nReal*nt)
+    d={'DeltaPressure':deltaPP[iw,:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Order':deltaPPOrder[:,:].flatten(),'Percentile':deltaPPPercentile[:,:].flatten(),'WellID':np.repeat(wellIDs[iw],nReal*nt)}
+    wellPPDF=pd.DataFrame(d)
+    winWellPPDF=wellPPDF[wellPPDF['Percentile'].isin(quantiles)]
+    PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
+  PPQuantilesDF['Date']=epoch+pd.to_timedelta(PPQuantilesDF['Days'],unit='d')
+  return PPQuantilesDF
+
+def getPerWellPressureTimeSeriesSpaghetti(deltaPP,dayVec,diffPPVec,wellIDs,epoch=pd.to_datetime('01-01-1970'),verbose=0):
+  '''
+  Generate input to a time series line plot from numpy array of time series pressures.
+  Inputs:
+    deltaPP    - output from runTimeSeries (nw, nReal, nt)
+    dayVec     - vector of length nt with days from start of epoch (1970)
+    diffPPVec  - vector of diffusivities for different realizations (nReal)
+    wellIDs    - vector of integer well identifiers (nw)
+  Outputs:
+    PPSpaghettiDF - dataframe with columns: Day,WellID,DeltaPressure,Realization,Diffusivity
+  '''
+  nReal=deltaPP.shape[1]
+  nt=deltaPP.shape[2]
+  nw=deltaPP.shape[0]
+  PPSpaghettiDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
+  PPSpaghettiDF=pd.DataFrame({'DeltaPressure':deltaPP[:,:,:].flatten(), 'Days':np.tile(dayVec,nw*nReal), 'Realization':np.tile(np.arange(nReal),nw).repeat(nt),'WellID':np.repeat(wellIDs,nReal*nt), 'Diffusivity':np.tile(diffPPVec,nw).repeat(nt)})
+  PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
+  return PPSpaghettiDF
+                             
 def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,injDF,wellNames,verbose=0):
   '''
   prepPressureAndDisposalTimeSeriesPlots - take output from getPerWellPressureTimeSeriesQuantiles
@@ -3384,7 +3464,7 @@ def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,i
     outPerWellDict[wellName]={'PPQuantiles': oneWellQuantilesPPWinDF, 'Spaghetti': oneWellSpaghettiPPWinDF, 'Disposal': oneWellInjDF, 'WellInfo': wellInfo}
   return outPerWellDict
 
-def prepTotalPressureTimeSeriesPlot(deltaPP,dayVec,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'),verbose=0):
+def prepTotalPressureTimeSeriesQuantilesPlot(deltaPP,dayVec,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'),verbose=0):
   '''
   Generate input to a time series line plot from numpy array of time series pressures.
   Inputs:
@@ -3532,4 +3612,156 @@ def extendDisposal(injDF,startDate,endDate,rateDict,dDays=10,epoch=pd.to_datetim
   pastInjDF['Type']='Original'
   forecastInjDF=pd.concat([pastInjDF,futureInjDF])
   return forecastInjDF
-  
+
+def checkWells(wellFile,boundsDictionary=None,verbose=0):
+  '''
+  checkWells: Subroutine to check disposal file for potential issues.
+
+  Inputs: 
+    wellFile - filename of wells, needs columns ID, PermittedMaxLiquidBPS, StartDate, SurfaceHoleLatitude,SurfaceHoleLongitude
+  Optional inputs:
+    boundsDictionary - min/max to check on input data. Default is:
+                      'ID': [0,999999999999],
+                      'PermittedMaxLiquidBPD': [0,199999.],
+                      'StartDate': [pd.to_datetime('1900-01-01'),pd.to_datetime('2050-12-31')],
+                      'SurfaceHoleLatitude': [-90.,90.],
+                      'SurfaceHoleLongitude': [-180.,180.]
+    verbose - level of output
+  Outputs:
+    wellDF      - well Dataframe
+    infoText    - text describing test results
+    warningText - warnings, could be empty. Code will run but results might be bad
+    errorText   - errors, could be empty. Code will not run.
+  '''
+  usedStringColumns=['APINumber','UICNumber','WellName']
+  #usedNumericColumns=['ID','PermittedMaxLiquidBPD','StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','Distances','YearsInjecting','EncompassingDay','TotalBBL']
+  usedNumericColumns=['ID','PermittedMaxLiquidBPD','StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude']
+  setStringColumns=set(usedStringColumns)
+  setNumericColumns=set(usedNumericColumns)
+  # If no dictionary of bounds, use the default
+  # Dictionary is a min/max pair for each columns
+  if boundsDictionary is None:
+    boundsDictionary={'ID': [0,999999999999],
+                      'PermittedMaxLiquidBPD': [0,199999.],
+                      'StartDate': [pd.to_datetime('1900-01-01'),pd.to_datetime('2050-12-31')],
+                      'SurfaceHoleLatitude': [-90.,90.],
+                      'SurfaceHoleLongitude': [-180.,180.]}
+  # Get the set of both
+  setColumns=setStringColumns | setNumericColumns
+  wellDF=pd.read_csv(wellFile)
+  setWellFileColumns=set(wellDF.columns)
+  # Initialize output text
+  warningText=''
+  errorText=''
+  infoText='gist.updateInjection information for '+wellFile+': '+str(len(wellDF))+' rows, '+str(len(setWellFileColumns))+' columns.\n'
+  # Check columns
+  # What is not in the file? Should be nothing
+  missingColumns=setColumns - setWellFileColumns
+  # What is extra in the file? Could be nothing or something
+  extraColumns=setWellFileColumns - setColumns
+  # Exit if we are missing columns
+  if len(missingColumns)>0:
+    errorText=errorText+' missing columns: '+str(missingColumns)
+    return wellDF,errorText,warningText,infoText
+  wellDF['StartDate']=pd.to_datetime(wellDF['StartDate'])
+  for column in usedStringColumns:
+    if verbose>0: print('column: ',column)
+    # Number of unique values is broken
+
+    infoAdd=column.rjust(24)+" has "+str(wellDF[column].nunique())+" unique values"
+    if verbose>0: print(' infoAdd:',infoAdd)
+    infoText=infoText+"\n   "+infoAdd
+  for column in usedNumericColumns:
+    if verbose>0: print('column: ',column)
+    infoAdd=column.rjust(24)+": Min:"+str(wellDF[column].min())+"; Max:"+str(wellDF[column].max())+" # of unique values:"+str(wellDF[column].nunique())
+    if verbose>0: print(' infoAdd:',infoAdd)
+    infoText=infoText+"   "+infoAdd+'\n'
+  if len(extraColumns)>0:
+    infoText=infoText+' extra columns: \n'
+    for extraColumn in extraColumns:
+      if pd.api.types.is_numeric_dtype(wellDF[extraColumn]):
+        infoText=infoText+"   "+extraColumn.rjust(24)+": Min:"+str(wellDF[extraColumn].min())+"; Max:"+str(wellDF[extraColumn].max())+" # of unique values:"+str(wellDF[extraColumn].nunique())+'\n'
+      else:
+        infoText=infoText+"   "+extraColumn.rjust(24)+": # of unique values:"+str(wellDF[extraColumn].nunique())+'\n'
+        # Loop over boundsDictionary and check for out-of-bounds values
+  for column,bounds in boundsDictionary.items():
+    underBoundMask=wellDF[column]<bounds[0] 
+    overBoundMask=wellDF[column]>bounds[1]
+    nUnder=sum(underBoundMask)
+    nOver=sum(overBoundMask)
+    if nUnder>0: warningText=warningText+' '+column+' has '+str(nUnder)+' values <'+str(bounds[0])+' out of '+str(len(underBoundMask)+'\n')
+    if nOver>0: warningText=warningText+' '+column+' has '+str(nOver)+' values >'+str(bounds[1])+' out of '+str(len(overBoundMask)+'\n')
+  if warningText=='': infoText=infoText+'No warnings found!\n'
+  if errorText=='': infoText=infoText+'No errors found!\n'
+  return wellDF,infoText,warningText,errorText
+
+
+def checkInj(injFile,wellDF=None,boundsDictionary=None,epoch=pd.to_datetime('01-01-1970'),verbose=0):
+  '''
+  checkInj: Subroutine to check disposal file for potential issues.
+
+  Inputs: 
+    injFile - filename of disposal data - must have columns ID, Days, BPD, Date
+  Optional inputs:
+    wellDF  - dataframe from checkWells - we check to see that the IDs match
+    boundsDictionary - min/max to check on input data. Default is:
+                      'ID': [0,999999999999],
+                     'BPD': [0,199999.],
+                    'Date': [pd.to_datetime('1900-01-01'),pd.to_datetime('2050-12-31')]
+    epoch    - start point for day number, usually Unix epoch (1970)
+    verbose - level of output
+  Outputs:
+    injDF       - disposal Dataframe
+    infoText    - text describing test results
+    warningText - warnings, could be empty. Code will run but results might be bad
+    errorText   - errors, could be empty. Code will not run.
+  '''
+  injDF=pd.read_csv(injFile)
+  # Check columns
+  injCols=['ID','Days','BPD','Date']
+  # How many rows? How many wells? How many wells have one row? Maximum number of rows for one well?
+  counts=injDF['ID'].value_counts()
+  infoText=' '+injFile+' info: '+str(len(injDF))+' rows, '+str(injDF['ID'].nunique())+' wells, '+str(max(counts))+' maximum rows per well, '+str(min(counts))+' minimum rows per well, '+str(sum(counts[counts==1]))+' wells have one row\n'
+  warningText=''
+  IDs=injDF['ID'].unique()
+  for ID in IDs:
+    # Isolate days
+    days=np.sort(injDF[injDF['ID']==ID].Days.values)
+    # Generate a vector using the min, max, and increment
+    dayMin=days[0]
+    dayMax=days[-1]
+    dayInc=days[1]-days[0]
+    daysVector=np.arange(dayMin,dayMax+dayInc,dayInc)
+    # Check if that vector matches the values
+    for i in range(len(daysVector)):
+      if daysVector[i]!=days[i]: warningText=warningText+' ID '+str(ID)+' expected '+str(daysVector[i])+' days but found '+str(days[i])+' days\n'
+  if warningText=='': infoText=infoText+'All injection data are evenly sampled in time\n'
+  injDF['Date']=pd.to_datetime(injDF['Date'])
+  errorText=''
+  dayLowerBound=(pd.to_datetime('1900-01-01')-epoch).days
+  dayUpperBound=(pd.to_datetime('2050-12-31')-epoch).days
+  if boundsDictionary is None:
+    boundsDictionary={'ID': [0,999999999999],
+                     'BPD': [0,199999.],
+                    'Date': [pd.to_datetime('1900-01-01'),pd.to_datetime('2050-12-31')],
+                    'Days': [dayLowerBound,dayUpperBound]}
+  for column,bounds in boundsDictionary.items():
+    underBoundMask=injDF[column]<bounds[0] 
+    overBoundMask=injDF[column]>bounds[1]
+    nUnder=sum(underBoundMask)
+    nOver=sum(overBoundMask)
+    if nUnder>0: errorText=errorText+' '+column+' has '+str(nUnder)+' values <'+str(bounds[0])+' out of '+str(len(underBoundMask))+'\n'
+    if nOver>0: errorText=errorText+' '+column+' has '+str(nOver)+' values >'+str(bounds[1])+' out of '+str(len(overBoundMask))+'\n'
+  if wellDF is not None:
+    # Get list of wells from well file
+    wellFileIDset=set(wellDF['ID'])
+    # Get list of well IDs from injection file
+    injFileIDset=set(IDs)
+    # Compare the two sets
+    wellIDNotPresentInInj=wellFileIDset-injFileIDset
+    injIDNotPresentInWells=injFileIDset-wellFileIDset
+    if len(injIDNotPresentInWells)>0: warningText=warningText+' '+str(len(injIDNotPresentInWells))+' wells with injection are not present in the well file.\n'
+    if len(wellIDNotPresentInInj)>0: infoText=infoText+' '+str(len(wellIDNotPresentInInj))+' wells with well data are not present in the injection file.\n'
+  # Get distances of wells not present in injection file? What else?
+  if errorText=='': infoText=infoText+'All well injection data are in expected bounds\n'
+  return injDF,infoText,warningText,errorText
