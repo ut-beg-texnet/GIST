@@ -782,7 +782,7 @@ class gistMC:
       injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
     # Do we need this?
     # Peter commented it out - Bill had it in
-    injDF['Date']=pd.to_datetime(injDF['Date'])
+    # injDF['Date']=pd.to_datetime(injDF['Date'])
     ############################################################
     # Get the number of wells selected from the injection file #
     ############################################################
