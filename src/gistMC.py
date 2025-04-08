@@ -3188,7 +3188,7 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   Outputs:
     smallPPDF - Updated dataframe with small contributors collapsed to a single well name
                 Order column added
-    smallWellList - List of wells ordered by maximum potential contribution
+    smallWellIDList - List of well IDs ordered by maximum potential contribution
 
   """
   nReal = max(ppDF['Realization'])+1
@@ -3253,28 +3253,33 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   # This mixed all other wells in the ordering, should we have it at the bottom?
   smallWellList = smallPPDF[smallPPDF['Name']!=smallName].groupby('Name')['Pressures'].max().sort_values(ascending=False).index
   smallWellList = smallWellList.append(smallPPDF[smallPPDF['Name']==smallName].groupby('Name')['Pressures'].max().index)
+  # Add well IDs here in case there are duplicate names
+  smallWellIDList = smallPPDF[smallPPDF['ID']!=0].groupby('ID')['Pressures'].max().sort_values(ascending=False).index
+  smallWellIDList = smallWellIDList.append(smallPPDF[smallPPDF['ID']==0].groupby('ID')['Pressures'].max().index)
   # Now come up with a category that colors it by relative contribution
   smallPPDF['Order'] = smallPPDF.groupby('Realization')['Percentages'].rank(method='dense', ascending=False)
   smallPPDF.loc[smallPPDF['Order']>nOrder,'Order'] = nOrder+1
-  return smallPPDF,smallWellList
+  return smallPPDF,smallWellIDList
 
-def prepDisaggregationPlot(smallPPDF,smallWellList,jitter=0.,verbose=0):
+def prepDisaggregationPlot(smallPPDF,smallWellIDList,jitter=0.,verbose=0):
   """
   prepDisaggregationPlot - prepare data for disaggregation plot
   Inputs:
     smallPPDF - dataframe of pore pressure results with columns:
         Realization,Pressures,Percentages,Name,ID
-    smallWellList - List of wells ordered by maximum potential contribution
+    smallWellIDList - List of well IDs ordered by maximum potential contribution
+                    Sum of small wells is ID=0
   Outputs:
     disaggregationDF - dataframe of input to scatterplot
           columns: Pressure,WellNo,Order,Name
   """
   # Make new dataframe
-  disaggregationPlotDF=pd.DataFrame(columns=['Pressures','WellNo','Order','Name','Realization'])
+  disaggregationPlotDF=pd.DataFrame(columns=['Pressures','WellNo','Order','Name','ID','Realization'])
   nReal=max(smallPPDF['Realization'])+1
-  if verbose>0: print(' prepDisaggregationPlot: ',len(smallWellList),' wells in disaggregation plot with ',nReal,' realizations')
+  if verbose>0: print(' prepDisaggregationPlot: ',len(smallWellIDList),' wells in disaggregation plot with ',nReal,' realizations')
+  if verbose>1: print(' prepDisaggregationPlot well List:')
   # Loop over smallWellList
-  for iw in range(len(smallWellList)):
+  for iw in range(len(smallWellIDList)):
     # Calculate y value with or without jitter
     if jitter>0.:
       jitterVec=np.random.uniform(-jitter,jitter,(nReal))
@@ -3282,8 +3287,8 @@ def prepDisaggregationPlot(smallPPDF,smallWellList,jitter=0.,verbose=0):
     else:
       wellNo = np.zeros(nReal,)-iw
     # Get rows for this well
-    wellDF = smallPPDF[smallPPDF['Name']==smallWellList[iw]][['Realization','Pressures','Order','Name']]
-    if verbose>0: print(' prepDisaggregationPlot: ',len(wellDF),' rows for ',smallWellList[iw])
+    wellDF = smallPPDF[smallPPDF['ID']==smallWellIDList[iw]][['Realization','Pressures','Order','Name','ID']]
+    if verbose>0: print(' prepDisaggregationPlot: ',len(wellDF),' rows for ',smallWellIDList[iw])
     # create a new dataframe for this well
     wellDF['WellNo']=wellNo
     # append to new dataframe
@@ -3426,7 +3431,7 @@ def getPerWellPressureTimeSeriesSpaghetti(deltaPP,dayVec,diffPPVec,wellIDs,epoch
   PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
   return PPSpaghettiDF
                              
-def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,injDF,wellNames,verbose=0):
+def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,injDF,wellIDs,verbose=0):
   '''
   prepPressureAndDisposalTimeSeriesPlots - take output from getPerWellPressureTimeSeriesQuantiles
                                            and produce two dataframes for each well
@@ -3435,7 +3440,7 @@ def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,i
             PPSpaghettiDF - dataframe of pressures output from getPerWellPressureTimeSeriesQuantiles
             wellDF        - dataframe with information from all wells
             injDF         - dataframe with injection data and columns ID, Date, BPD
-            wellNames     - list of strings of well names to pull from wellDF and PPQuantilesDF
+            wellIDs     - list of strings of well names to pull from wellDF and PPQuantilesDF
   output:
           outPerWellDict  - dictionary with one entry per well
                             each well has:
@@ -3447,10 +3452,10 @@ def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,i
   # Initialize output dictionary
   outPerWellDict={}
   # Loop over wells of interest:
-  for iw in range(len(wellNames)):
-    wellName=wellNames[iw]
-    wellID=wellsDF[wellsDF['WellName']==wellName]['ID'].iloc[0]
-    wellInfo=wellsDF[wellsDF['WellName']==wellName]
+  for iw in range(len(wellIDs)):
+    wellID=wellIDs[iw]
+    wellName=wellsDF[wellsDF['ID']==wellID]['WellName'].iloc[0]
+    wellInfo=wellsDF[wellsDF['ID']==wellID]
     if verbose>0: print("prepPressureAndDisposalTimeSeriesPlots",wellName,' ID: ',wellID)
     # isolate disposal from this well
     oneWellInjDF=injDF[injDF['ID']==wellID]
