@@ -56,8 +56,8 @@ def step2(input):
     gistMC_instance = gistMC()
     gistMC_instance.initPP()
     eq = input.get("eq")
-    wellcsv = 'C:/Users/peter/Documents/workspace/GIST/src/gist_well_data.csv'
-    injectioncsv = 'C:/Users/peter/Documents/workspace/GIST/src/gist_injection_data.csv'
+    wellcsv = 'C:/Users/peter/Documents/workspace/GIST/src/data/gist_well_data.csv'
+    injectioncsv = 'C:/Users/peter/Documents/workspace/GIST/src/data/gist_injection_data.csv'
     gistMC_instance.addWells(wellcsv, injectioncsv, verbose=2)
     forecastYears = 5 #change to use forcast date
     considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq,PE=False, responseYears=forecastYears)
