@@ -79,9 +79,28 @@ input = {
 smallPPDF, smallWellList, disaggregationDF = runGistCore(input)
 
 
+wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
+# orderedWellList with proposed Future Rate initalize at 10000
+originalWellDF = pd.read_csv(wellcsv)
+orderedWellList = pd.DataFrame(orderedWellList, columns=['ID', 'Name'])
+orderedWellList = orderedWellList.merge(
+    originalWellDF[['ID', 'WellName', 'PermittedMaxLiquidBPD']],
+    left_on='Name',
+    right_on='WellName',
+    how='left'
+).drop(columns=['WellName', 'ID_x']).rename(columns={'ID_y': 'ID'})
+orderedWellList['Proposed Future Rate (BPD)'] = np.where(
+orderedWellList['PermittedMaxLiquidBPD'] < 10000,
+orderedWellList['PermittedMaxLiquidBPD'],  # Use PermittedMaxLiquidBPD if it's less
+10000  # Otherwise, use 10000
+)
+orderedWellListWithFutureRates = orderedWellList.drop(orderedWellList.index[-1])
+
+
 helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF", smallPPDF)
 helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList", smallWellList)
 helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "disaggregationDF", disaggregationDF)
 # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPQuantilesDF", totalPPQuantilesDF)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "orderedWellListWithFutureRates", orderedWellListWithFutureRates)
 
 helper.writeResultsFile()
