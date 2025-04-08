@@ -11,13 +11,6 @@ import os
 import time
 import pathlib
 
-from gistMC import gistMC
-from gistMC import prepRTPlot
-from gistMC import prepDisaggregationPlot
-from gistMC import getWinWells
-from gistMC import summarizePPResults
-from gistMC import prepTotalPressureTimeSeriesPlot
-
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
@@ -76,12 +69,14 @@ input = {
     "eq": formattedEarthquake
 }
 
-smallPPDF, smallWellList, disaggregationDF = runGistCore(input)
+smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
 
 
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF", smallPPDF)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList", smallWellList)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF", disaggregationDF)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF_forecast", smallPPDF)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_forecast", smallWellList)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF_forecast", disaggregationDF)
 # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF", totalPPQuantilesDF)
+
+helper.setSuccessForStepIndex(4, True)
 
 helper.writeResultsFile()

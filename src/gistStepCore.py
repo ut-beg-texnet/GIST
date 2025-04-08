@@ -46,4 +46,4 @@ def runGistCore(input):
     # scenarioTSRDF,dPTimeSeriesR,wellIDsR,dayVecR = gistMC_instance.runPressureScenariosTimeSeries(eq,winWellsDF,winInjDF, verbose=2)
     # totalPPQuantilesDF = prepTotalPressureTimeSeriesPlot(dPTimeSeriesR,dayVecR,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'), )
 
-    return smallPPDF, smallWellList, disaggregationDF
+    return smallPPDF, smallWellList, disaggregationDF, orderedWellList

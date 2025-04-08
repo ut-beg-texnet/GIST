@@ -11,13 +11,6 @@ import os
 import time
 import pathlib
 
-from gistMC import gistMC
-from gistMC import prepRTPlot
-from gistMC import prepDisaggregationPlot
-from gistMC import getWinWells
-from gistMC import summarizePPResults
-# from gistMC import prepTotalPressureTimeSeriesPlot
-
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
@@ -76,7 +69,7 @@ input = {
     "eq": formattedEarthquake
 }
 
-smallPPDF, smallWellList, disaggregationDF = runGistCore(input)
+smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
 
 
 helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)

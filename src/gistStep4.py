@@ -11,13 +11,6 @@ import os
 import time
 import pathlib
 
-from gistMC import gistMC
-from gistMC import prepRTPlot
-from gistMC import prepDisaggregationPlot
-from gistMC import getWinWells
-from gistMC import summarizePPResults
-from gistMC import prepTotalPressureTimeSeriesPlot
-
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
@@ -76,7 +69,9 @@ input = {
     "eq": formattedEarthquake
 }
 
-smallPPDF, smallWellList, disaggregationDF = runGistCore(input)
+smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
+
+print(orderedWellList)
 
 
 wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
@@ -97,10 +92,13 @@ orderedWellList['PermittedMaxLiquidBPD'],  # Use PermittedMaxLiquidBPD if it's l
 orderedWellListWithFutureRates = orderedWellList.drop(orderedWellList.index[-1])
 
 
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF", smallPPDF)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList", smallWellList)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "disaggregationDF", disaggregationDF)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF_updated", smallPPDF)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_updated", smallWellList)
+helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "disaggregationDF_updated", disaggregationDF)
 # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPQuantilesDF", totalPPQuantilesDF)
 helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "orderedWellListWithFutureRates", orderedWellListWithFutureRates)
+
+helper.setSuccessForStepIndex(2, True)
+helper.setSuccessForStepIndex(3, True)
 
 helper.writeResultsFile()
