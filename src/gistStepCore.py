@@ -38,6 +38,10 @@ def runGistCore(input):
     scenarioDF = gistMC_instance.runPressureScenarios(eq,currentWellsDF,inj_df)
     nWells=50
 
+    # if scenarioDF is empty then we need to abort
+    if scenarioDF.empty:
+        return smallPPDF, smallWellList, scenarioDF, []
+
     dPCutoff=0.5
     filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
     if len(orderedWellList) > 20:

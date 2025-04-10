@@ -83,12 +83,15 @@ input = {
 
 smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
 
+if disaggregationDF.empty:
+    helper.addMessageWithStepIndex(4, "Insufficient data to generate a report, please try adjusting your inputs.", 2)
+    helper.setSuccessForStepIndex(4, False)
+else:
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF_forecast", smallPPDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_forecast", smallWellList)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF_forecast", disaggregationDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF", totalPPQuantilesDF)
 
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF_forecast", smallPPDF)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_forecast", smallWellList)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF_forecast", disaggregationDF)
-# helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF", totalPPQuantilesDF)
-
-helper.setSuccessForStepIndex(4, True)
+    helper.setSuccessForStepIndex(4, True)
 
 helper.writeResultsFile()

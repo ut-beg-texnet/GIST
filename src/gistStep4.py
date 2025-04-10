@@ -83,30 +83,34 @@ input = {
 
 smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
 
-wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
-# orderedWellList with proposed Future Rate initalize at 10000
-originalWellDF = pd.read_csv(wellcsv)
-orderedWellList = pd.DataFrame(orderedWellList, columns=['ID'])
-orderedWellList = orderedWellList.merge(
-    originalWellDF[['ID', 'WellName', 'PermittedMaxLiquidBPD']],
-    left_on='ID',
-    right_on='ID',
-    how='right'
-)
-orderedWellList['Proposed Future Rate (BPD)'] = np.where(
-orderedWellList['PermittedMaxLiquidBPD'] < 10000,
-orderedWellList['PermittedMaxLiquidBPD'],  # Use PermittedMaxLiquidBPD if it's less
-10000  # Otherwise, use 10000
-)
-orderedWellListWithFutureRates = orderedWellList.drop(orderedWellList.index[-1])
+if disaggregationDF.empty:
+    helper.addMessageWithStepIndex(3, "Insufficient data to generate a report, please try adjusting your inputs.", 2)
+    helper.setSuccessForStepIndex(3, False)
+else:
+    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
+    # orderedWellList with proposed Future Rate initalize at 10000
+    originalWellDF = pd.read_csv(wellcsv)
+    orderedWellList = pd.DataFrame(orderedWellList, columns=['ID'])
+    orderedWellList = orderedWellList.merge(
+        originalWellDF[['ID', 'WellName', 'PermittedMaxLiquidBPD']],
+        left_on='ID',
+        right_on='ID',
+        how='right'
+    )
+    orderedWellList['Proposed Future Rate (BPD)'] = np.where(
+    orderedWellList['PermittedMaxLiquidBPD'] < 10000,
+    orderedWellList['PermittedMaxLiquidBPD'],  # Use PermittedMaxLiquidBPD if it's less
+    10000  # Otherwise, use 10000
+    )
+    orderedWellListWithFutureRates = orderedWellList.drop(orderedWellList.index[-1])
 
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF_updated", smallPPDF)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_updated", smallWellList)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "disaggregationDF_updated", disaggregationDF)
-# helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPQuantilesDF", totalPPQuantilesDF)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "orderedWellListWithFutureRates", orderedWellListWithFutureRates)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF_updated", smallPPDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_updated", smallWellList)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "disaggregationDF_updated", disaggregationDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPQuantilesDF", totalPPQuantilesDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "orderedWellListWithFutureRates", orderedWellListWithFutureRates)
 
-helper.setSuccessForStepIndex(2, True)
-helper.setSuccessForStepIndex(3, True)
+    helper.setSuccessForStepIndex(2, True)
+    helper.setSuccessForStepIndex(3, True)
 
 helper.writeResultsFile()
