@@ -11,6 +11,9 @@ import os
 import time
 import pathlib
 
+from datetime import datetime
+from math import ceil
+
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
@@ -39,6 +42,14 @@ formattedEarthquake = {
     "EventID": Earthquake.get("EventID")
 }
 
+forecastDate = helper.getParameterValueWithStepIndexAndParamName(1,"forecastEndDate")
+
+eq_date = datetime.strptime(formatted_date, "%Y-%m-%d")
+future_date = datetime.strptime(forecastDate, "%Y-%m-%dT%H:%M:%S.%fZ")
+
+days_diff = (future_date - eq_date).days
+years_diff = days_diff / 365
+
 realizationCount = helper.getParameterValueWithStepIndexAndParamName(3,"realizationCount")
 rho0 = helper.getParameterValueWithStepIndexAndParamName(3,"rho0")
 phi = helper.getParameterValueWithStepIndexAndParamName(3,"phi")
@@ -49,6 +60,7 @@ alphav = helper.getParameterValueWithStepIndexAndParamName(3,"alphav")
 beta = helper.getParameterValueWithStepIndexAndParamName(3,"beta")
 
 input = {
+    "years_diff": years_diff,
     "realizationCount": realizationCount,
     "porePressureParams" : {
         "rho0_min": rho0.get("min"),
@@ -71,26 +83,22 @@ input = {
 
 smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
 
-print(orderedWellList)
-
-
 wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
 # orderedWellList with proposed Future Rate initalize at 10000
 originalWellDF = pd.read_csv(wellcsv)
-orderedWellList = pd.DataFrame(orderedWellList, columns=['ID', 'Name'])
+orderedWellList = pd.DataFrame(orderedWellList, columns=['ID'])
 orderedWellList = orderedWellList.merge(
     originalWellDF[['ID', 'WellName', 'PermittedMaxLiquidBPD']],
-    left_on='Name',
-    right_on='WellName',
-    how='left'
-).drop(columns=['WellName', 'ID_x']).rename(columns={'ID_y': 'ID'})
+    left_on='ID',
+    right_on='ID',
+    how='right'
+)
 orderedWellList['Proposed Future Rate (BPD)'] = np.where(
 orderedWellList['PermittedMaxLiquidBPD'] < 10000,
 orderedWellList['PermittedMaxLiquidBPD'],  # Use PermittedMaxLiquidBPD if it's less
 10000  # Otherwise, use 10000
 )
 orderedWellListWithFutureRates = orderedWellList.drop(orderedWellList.index[-1])
-
 
 helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF_updated", smallPPDF)
 helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_updated", smallWellList)

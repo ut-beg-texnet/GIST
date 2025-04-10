@@ -11,6 +11,9 @@ import os
 import time
 import pathlib
 
+from datetime import datetime
+from math import ceil
+
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
@@ -39,6 +42,14 @@ formattedEarthquake = {
     "EventID": Earthquake.get("EventID")
 }
 
+forecastDate = helper.getParameterValueWithStepIndexAndParamName(1,"forecastEndDate")
+
+eq_date = datetime.strptime(formatted_date, "%Y-%m-%d")
+future_date = datetime.strptime(forecastDate, "%Y-%m-%dT%H:%M:%S.%fZ")
+
+days_diff = (future_date - eq_date).days
+years_diff = days_diff / 365
+
 realizationCount = helper.getParameterValueWithStepIndexAndParamName(3,"realizationCount")
 rho0 = helper.getParameterValueWithStepIndexAndParamName(3,"rho0")
 phi = helper.getParameterValueWithStepIndexAndParamName(3,"phi")
@@ -49,6 +60,7 @@ alphav = helper.getParameterValueWithStepIndexAndParamName(3,"alphav")
 beta = helper.getParameterValueWithStepIndexAndParamName(3,"beta")
 
 input = {
+    "years_diff": years_diff,
     "realizationCount": realizationCount,
     "porePressureParams" : {
         "rho0_min": rho0.get("min"),
