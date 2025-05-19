@@ -30,40 +30,102 @@ import pandas as pd
 import math
 import gc
 
-# List manipulation - probably not needed
-#from itertools import compress
 
-#################################
-# Contains:                     #
-#   Classes:                    #
-#     gistMC - Monte Carlo GIST #
-#       init                    #
-#       initPP                  #
-#       initPE                  #
-#       initPPAniso             #
-#       writeRealizations       #
-#       addWells                #
-#       findWells               #
-#       runPressureScenarios    #
-#       pressureScenario        #
-#       runPressureGrid
-#       runPressureScenariosTimeSeries
-#       runPressureScenariosTimeSeriesTest
-#       pressureScenarioAniso   #
-#       runPoroelasticScenarios #
-#       poroelasticScenario     #
-#       poroAttr                #
-#   Subroutines:                #
-#     calcPPVals                #
-#     matchPE2PP                #
-#     calcPEvals                #
-#     haversineXY               #
-#     haversine                 #
-#     formEffectiveStressTensor #
-#     projectStress             #
-#     stressInvariants          #
-#     prepInj
-#################################
+#############################################
+# Contains:                                 #
+#   Classes:                                #
+#     gistMC - Monte Carlo GIST             #
+#       init                                #
+#       initPP                              #
+#       initPE                              #
+#       initPPAniso                         #
+#       writeRealizations                   #
+#       addWells                            #
+#       findWells                           #
+#       runPressureScenarios                #
+#       pressureScenario                    #
+#       runPressureGrid                     #
+#       runPressureScenariosTimeSeries      #
+#       runPressureScenariosTimeSeriesTest  #
+#       pressureScenarioAniso               #
+#       runPoroelasticScenarios             #
+#       poroelasticScenario                 #
+#       poroAttr                            #
+#############################################
+#   Subroutines:                            #
+#     Parameter mapping:                    #
+#       calcPPVals                          #
+#       calcPPAnisoVals                     #
+#       matchPE2PP                          #
+#       calcPEvals                          #
+#       formEffectiveStressTensor           #
+#       projectStress                       #
+#       stressInvariants                    #
+#     General purpose:                      #
+#       getDates                            #
+#       logSpace                            #
+#       haversineXY                         #
+#       haversine                           #
+#     Injection data handling:              #
+#       prepInj                             #
+#       extendDisposal                      #
+#       checkWells                          #
+#       checkInj                            #
+#     Results plots:                        #
+#       saveTimeSeriesPressures             #
+#       prepRTPlot                          #
+#       summarizePPResults                  #
+#       prepDisaggregationPlot              #
+#       getWinWells                         ###############
+#       getPerWellPressureTimeSeriesSpaghettiAndQuantiles #
+#       getPerWellPressureTimeSeriesQuantiles             #
+#       getPerWellPressureTimeSeriesSpaghetti             #
+#       prepPressureAndDisposalTimeSeriesPlots            #
+#       prepTotalPressureTimeSeriesQuantilesPlot          #
+#       prepTotalPressureTimeSeriesSpaghettiPlot          #
+###########################################################
+# Sequences of subroutines for different plots: #
+#################################################
+# A: For everything (boilerplate):  #
+#   gistMC.__init__                 #
+#   gistMC.initPP                   #
+#   gistMC.addWells                 #
+#   gistMC.findWells                #
+###################################
+# RT:                             #
+#   A +                           #
+#   gistMC.prepRTPlot             #
+######################################
+# B: For all below using pressures:  #
+#   gistMC.runPressureScenarios      #
+######################################
+# Disaggregation:                 #
+#   A + B +                       #
+#   gistMC.summarizePPResults     #
+#   gistMC.prepDisaggregationPlot #
+###########################################
+# C: For all below using time series:     #
+#   gistMC.getWinWells                    #
+#   gistMC.runPressureScenariosTimeSeries #
+#####################################################
+# Total Quantiles Time Series:                      #
+#   A + B + C +                                     #
+#   gistMC.prepTotalPressureTimeSeriesQuantilesPlot #
+#####################################################
+# Total Spaghetti Time Series:                      #
+#   A + B + C +                                     #
+#   gistMC.prepTotalPressureTimeSeriesSpaghettiPlot #
+#################################################################################
+# Per-well Time Series for combinations of Quantiles, Spaghetti, and Injection: #
+#   A + B + C +                                                                 #
+#   gistMC.getPerWellPressureTimeSeriesSpaghettiAndQuantiles                    #
+#   gistMC.prepPressureAndDisposalTimeSeriesPlots                               #
+#################################################################################
+# Total and per-well tornado plots: #
+#   A + B + C +                     #
+#   gistMC.getPressureSensitivity   #
+#####################################
+
 
 
 class gistMC:
@@ -74,25 +136,28 @@ class gistMC:
             - different central parameterizations  #
   
   Contains
-  #####################################
-  # init          - initialize general class ########################
-  # initPP        - initialize pore pressure modeling #
-  # initPE        - initialize poroelastic modeling  #
-  # initPPAniso   - initialize anisotropic pore pressure modeling #
-  # writeRealizations - output csv of parameter sets           #
+  ###################################################################
+  # init          - initialize general class                        #
+  # initPP        - initialize pore pressure modeling               #
+  # initPE        - initialize poroelastic modeling                 #
+  # initPPAniso   - initialize anisotropic pore pressure modeling   #
+  # writeRealizations - output csv of parameter sets                #
   ####################################################################
   # addWells   - load injection and well info from injectionV3 files #
   # findWells  - get list of potential wells for an earthquake       #
-  ####################################################################
-  # pressureImpulseResponse - Produce impulse response for testing   #
+  #####################################################################################
+  # pressureImpulseResponse             - Produce impulse response for testing        #
   # poroelasticImpulseResponse - 
-  # runPressureScenarios    - run all pore pressure scenarios for EQ #
-  # pressureScenario        - individual pore pressure modeling case #
-  # runPressureGrid ---
-  # runPoroelasticScenarios - run all poroelastic scenarios for EQ   #
-  # poroelasticScenario     - individual poroelastic modeling case   #
-  # poroAttr                - poroelastic disaggregation to wells    #
-  ####################################################################
+  # runPressureScenarios                - run all pore pressure scenarios for EQ      #
+  # pressureScenario                    - individual pore pressure modeling case      #
+  # runPressureGrid                     - generate pressures over a grid              #
+  # runPressureScenariosTimeSeries      - generate per-well pressure time series      #
+  # runPressureScenariosTimeSeriesTest  - faster version of above                     #
+  # pressureScenarioAniso               - generate pore pressure with perm anisotropy #
+  # runPoroelasticScenarios - run all poroelastic scenarios for EQ                    #
+  # poroelasticScenario     - individual poroelastic modeling case                    #
+  # poroAttr                - poroelastic disaggregation to wells                     #
+  #####################################################################################
   """
   def __init__(self,epoch=pd.to_datetime('01-01-1970'),nReal=100,seed=42,ntBin=51):
     """
@@ -967,6 +1032,11 @@ class gistMC:
     #     Faster than runPressureScenariosTimeSeries but only works #
     #     at the earthquake time                                    #
     #################################################################
+    # To-do: To add per-well parameters with uncertainty, add a     #
+    #        case for SVec, TVec, and rhoVec to be arrays with      #
+    #        nReal x nwells entries. Get parameters from pressure   #
+    #        pulse inversion                                        #
+    #################################################################
     """
     if SVec is None:
       SVec=self.SVec
@@ -1006,19 +1076,22 @@ class gistMC:
     ##############################################
     r2=wellDistances*wellDistances
     if verbose>1: print('runPressureScenariosTimeSeries r2 min/max: ',min(r2),max(r2))
-    #####################################################
+    ################################################
     # Compute property-related part of ppp [nReal] #
-    #####################################################
+    # To-do: extend to size [nReal,nwC]            # 
+    ################################################
     TSOver4TT=self.TVec*self.SVec/(4.*self.TVec*self.TVec)
     if verbose>1: print('runPressureScenariosTimeSeries TSOver4TT min/max: ',min(TSOver4TT.flatten()),max(TSOver4TT.flatten()))
-    #######################################################################
-    # Compute outer product of r2 and TSOver4TT to get ppp [nwC,nReal] #
-    #######################################################################
+    ###############################################################################
+    # Compute outer product of r2 and TSOver4TT to get ppp [nwC,nReal]            #
+    # To-do: change from outer product to element-by-element when TSOver4TT is 2D #
+    ###############################################################################
     ppp=np.outer(r2,TSOver4TT)
     if verbose>1: print('runPressureScenariosTimeSeries ppp min/max: ',min(ppp.flatten()),max(ppp.flatten()))
-    #############################
-    # Compute gRhoOverT [nReal] #
-    #############################
+    #####################################
+    # Compute gRhoOverT [nReal]         #
+    # To-do: extend to size [nReal,nwC] #
+    #####################################
     gRhoOverT=self.rhoVec*self.g/(4.*np.pi*self.TVec)
     ########################
     # Initialize output dP #
@@ -1039,6 +1112,7 @@ class gistMC:
     # computation vs. FSP for a time series by O(nt). epp is [nwC,nReal,nt].              #
     # We reuse parts of this array in the summation as we assume that dt is fixed.        #
     # I'm sure that there are better ways to broadcast these shapes but I don't know how! #
+    # To-do: Update with new shape of ppp.                                                #
     #######################################################################################
     epp=sc.exp1(ppp.reshape((nwC,self.nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(self.nReal,1))
     if verbose>1: print('runPressureScenariosTimeSeries epp min/max: ',min(epp.flatten()),max(epp.flatten()))
@@ -1054,6 +1128,7 @@ class gistMC:
     # convolution of epp and dQdtArray on the last axis and #
     # there should be a way to make this more efficient!    #
     # scipy.ndimage.convolve1d(dQdtarray.reshape((nwC,1,it)).repeat(self.nReal,1), epp, axis=-1, mode='constant')
+    # To-do: Use Samson Marty's fftconvolve approach
     #########################################################
     timeStepsSum1=np.sum(epp[:,:,-ieq:] * dQdtArray[:,:ieq].reshape((nwC,1,ieq)).repeat(self.nReal,1),axis=2)
     timeStepsSum2=np.sum(epp[:,:,-(ieq+1):] * dQdtArray[:,:ieq+1].reshape((nwC,1,ieq+1)).repeat(self.nReal,1),axis=2)
@@ -1105,6 +1180,11 @@ class gistMC:
     #                          nwC x nReal is pretty big                         #
     #                          size(nwC x nReal x nt)                            #
     ##############################################################################
+    # To-do: To add per-well parameters with uncertainty, add a     #
+    #        case for SVec, TVec, and rhoVec to be arrays with      #
+    #        nReal x nwells entries. Get parameters from pressure   #
+    #        pulse inversion                                        #
+    #################################################################
     # To-do:  Optionally give a list of r values to compute on a grid #
     #         Currently implemented in runPressureGrid                #
     ###################################################################
@@ -1129,19 +1209,22 @@ class gistMC:
     ##############################################
     r2=wellDistances*wellDistances
     if verbose>1: print('runPressureScenariosTimeSeries r2 min/max: ',min(r2),max(r2))
-    #####################################################
+    ################################################
     # Compute property-related part of ppp [nReal] #
-    #####################################################
+    # To-do: extend to size [nReal,nwC]            # 
+    ################################################
     TSOver4TT=self.TVec*self.SVec/(4.*self.TVec*self.TVec)
     if verbose>1: print('runPressureScenariosTimeSeries TSOver4TT min/max: ',min(TSOver4TT.flatten()),max(TSOver4TT.flatten()))
-    #######################################################################
-    # Compute outer product of r2 and TSOver4TT to get ppp [nwC,nReal] #
-    #######################################################################
+    ###############################################################################
+    # Compute outer product of r2 and TSOver4TT to get ppp [nwC,nReal]            #
+    # To-do: change from outer product to element-by-element when TSOver4TT is 2D #
+    ###############################################################################
     ppp=np.outer(r2,TSOver4TT)
     if verbose>1: print('runPressureScenariosTimeSeries ppp min/max: ',min(ppp.flatten()),max(ppp.flatten()))
-    #############################
-    # Compute gRhoOverT [nReal] #
-    #############################
+    #####################################
+    # Compute gRhoOverT [nReal]         #
+    # To-do: extend to size [nReal,nwC] #
+    #####################################
     gRhoOverT=self.rhoVec*self.g/(4.*np.pi*self.TVec)
     ########################
     # Initialize output dP #
@@ -1163,6 +1246,7 @@ class gistMC:
     # computation vs. FSP for a time series by O(nt). epp is [nwC,nReal,nt].              #
     # We reuse parts of this array in the summation as we assume that dt is fixed.        #
     # I'm sure that there are better ways to broadcast these shapes but I don't know how! #
+    # To-do: Update with new shape of ppp.                                                #
     #######################################################################################
     epp=sc.exp1(ppp.reshape((nwC,self.nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(self.nReal,1))
     if verbose>1: print('runPressureScenariosTimeSeries epp min/max: ',min(epp.flatten()),max(epp.flatten()))
@@ -1181,6 +1265,7 @@ class gistMC:
       # convolution of epp and dQdtArray on the last axis and #
       # there should be a way to make this more efficient!    #
       # scipy.ndimage.convolve1d(dQdtarray.reshape((nwC,1,it)).repeat(self.nReal,1), epp, axis=-1, mode='constant')
+      # To-do: Use Samson Marty's fftconvolve approach
       #########################################################
       timeStepsSum=np.sum(epp[:,:,-it:] * dQdtArray[:,:it].reshape((nwC,1,it)).repeat(self.nReal,1),axis=2)
       ########################################################################
@@ -1208,7 +1293,6 @@ class gistMC:
     scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
     if np.any(dP<0.): print("runPressureScenariosTimeSeries: Negative pressures found: ",np.argmin(dP))
     return scenarioDF,dP,wellIDs,dayVec
-
 
   def runPressureScenariosTimeSeriesTest(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
     """
@@ -1429,10 +1513,10 @@ class gistMC:
     #           eqDay: day number of earthquake              #
     #               r: distance to earthquake       (meters) #
     #           iReal: realization number                    #
-    #           STRho: Storativity,Transmisivity,Density   #
-    #               Used for sensitivity tests           #
+    #           STRho: Storativity,Transmisivity,Density     #
+    #               Used for sensitivity tests               #
     ##########################################################
-    # Outputs:      dP: modeled change in pressure      (PSI) # 
+    # Outputs:      dP: modeled change in pressure     (PSI) # 
     # Assumptions: #########################################
     #     Run inside runPressureScenarios #
     # To-do - replace with Lei's code with additional terms #
@@ -2257,12 +2341,14 @@ class gistMC:
   
   def getPressureSensitivity(self,injDF,wellDF,EQ,verbose=0):
     '''
-    getPressureSensitivity(injDF,wellDF,EQ,verbose=0)
-
-    Parameter sensitivity for pore pressure modeling
-    Runs each parameter separately with three values - mean, min, and max
-    Holds all other parameters at mean. Compares pressures at EQ time.
-    Also 
+    #####################################################
+    # getPressureSensitivity(injDF,wellDF,EQ,verbose=0) #
+    #####################################################
+    # Parameter sensitivity for pore pressure modeling  #
+    # Runs each parameter separately with three values: #
+    # mean, min, & max. Holds other parameters at mean. #
+    # Compares pressures at EQ time.                    #
+    #####################################################
     '''
     # Initialize array of parameters - needs 21 realizations?
     nS=21
