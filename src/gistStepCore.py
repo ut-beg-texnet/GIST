@@ -27,7 +27,7 @@ def runGistCore(input):
     gistMC_instance.initPP()
     eq = input.get("eq")
     gistMC_instance.addWells(wellcsv, injectioncsv)
-    forecastYears = 5 #change to use forcast date
+    forecastYears = input.get("years_diff")
     considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq,PE=False, responseYears=forecastYears)
 
     # r-t plot combination of considered well and excluded wells df reference plots.py
@@ -36,9 +36,24 @@ def runGistCore(input):
     # disaggregationPlot plot
     currentWellsDF=considered_wells_df[considered_wells_df['EncompassingDay']<0.].reset_index(drop=True)
     scenarioDF = gistMC_instance.runPressureScenarios(eq,currentWellsDF,inj_df)
-    dPCutoff=0.5
     nWells=50
-    filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,threshold=dPCutoff,nOrder=nWells)
+
+    # if scenarioDF is empty then we need to abort
+    if scenarioDF.empty:
+        return smallPPDF, smallWellList, scenarioDF, []
+
+    dPCutoff=0.5
+    filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
+    if len(orderedWellList) > 20:
+        dPCutoff=1
+        filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
+        if len(orderedWellList) > 20:
+            dPCutoff=5
+            filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
+            if len(orderedWellList) > 20:
+                dPCutoff=10
+                filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
+  
     disaggregationDF = prepDisaggregationPlot(filteredDF,orderedWellList,jitter=0.1)
 
     # time series plot
@@ -46,4 +61,4 @@ def runGistCore(input):
     # scenarioTSRDF,dPTimeSeriesR,wellIDsR,dayVecR = gistMC_instance.runPressureScenariosTimeSeries(eq,winWellsDF,winInjDF, verbose=2)
     # totalPPQuantilesDF = prepTotalPressureTimeSeriesPlot(dPTimeSeriesR,dayVecR,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'), )
 
-    return smallPPDF, smallWellList, disaggregationDF
+    return smallPPDF, smallWellList, disaggregationDF, orderedWellList

@@ -11,12 +11,8 @@ import os
 import time
 import pathlib
 
-from gistMC import gistMC
-from gistMC import prepRTPlot
-from gistMC import prepDisaggregationPlot
-from gistMC import getWinWells
-from gistMC import summarizePPResults
-# from gistMC import prepTotalPressureTimeSeriesPlot
+from datetime import datetime
+from math import ceil
 
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
@@ -46,6 +42,14 @@ formattedEarthquake = {
     "EventID": Earthquake.get("EventID")
 }
 
+forecastDate = helper.getParameterValueWithStepIndexAndParamName(1,"forecastEndDate")
+
+eq_date = datetime.strptime(formatted_date, "%Y-%m-%d")
+future_date = datetime.strptime(forecastDate, "%Y-%m-%dT%H:%M:%S.%fZ")
+
+days_diff = (future_date - eq_date).days
+years_diff = days_diff / 365
+
 realizationCount = helper.getParameterValueWithStepIndexAndParamName(1,"realizationCount")
 rho0 = helper.getParameterValueWithStepIndexAndParamName(1,"rho0")
 phi = helper.getParameterValueWithStepIndexAndParamName(1,"phi")
@@ -56,6 +60,7 @@ alphav = helper.getParameterValueWithStepIndexAndParamName(1,"alphav")
 beta = helper.getParameterValueWithStepIndexAndParamName(1,"beta")
 
 input = {
+    "years_diff": years_diff,
     "realizationCount": realizationCount,
     "porePressureParams" : {
         "rho0_min": rho0.get("min"),
@@ -76,25 +81,28 @@ input = {
     "eq": formattedEarthquake
 }
 
-smallPPDF, smallWellList, disaggregationDF = runGistCore(input)
+smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
+
+if disaggregationDF.empty:
+    helper.addMessageWithStepIndex(1, "Insufficient data to generate a report, please try adjusting your inputs.", 2)
+    helper.setSuccessForStepIndex(1, False)
+else:
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "disaggregationDF", disaggregationDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPQuantilesDF", totalPPQuantilesDF)
 
 
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "disaggregationDF", disaggregationDF)
-# helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPQuantilesDF", totalPPQuantilesDF)
+    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
+    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_data.csv'
 
+    GISTWells = pd.read_csv(wellcsv)
+    GISTInjection = pd.read_csv(injectioncsv)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTWells-corrections", GISTWells)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTInjection-corrections", GISTInjection)
 
-wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
-injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_data.csv'
-
-GISTWells = pd.read_csv(wellcsv)
-GISTInjection = pd.read_csv(injectioncsv)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTWells-corrections", GISTWells)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTInjection-corrections", GISTInjection)
-
-#Since step 0 doesnt have business logic set its sucess to true.
-helper.setSuccessForStepIndex(0, True)
-helper.setSuccessForStepIndex(1, True)
+    #Since step 0 doesnt have business logic set its sucess to true.
+    helper.setSuccessForStepIndex(0, True)
+    helper.setSuccessForStepIndex(1, True)
 
 helper.writeResultsFile()

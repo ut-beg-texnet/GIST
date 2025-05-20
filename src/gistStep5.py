@@ -11,12 +11,8 @@ import os
 import time
 import pathlib
 
-from gistMC import gistMC
-from gistMC import prepRTPlot
-from gistMC import prepDisaggregationPlot
-from gistMC import getWinWells
-from gistMC import summarizePPResults
-from gistMC import prepTotalPressureTimeSeriesPlot
+from datetime import datetime
+from math import ceil
 
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
@@ -46,6 +42,14 @@ formattedEarthquake = {
     "EventID": Earthquake.get("EventID")
 }
 
+forecastDate = helper.getParameterValueWithStepIndexAndParamName(1,"forecastEndDate")
+
+eq_date = datetime.strptime(formatted_date, "%Y-%m-%d")
+future_date = datetime.strptime(forecastDate, "%Y-%m-%dT%H:%M:%S.%fZ")
+
+days_diff = (future_date - eq_date).days
+years_diff = days_diff / 365
+
 realizationCount = helper.getParameterValueWithStepIndexAndParamName(3,"realizationCount")
 rho0 = helper.getParameterValueWithStepIndexAndParamName(3,"rho0")
 phi = helper.getParameterValueWithStepIndexAndParamName(3,"phi")
@@ -56,6 +60,7 @@ alphav = helper.getParameterValueWithStepIndexAndParamName(3,"alphav")
 beta = helper.getParameterValueWithStepIndexAndParamName(3,"beta")
 
 input = {
+    "years_diff": years_diff,
     "realizationCount": realizationCount,
     "porePressureParams" : {
         "rho0_min": rho0.get("min"),
@@ -76,12 +81,17 @@ input = {
     "eq": formattedEarthquake
 }
 
-smallPPDF, smallWellList, disaggregationDF = runGistCore(input)
+smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
 
+if disaggregationDF.empty:
+    helper.addMessageWithStepIndex(4, "Insufficient data to generate a report, please try adjusting your inputs.", 2)
+    helper.setSuccessForStepIndex(4, False)
+else:
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF_forecast", smallPPDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_forecast", smallWellList)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF_forecast", disaggregationDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF", totalPPQuantilesDF)
 
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF", smallPPDF)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList", smallWellList)
-helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF", disaggregationDF)
-# helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF", totalPPQuantilesDF)
+    helper.setSuccessForStepIndex(4, True)
 
 helper.writeResultsFile()
