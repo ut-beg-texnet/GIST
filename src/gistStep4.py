@@ -51,6 +51,7 @@ days_diff = (future_date - eq_date).days
 years_diff = days_diff / 365
 
 realizationCount = helper.getParameterValueWithStepIndexAndParamName(3,"realizationCount")
+wellType = helper.getParameterValueWithStepIndexAndParamName(3,"wellType")
 rho0 = helper.getParameterValueWithStepIndexAndParamName(3,"rho0")
 phi = helper.getParameterValueWithStepIndexAndParamName(3,"phi")
 nta = helper.getParameterValueWithStepIndexAndParamName(3,"nta")
@@ -81,13 +82,23 @@ input = {
     "eq": formattedEarthquake
 }
 
-smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
+if wellType == 'Shallow':
+    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_shallow.csv'
+    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_shallow.csv'
+else:
+    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
+    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
+
+smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF = runGistCore(input, wellcsv, injectioncsv)
 
 if disaggregationDF.empty:
-    helper.addMessageWithStepIndex(3, "Insufficient data to generate a report, please try adjusting your inputs.", 2)
+    helper.addMessageWithStepIndex(3, "No Wells Found.", 2)
     helper.setSuccessForStepIndex(3, False)
 else:
-    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
+    if wellType == 'Shallow':
+        wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_shallow.csv'
+    else:
+        wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
     # orderedWellList with proposed Future Rate initalize at 10000
     originalWellDF = pd.read_csv(wellcsv)
     orderedWellList = pd.DataFrame(orderedWellList, columns=['ID'])
@@ -107,7 +118,8 @@ else:
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF_updated", smallPPDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_updated", smallWellList)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "disaggregationDF_updated", disaggregationDF)
-    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPQuantilesDF", totalPPQuantilesDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPQuantilesDF_updated", totalPPQuantilesDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPSpaghettiDF_updated", totalPPSpaghettiDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "orderedWellListWithFutureRates", orderedWellListWithFutureRates)
 
     helper.setSuccessForStepIndex(2, True)

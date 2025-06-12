@@ -16,12 +16,10 @@ from gistMC import prepRTPlot
 from gistMC import prepDisaggregationPlot
 from gistMC import getWinWells
 from gistMC import summarizePPResults
-# from gistMC import prepTotalPressureTimeSeriesPlot
+from gistMC import prepTotalPressureTimeSeriesQuantilesPlot
+from gistMC import prepTotalPressureTimeSeriesSpaghettiPlot
 
-wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
-injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_data.csv'
-
-def runGistCore(input):
+def runGistCore(input, wellcsv, injectioncsv):
     # Initialize gistMC class
     gistMC_instance = gistMC()
     gistMC_instance.initPP()
@@ -57,8 +55,15 @@ def runGistCore(input):
     disaggregationDF = prepDisaggregationPlot(filteredDF,orderedWellList,jitter=0.1)
 
     # time series plot
-    # winWellsDF,winInjDF = getWinWells(filteredDF,currentWellsDF,inj_df)
-    # scenarioTSRDF,dPTimeSeriesR,wellIDsR,dayVecR = gistMC_instance.runPressureScenariosTimeSeries(eq,winWellsDF,winInjDF, verbose=2)
-    # totalPPQuantilesDF = prepTotalPressureTimeSeriesPlot(dPTimeSeriesR,dayVecR,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'), )
+    winWellsDF,winInjDF = getWinWells(filteredDF,currentWellsDF,inj_df)
+    scenarioTSRDF,dPTimeSeriesR,wellIDsR,dayVecR = gistMC_instance.runPressureScenariosTimeSeries(eq,winWellsDF,winInjDF, verbose=2)
+    totalPPQuantilesDF = prepTotalPressureTimeSeriesQuantilesPlot(dPTimeSeriesR,dayVecR,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'))
+    totalPPSpaghettiDF = prepTotalPressureTimeSeriesSpaghettiPlot(dPTimeSeriesR,dayVecR,gistMC_instance.diffPPVec,epoch=pd.to_datetime('1970-01-01'))
+    # add unix timestamp
+    totalPPQuantilesDF['timestamp'] = pd.to_datetime(totalPPQuantilesDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
+    totalPPQuantilesDF = totalPPQuantilesDF.sort_values('timestamp').reset_index(drop=True)
 
-    return smallPPDF, smallWellList, disaggregationDF, orderedWellList
+    totalPPSpaghettiDF['timestamp'] = pd.to_datetime(totalPPSpaghettiDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
+    totalPPSpaghettiDF = totalPPSpaghettiDF.sort_values('timestamp').reset_index(drop=True)
+
+    return smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF

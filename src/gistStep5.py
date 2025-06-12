@@ -51,6 +51,7 @@ days_diff = (future_date - eq_date).days
 years_diff = days_diff / 365
 
 realizationCount = helper.getParameterValueWithStepIndexAndParamName(3,"realizationCount")
+wellType = helper.getParameterValueWithStepIndexAndParamName(3,"wellType")
 rho0 = helper.getParameterValueWithStepIndexAndParamName(3,"rho0")
 phi = helper.getParameterValueWithStepIndexAndParamName(3,"phi")
 nta = helper.getParameterValueWithStepIndexAndParamName(3,"nta")
@@ -81,16 +82,24 @@ input = {
     "eq": formattedEarthquake
 }
 
-smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
+if wellType == 'Shallow':
+    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_shallow.csv'
+    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_shallow.csv'
+else:
+    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
+    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
+
+smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF = runGistCore(input, wellcsv, injectioncsv)
 
 if disaggregationDF.empty:
-    helper.addMessageWithStepIndex(4, "Insufficient data to generate a report, please try adjusting your inputs.", 2)
+    helper.addMessageWithStepIndex(4, "No Wells Found.", 2)
     helper.setSuccessForStepIndex(4, False)
 else:
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF_forecast", smallPPDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_forecast", smallWellList)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF_forecast", disaggregationDF)
-    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF", totalPPQuantilesDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF_forecast", totalPPQuantilesDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPSpaghettiDF_forecast", totalPPSpaghettiDF)
 
     helper.setSuccessForStepIndex(4, True)
 

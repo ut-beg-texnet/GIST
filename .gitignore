@@ -6,3 +6,9 @@
 /data
 /src/__pycache__
 /.idea
+
+/src/data/disposal_inj.csv
+/src/data/disposal_well.csv
+
+/src/data/disposal_inj_b3_format.csv
+/src/data/disposal_well_b3_format.csv

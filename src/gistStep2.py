@@ -51,6 +51,7 @@ days_diff = (future_date - eq_date).days
 years_diff = days_diff / 365
 
 realizationCount = helper.getParameterValueWithStepIndexAndParamName(1,"realizationCount")
+wellType = helper.getParameterValueWithStepIndexAndParamName(1,"wellType")
 rho0 = helper.getParameterValueWithStepIndexAndParamName(1,"rho0")
 phi = helper.getParameterValueWithStepIndexAndParamName(1,"phi")
 nta = helper.getParameterValueWithStepIndexAndParamName(1,"nta")
@@ -81,20 +82,24 @@ input = {
     "eq": formattedEarthquake
 }
 
-smallPPDF, smallWellList, disaggregationDF, orderedWellList = runGistCore(input)
+if wellType == 'Shallow':
+    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_shallow.csv'
+    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_shallow.csv'
+else:
+    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
+    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
+
+smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF = runGistCore(input, wellcsv, injectioncsv)
 
 if disaggregationDF.empty:
-    helper.addMessageWithStepIndex(1, "Insufficient data to generate a report, please try adjusting your inputs.", 2)
+    helper.addMessageWithStepIndex(1, "No Wells Found.", 2)
     helper.setSuccessForStepIndex(1, False)
 else:
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "disaggregationDF", disaggregationDF)
-    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPQuantilesDF", totalPPQuantilesDF)
-
-
-    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_data.csv'
-    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_data.csv'
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPQuantilesDF", totalPPQuantilesDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPSpaghettiDF", totalPPSpaghettiDF)
 
     GISTWells = pd.read_csv(wellcsv)
     GISTInjection = pd.read_csv(injectioncsv)
