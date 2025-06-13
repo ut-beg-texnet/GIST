@@ -22,7 +22,8 @@ from gistMC import prepTotalPressureTimeSeriesSpaghettiPlot
 def runGistCore(input, wellcsv, injectioncsv):
     # Initialize gistMC class
     gistMC_instance = gistMC()
-    gistMC_instance.initPP()
+    porePressureParams = input.get("porePressureParams")
+    gistMC_instance.initPP(**porePressureParams)
     eq = input.get("eq")
     gistMC_instance.addWells(wellcsv, injectioncsv)
     forecastYears = input.get("years_diff")
