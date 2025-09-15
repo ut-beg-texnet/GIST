@@ -5,6 +5,7 @@ Copyright 2023 ExxonMobil Technology and Engineering Company
 
 Authors: MATLAB Prototype:  Lei Jin    lei.jin@exxonmobil.com
          Python port:    Bill Curry bill.curry@exxonmobil.com
+         Thanks:        Samson Marty (Caltech)
 
 Written in Python 3.6
 
@@ -22,6 +23,7 @@ import scipy.special as sc
 import scipy.interpolate as si
 
 import scipy.ndimage as sn
+import scipy.signal as sg
 ##################
 # Base libraries #
 ##################
@@ -29,7 +31,6 @@ import numpy as np
 import pandas as pd
 import math
 import gc
-
 
 #############################################
 # Contains:                                 #
@@ -46,7 +47,7 @@ import gc
 #       pressureScenario                    #
 #       runPressureGrid                     #
 #       runPressureScenariosTimeSeries      #
-#       runPressureScenariosTimeSeriesTest  #
+#       runPressureScenariosTimeSeriesConv  #
 #       pressureScenarioAniso               #
 #       runPoroelasticScenarios             #
 #       poroelasticScenario                 #
@@ -125,8 +126,6 @@ import gc
 #   A + B + C +                     #
 #   gistMC.getPressureSensitivity   #
 #####################################
-
-
 
 class gistMC:
   """
@@ -646,27 +645,12 @@ class gistMC:
         print(' gistMC.addWells: injection file day interval: ',self.injDT)
         print(' gistMC.addWells: injection file number of time samples: ',self.injNT)
       # Error checking for column names:
-      requiredColumns=['StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','StartDate','ID','WellName','APINumber']
+      requiredColumns=['StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','ID','WellName','APINumber']
       for col in requiredColumns:
         if col not in self.wellDF.columns:  print(' gistMC.addWells: ERROR: ',col,' not in well file')
     elif case=='TwoSets':
       print(' gistMC.addWells: Two sets - need to develop merge.')
     self.runAddWells=True
-    return
-
-  def checkWells(self):
-    '''
-    checkWells - gistMC subroutine to check validity of wells .csv file
-    and injection file.
-    addWells already checks column names, we need more here
-    '''
-    return
-
-  def checkInj(self):
-    '''
-    '''
-    # open self.injFile and check that all wells have injection
-    #and all injection has a well
     return
 
   def findWells(self,eq,PE=False,responseYears=0.,endDate=None,verbose=0):
@@ -848,7 +832,7 @@ class gistMC:
       injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
     # Do we need this?
     # Peter commented it out - Bill had it in
-    # injDF['Date']=pd.to_datetime(injDF['Date'])
+    #injDF['Date']=pd.to_datetime(injDF['Date'])
     ############################################################
     # Get the number of wells selected from the injection file #
     ############################################################
@@ -1076,19 +1060,19 @@ class gistMC:
     # Compute r squared for all wells [nwC] #
     ##############################################
     r2=wellDistances*wellDistances
-    if verbose>1: print('runPressureScenariosTimeSeries r2 min/max: ',min(r2),max(r2))
+    if verbose>1: print('runPressureScenariosVectorized r2 min/max: ',min(r2),max(r2))
     ################################################
     # Compute property-related part of ppp [nReal] #
     # To-do: extend to size [nReal,nwC]            # 
     ################################################
     TSOver4TT=self.TVec*self.SVec/(4.*self.TVec*self.TVec)
-    if verbose>1: print('runPressureScenariosTimeSeries TSOver4TT min/max: ',min(TSOver4TT.flatten()),max(TSOver4TT.flatten()))
+    if verbose>1: print('runPressureScenariosVectorized TSOver4TT min/max: ',min(TSOver4TT.flatten()),max(TSOver4TT.flatten()))
     ###############################################################################
     # Compute outer product of r2 and TSOver4TT to get ppp [nwC,nReal]            #
     # To-do: change from outer product to element-by-element when TSOver4TT is 2D #
     ###############################################################################
     ppp=np.outer(r2,TSOver4TT)
-    if verbose>1: print('runPressureScenariosTimeSeries ppp min/max: ',min(ppp.flatten()),max(ppp.flatten()))
+    if verbose>1: print('runPressureScenariosVectorized ppp min/max: ',min(ppp.flatten()),max(ppp.flatten()))
     #####################################
     # Compute gRhoOverT [nReal]         #
     # To-do: extend to size [nReal,nwC] #
@@ -1107,7 +1091,7 @@ class gistMC:
     # different heights corresponding to changes in injection rates over time - dQdtArray #
     #######################################################################################
     durations=np.max(secArray)-secArray+dts
-    if verbose>1: print('runPressureScenariosTimeSeries durations min/max: ',min(durations),max(durations))
+    if verbose>1: print('runPressureScenariosVectorized durations min/max: ',min(durations),max(durations))
     #######################################################################################
     # This has the well function in it - sc.exp1. Moving this out of the loop speeds up   #
     # computation vs. FSP for a time series by O(nt). epp is [nwC,nReal,nt].              #
@@ -1116,7 +1100,7 @@ class gistMC:
     # To-do: Update with new shape of ppp.                                                #
     #######################################################################################
     epp=sc.exp1(ppp.reshape((nwC,self.nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(self.nReal,1))
-    if verbose>1: print('runPressureScenariosTimeSeries epp min/max: ',min(epp.flatten()),max(epp.flatten()))
+    if verbose>1: print('runPressureScenariosVectorized epp min/max: ',min(epp.flatten()),max(epp.flatten()))
     ##########################
     # Loop over output time: #
     ##########################
@@ -1159,7 +1143,7 @@ class gistMC:
     scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
     return scenarioDF
 
-  def runPressureScenariosTimeSeries(self,eq,consideredWells,injDF,verbose=0):
+  def runPressureScenariosTimeSeries(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
     """
     ###############################################################################
     # runPressureScenariosTimeSeries:                                             #
@@ -1173,6 +1157,12 @@ class gistMC:
     #                          with 'ID' and 'Distances' columns                 #
     #        injDF:            dataframe of injection produced by self.findWells #
     #                          with 'ID', 'Days' and 'BPD' columns               #
+    #        SVec:             Optional list of storativities to model with      #
+    #                          instead of the Monte Carlo samples in the object  #
+    #        TVec:             Optional list of transmissivities to model with   #
+    #                          instead of the Monte Carlo samples in the object  #
+    #        rhoVec:           Optional list of densities to model with          #
+    #                          instead of the Monte Carlo samples in the object  #
     ##############################################################################
     # Outputs:                                                                   #
     #        scenarioDF:       dataframe of pore pressure contribution scenarios #
@@ -1190,6 +1180,20 @@ class gistMC:
     #         Currently implemented in runPressureGrid                #
     ###################################################################
     """
+    if SVec is None:
+      SVec=self.SVec
+      nReal=self.nReal
+    else:
+      SVec=SVec
+      nReal=len(SVec)
+    if TVec is None:
+      TVec=self.TVec
+    else:
+      TVec=TVec
+    if rhoVec is None:
+      rhoVec=self.rhoVec
+    else:
+      rhoVec=rhoVec
     eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
     ########################################################################
     # Prep injection data to get arrays needed for vectorized calculations #
@@ -1214,7 +1218,7 @@ class gistMC:
     # Compute property-related part of ppp [nReal] #
     # To-do: extend to size [nReal,nwC]            # 
     ################################################
-    TSOver4TT=self.TVec*self.SVec/(4.*self.TVec*self.TVec)
+    TSOver4TT=TVec*SVec/(4.*TVec*TVec)
     if verbose>1: print('runPressureScenariosTimeSeries TSOver4TT min/max: ',min(TSOver4TT.flatten()),max(TSOver4TT.flatten()))
     ###############################################################################
     # Compute outer product of r2 and TSOver4TT to get ppp [nwC,nReal]            #
@@ -1226,11 +1230,11 @@ class gistMC:
     # Compute gRhoOverT [nReal]         #
     # To-do: extend to size [nReal,nwC] #
     #####################################
-    gRhoOverT=self.rhoVec*self.g/(4.*np.pi*self.TVec)
+    gRhoOverT=self.rhoVec*self.g/(4.*np.pi*TVec)
     ########################
     # Initialize output dP #
     ########################
-    dP=np.zeros([nwC,self.nReal,nt])
+    dP=np.zeros([nwC,nReal,nt])
     ######################################
     # Convert injDT from days to seconds #
     ###################################### 
@@ -1249,14 +1253,14 @@ class gistMC:
     # I'm sure that there are better ways to broadcast these shapes but I don't know how! #
     # To-do: Update with new shape of ppp.                                                #
     #######################################################################################
-    epp=sc.exp1(ppp.reshape((nwC,self.nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(self.nReal,1))
+    epp=sc.exp1(ppp.reshape((nwC,nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(nReal,1))
     if verbose>1: print('runPressureScenariosTimeSeries epp min/max: ',min(epp.flatten()),max(epp.flatten()))
     ##########################
     # Loop over output time: #
     ##########################
     for it in range(1,nt):
       if verbose>0:
-        if it%10==0: print('runPRessureScenariosTimeSeries time step ',it,' of ',nt)
+        if it%10==0: print('runPressureScenariosTimeSeries time step ',it,' of ',nt)
       #########################################################
       # Get output of well function x the change in injection #
       # We take the last 'it' values of epp that is a series  #
@@ -1268,12 +1272,16 @@ class gistMC:
       # scipy.ndimage.convolve1d(dQdtarray.reshape((nwC,1,it)).repeat(self.nReal,1), epp, axis=-1, mode='constant')
       # To-do: Use Samson Marty's fftconvolve approach
       #########################################################
-      timeStepsSum=np.sum(epp[:,:,-it:] * dQdtArray[:,:it].reshape((nwC,1,it)).repeat(self.nReal,1),axis=2)
+      timeStepsSum=np.sum(epp[:,:,-it:] * dQdtArray[:,:it].reshape((nwC,1,it)).repeat(nReal,1),axis=2)
       ########################################################################
       # Multiply the sum of the time steps with gRhoOverT and convert to PSI #
       # dP is the change in pressure from the first time step [nw,nReal,nt]  #
       ########################################################################
-      dP[:,:,it]=timeStepsSum * gRhoOverT.reshape((1,self.nReal)).repeat(nwC,0) / 6894.76
+      dP[:,:,it]=timeStepsSum * gRhoOverT.reshape((1,nReal)).repeat(nwC,0) / 6894.76
+    ################################
+    # Check for unphysical outputs #
+    ################################
+    if np.any(dP<0.): print("runPressureScenariosTimeSeries: Negative pressures found: ",np.argmin(dP))
     ###################################################
     # Linear interpolation between the two time steps #
     # bounding the EQ time dPatEQ [nw,nReal]          #
@@ -1290,10 +1298,20 @@ class gistMC:
     ##########################################
     # Get dataframe of output scenarios from #
     # input numpy arrays and well dataframe  #
+    # If the number of realizations hasn't   #
+    # changed we don't have special SVec,    #
+    # TVec, and rhoVec                       #
     ##########################################
-    scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
-    if np.any(dP<0.): print("runPressureScenariosTimeSeries: Negative pressures found: ",np.argmin(dP))
-    return scenarioDF,dP,wellIDs,dayVec
+    if nReal==self.nReal:
+      scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
+      return scenarioDF,dP,wellIDs,dayVec
+    ########################################
+    # If we have a different nReal we have #
+    # added optional SVec, TVec, rhoVec.   #
+    # No need to output scenarioDF         #
+    ########################################
+    else:
+      return dP,wellIDs,dayVec
 
   def runPressureScenariosTimeSeriesTest(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
     """
@@ -1405,7 +1423,9 @@ class gistMC:
       # Loop over wells
       #   input should be epp[iWell,:,:], 1D weights dQdt[iWell,:]
       #    How do I center the filter? dQdtArray is nw x nt
-      dP[iW,:,:]=-np.flip(sn.convolve1d(input=epp[iW,:,:], weights=dQdtArray[iW,:], axis=-1, mode='constant',cval=0,origin=-int((nt-1)/2)),axis=1)
+      #dP[iW,:,:]=-np.flip(sn.convolve1d(input=epp[iW,:,:], weights=dQdtArray[iW,:], axis=-1, mode='constant',cval=0,origin=-int((nt-1)/2)),axis=1)
+      dP[iW,:,:]=-np.flip(sn.convolve1d(input=epp[iW,:,:], weights=dQdtArray[iW,:], axis=-1, mode='constant',cval=0),axis=1)
+      #for iR in range(nReal):
       #  dP[iW,iR,:]=sn.correlate1d(input=dQdtArray[iW,:], weights=epp[iW,iR,:], axis=-1, mode='constant',cval=0)
     dP=dP * gRhoOverT.reshape((1,nReal,1)).repeat(nwC,0).repeat(nt,2) / 6894.76
     ###################################################
@@ -1430,7 +1450,144 @@ class gistMC:
     if np.any(dP<0.): print("runPressureScenariosTimeSeries: Negative pressures found: ",np.argmin(dP))
     return scenarioDF,dP,wellIDs,dayVec
 
-
+  def runPressureScenariosTimeSeriesConv(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
+    """
+    ###############################################################################
+    # runPressureScenariosTimeSeries:                                             #
+    #        Version of pore pressure modeling to output time series of pressures.#
+    #        This will be slower than runPressureScenarios which only puts out    #
+    #        pressures at the EQ time at one time.                                #
+    ###############################################################################
+    # Inputs:                                                                    #
+    #        eq:               earthquake dataframe with 'Origin Date' column    #
+    #        consideredWells:  dataframe of wells produced by self.findWells     #
+    #                          with 'ID' and 'Distances' columns                 #
+    #        injDF:            dataframe of injection produced by self.findWells #
+    #                          with 'ID', 'Days' and 'BPD' columns               #
+    #        SVec(Optional):  Vector of storativities for sensitivity analysis   #
+    #        TVec(Optional):  Vector of transmissivities for sensitivity analysis#          
+    ##############################################################################
+    # Outputs:                                                                   #
+    #        scenarioDF:       dataframe of pore pressure contribution scenarios #
+    #                          with many columns at earthquake date              #
+    #        dP:               pressure time series at eq location               #
+    #                          nwC x nReal is pretty big                         #
+    #                          size(nwC x nReal x nt)                            #
+    ##############################################################################
+    # To-do:  Optionally give a list of r values to compute on a grid #
+    #         Currently implemented in runPressureGrid                #
+    #         Add different values for pressure sensitivity test      #
+    ###################################################################
+    """
+    if SVec is None:
+      SVec=self.SVec
+      nReal=self.nReal
+    else:
+      SVec=SVec
+      nReal=len(SVec)
+    if TVec is None:
+      TVec=self.TVec
+    else:
+      TVec=TVec
+    if rhoVec is None:
+      rhoVec=self.rhoVec
+    else:
+      rhoVec=rhoVec
+    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
+    ########################################################################
+    # Prep injection data to get arrays needed for vectorized calculations #
+    ########################################################################
+    (wellIDs,nwC,dayVec,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,f)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None,verbose=verbose)
+    if verbose>0: print('runPressureScenariosTimeSeriesConv input time axis information - nt:',nt,'; ot:',ot,'; dt:',self.injDT,' earthquake index: ',ieq,' f ',f)
+    if verbose>0: print('runPressureScenariosTimeSeriesConv output time axis information - len(secArray):',nt,'; min(secArray):',ot,'; dt:',secArray[1]-secArray[0],' earthquake index: ',ieq,' f ',f)
+    ###########################################
+    # Convert bpdArray to Q - m3/s [nwC,nt+1] #
+    ###########################################
+    QArray=1.84013e-6 *bpdArray
+    #######################################################
+    # Take a derivative of QArray along the time (0) axis #
+    # This array now has one fewer time samples [nwC,nt]#
+    #######################################################
+    dQdtArray=np.diff(QArray,axis=1)
+    ##############################################
+    # Compute r squared for all wells [nwC] #
+    ##############################################
+    r2=wellDistances*wellDistances
+    if verbose>1: print('runPressureScenariosTimeSeriesConv r2 min/max: ',min(r2),max(r2))
+    #####################################################
+    # Compute property-related part of ppp [nReal] #
+    #####################################################
+    TSOver4TT=TVec*SVec/(4.*TVec*TVec)
+    if verbose>1: print('runPressureScenariosTimeSeriesConv TSOver4TT min/max: ',min(TSOver4TT.flatten()),max(TSOver4TT.flatten()))
+    #######################################################################
+    # Compute outer product of r2 and TSOver4TT to get ppp [nwC,nReal] #
+    #######################################################################
+    ppp=np.outer(r2,TSOver4TT)
+    if verbose>1: print('runPressureScenariosTimeSeriesConv ppp min/max: ',min(ppp.flatten()),max(ppp.flatten()))
+    #############################
+    # Compute gRhoOverT [nReal] #
+    #############################
+    gRhoOverT=rhoVec*self.g/(4.*np.pi*TVec)
+    ########################
+    # Initialize output dP #
+    ########################
+    dP=np.zeros([nwC,nReal,nt])
+    ######################################
+    # Convert injDT from days to seconds #
+    ###################################### 
+    dts=self.injDT*24*60*60
+    #######################################################################################
+    # Create a vector of injection durations starting with all time and ending with dt.   #
+    # Variable-injection Theis modeling sums a shortening series of boxcars with          #
+    # different heights corresponding to changes in injection rates over time - dQdtArray #
+    #######################################################################################
+    durations=np.max(secArray)-secArray+dts
+    if verbose>1: print('runPressureScenariosTimeSeriesConv durations min/max: ',min(durations),max(durations))
+    #######################################################################################
+    # This has the well function in it - sc.exp1. Moving this out of the loop speeds up   #
+    # computation vs. FSP for a time series by O(nt). epp is [nwC,nReal,nt].              #
+    # We reuse parts of this array in the summation as we assume that dt is fixed.        #
+    # I'm sure that there are better ways to broadcast these shapes but I don't know how! #
+    #######################################################################################
+    epp=sc.exp1(ppp.reshape((nwC,nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(nReal,1))
+    if verbose>1: print('runPressureScenariosTimeSeriesConv epp min/max: ',min(epp.flatten()),max(epp.flatten()))
+    #dP=np.zeros([nwC,self.nReal,nt])
+    #
+    # Use convolution with the scipy.signal.fftconvolve
+    # dP output should be [nwC,nReal,nt]
+    # dQdtArray is [nwC,nt]
+    # epp is [nwC,nReal,nt]
+    dP=-np.flip(sg.fftconvolve(epp[:,:,:],dQdtArray[:,np.newaxis,:], mode='same'),axis=2)
+    #for iW in range(nwC):
+    #  if iW%10==0: print('runPressureScenariosTimeSeriesTest Well ',iW+1,' of ',nwC)
+    #  # Loop over wells
+    #  #   input should be epp[iWell,:,:], 1D weights dQdt[iWell,:]
+    #  #    How do I center the filter? dQdtArray is nw x nt
+    #  dP[iW,:,:]=-np.flip(sn.convolve1d(input=epp[iW,:,:], weights=dQdtArray[iW,:], axis=-1, mode='constant',cval=0,origin=-int((nt-1)/2)),axis=1)
+    #  #  dP[iW,iR,:]=sn.correlate1d(input=dQdtArray[iW,:], weights=epp[iW,iR,:], axis=-1, mode='constant',cval=0)
+    dP=dP * gRhoOverT.reshape((1,nReal,1)).repeat(nwC,0).repeat(nt,2) / 6894.76
+    ###################################################
+    # Linear interpolation between the two time steps #
+    # bounding the EQ time dPatEQ [nw,nReal]          #
+    ###################################################
+    dPatEQ=((1.-f)*dP[:,:,ieq])+(f*dP[:,:,ieq+1])
+    ###########################################################
+    # Sum over wells to get total Pressure at EQ time [nReal] #
+    ###########################################################
+    totalPressureAtEQ=np.sum(dPatEQ,axis=0,keepdims=True)
+    #########################################################
+    # Calculate percentages for each realization [nw,nReal] #
+    #########################################################
+    percentages=100.* dPatEQ / totalPressureAtEQ.repeat(nwC,0)
+    ##########################################
+    # Get dataframe of output scenarios from #
+    # input numpy arrays and well dataframe  #
+    ##########################################
+    scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
+    # Check for negative pressures
+    if np.any(dP<0.): print("runPressureScenariosTimeSeriesConv: Negative pressures found: ",np.argmin(dP))
+    return scenarioDF,dP,wellIDs,dayVec
+  
   def runPressureGrid(self,wellDF,injDF,grid,dt=10,verbose=0):
     '''
     ###############################################################
@@ -1495,9 +1652,11 @@ class gistMC:
     #  # Loop over wells
     #  dP[:,:,iW,:,:]=-np.flip(sn.convolve1d(input=epp[:,:,iW,:,:], weights=dQdtArray[iW,:], axis=-1, mode='constant',cval=0),axis=3)
     #dP=dP * gRhoOverT.reshape((1,1,1,self.nReal,1)).repeat(nw,2).repeat(nx,0).repeat(ny,1).repeat(nt,4) / 6894.76
-    for it in range(1,nt):
-      timeStepsSum=np.sum(epp[:,:,:,:,-it:] * dQdtArray[:,:it].reshape((1,1,nw,1,it)).repeat(self.nReal,3),axis=4)
-      dP[:,:,:,:,it]=timeStepsSum.reshape(nx,ny,nw,self.nReal) * gRhoOverT.reshape((1,1,1,self.nReal)).repeat(nw,2).repeat(nx,0).repeat(ny,1) / 6894.76
+    dP=-np.flip(sg.fftconvolve(epp[:,:,:,:,:],dQdtArray[np.newaxis,np.newaxis,:,np.newaxis,:], mode='same'),axis=4)
+    dP= dP*gRhoOverT.reshape((1,1,1,self.nReal,1)).repeat(nw,2).repeat(nx,0).repeat(ny,1).repeat(nt,4) / 6894.76
+    #for it in range(1,nt):
+    #  #timeStepsSum=np.sum(epp[:,:,:,:,-it:] * dQdtArray[:,:it].reshape((1,1,nw,1,it)).repeat(self.nReal,3),axis=4)
+    #  dP[:,:,:,:,it]=timeStepsSum.reshape(nx,ny,nw,self.nReal) * gRhoOverT.reshape((1,1,1,self.nReal)).repeat(nw,2).repeat(nx,0).repeat(ny,1) / 6894.76
     ##############
     # dP is big! #
     ##############
@@ -3535,6 +3694,7 @@ def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,i
                                 Spaghetti   - dataframe of all pressure models for that well
                                 Disposal    - dataframe of disposal for that well
                                 WellInfo    - Name, ID, Distance, ...
+  To-do: This is a memory hog and is the one thing that will OOM in a run with thousands of realizations.
   '''
   # Initialize output dictionary
   outPerWellDict={}
