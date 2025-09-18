@@ -30,7 +30,7 @@ def runGistCore(input, wellcsv, injectioncsv):
     considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq,PE=False, responseYears=forecastYears)
 
     # r-t plot combination of considered well and excluded wells df reference plots.py
-    smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, 1980, [0.1, 2], eq, True)
+    smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, 1980, [gistMC_instance.diffPPMin, gistMC_instance.diffPPMax], eq, True)
 
     # disaggregationPlot plot
     currentWellsDF=considered_wells_df[considered_wells_df['EncompassingDay']<0.].reset_index(drop=True)

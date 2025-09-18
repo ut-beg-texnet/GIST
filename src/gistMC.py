@@ -278,6 +278,7 @@ class gistMC:
     self.TVec=TVec
     self.diffPPVec=diffPPVec
     self.diffPPMax=np.max(diffPPVec)
+    self.diffPPMin=np.min(diffPPVec)
     self.CVec=CVec
     #
     # Set initialized Flag as done
