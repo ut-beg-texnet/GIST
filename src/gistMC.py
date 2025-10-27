@@ -1003,7 +1003,7 @@ class gistMC:
       responseDays=(pd.to_datetime(endDate)-pd.to_datetime(eq['Origin Date'])).days
       consideredMask = encompassingDays<responseDays
     if verbose>0: print('gistMC.findWellsVec:  Selecting ',sum(consideredMask),' and excluding ',sum(~consideredMask),' wells')
-    if sum(consideredMask==0): raise ValueError('No wells were selected for this event. Find more wells or increase permeability.')
+    if sum(consideredMask)==0: raise ValueError('No wells were selected for this event. Find more wells or increase permeability.')
     #############################################################################
     # Prior code used the  diffusionDistances>(wellDistances-eqUncert) criteria #
     # this made it harder to select wells for the forecast later on             #
