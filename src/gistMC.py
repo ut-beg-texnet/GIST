@@ -81,8 +81,6 @@ import time
 #       prepDisaggregationPlot              #
 #       getWinWells                         ###############
 #       getPerWellPressureTimeSeriesSpaghettiAndQuantiles #
-#       getPerWellPressureTimeSeriesQuantiles             #
-#       getPerWellPressureTimeSeriesSpaghetti             #
 #       prepPressureAndDisposalTimeSeriesPlots            #
 #       prepTotalPressureTimeSeriesQuantilesPlot          #
 #       prepTotalPressureTimeSeriesSpaghettiPlot          #
@@ -3820,73 +3818,6 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
   PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
   return PPQuantilesDF,PPSpaghettiDF
 
-def getPerWellPressureTimeSeriesQuantiles(deltaPP,dayVec,wellIDs,nQuantiles=11,epoch=pd.to_datetime('01-01-1970'),verbose=0):
-  '''
-  getPerWellPressureTimeSeriesQuantiles
-  Generate input to a time series line plot from numpy array of time series pressures.
-  Inputs:
-    deltaPP    - output from runTimeSeries (nw, nReal, nt)
-    dayVec     - vector of length nt with days from start of epoch (1970)
-    wellIDs    - vector of integer well identifiers (nw)
-    nQuantiles - number of curves to generate evenly distributed around the number of 
-                 realizations, default 11. This should be odd to get the median.
-  Outputs:
-    PPQuantilesDF - dataframe with columns: Day,WellID,DeltaPressure,Percentile
-  '''
-  nReal=deltaPP.shape[1]
-  nt=deltaPP.shape[2]
-  nw=deltaPP.shape[0]
-  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - sizes: ',nReal,nt,nw)
-  PPQuantilesDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
-  #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
-  # Calculate order ofdeltaPP for each value to get percentiles
-  #deltaPPArgSort=np.argsort(deltaPP,axis=1)
-  if verbose>1: print('getPerWellPressureTimeSeriesQuantiles - after argsort: ',nReal,nt,nw)
-  deltaPPSorted=np.zeros([nReal,nt])
-  deltaPPOrder=np.zeros([nReal,nt])
-  deltaPPPercentile=np.zeros([nReal,nt])
-  ptiles_list=list(range(0,nReal))
-  ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
-  indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
-  quantiles=[ptiles[i] for i in indices]
-  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - quantiles: ',quantiles)
-  for iw in range(nw):
-    deltaPPArgSort=np.argsort(deltaPP[iw,:,:].reshape([nReal,nt]),axis=0)
-    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - well: ',iw,' of ',nw)
-    for it in range(nt):
-      for iR in range(nReal):
-        deltaPPSorted[deltaPPArgSort[iR,it],it]=deltaPP[iw,iR,it]
-        deltaPPPercentile[deltaPPArgSort[iR,it],it]=round(100.*iR/(nReal-1),1)
-        deltaPPOrder[deltaPPArgSort[iR,it],it]=iR
-    # Now just extract dataframe for this well
-    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - array sizes: ',deltaPP[iw,:,:].shape,deltaPPPercentile[:,:].shape,deltaPPOrder[:,:].shape),np.tile(dayVec,nReal).shape,np.arange(nReal).repeat(nt).shape,np.repeat(wellIDs[iw],nReal*nt)
-    d={'DeltaPressure':deltaPP[iw,:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Order':deltaPPOrder[:,:].flatten(),'Percentile':deltaPPPercentile[:,:].flatten(),'WellID':np.repeat(wellIDs[iw],nReal*nt)}
-    wellPPDF=pd.DataFrame(d)
-    winWellPPDF=wellPPDF[wellPPDF['Percentile'].isin(quantiles)]
-    PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
-  PPQuantilesDF['Date']=epoch+pd.to_timedelta(PPQuantilesDF['Days'],unit='d')
-  return PPQuantilesDF
-
-def getPerWellPressureTimeSeriesSpaghetti(deltaPP,dayVec,diffPPVec,wellIDs,epoch=pd.to_datetime('01-01-1970'),verbose=0):
-  '''
-  getPerWellPressureTimeSeriesSpaghetti
-  Generate input to a time series line plot from numpy array of time series pressures.
-  Inputs:
-    deltaPP    - output from runTimeSeries (nw, nReal, nt)
-    dayVec     - vector of length nt with days from start of epoch (1970)
-    diffPPVec  - vector of diffusivities for different realizations (nReal)
-    wellIDs    - vector of integer well identifiers (nw)
-  Outputs:
-    PPSpaghettiDF - dataframe with columns: Day,WellID,DeltaPressure,Realization,Diffusivity
-  '''
-  nReal=deltaPP.shape[1]
-  nt=deltaPP.shape[2]
-  nw=deltaPP.shape[0]
-  PPSpaghettiDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
-  PPSpaghettiDF=pd.DataFrame({'DeltaPressure':deltaPP[:,:,:].flatten(), 'Days':np.tile(dayVec,nw*nReal), 'Realization':np.tile(np.arange(nReal),nw).repeat(nt),'WellID':np.repeat(wellIDs,nReal*nt), 'Diffusivity':np.tile(diffPPVec,nw).repeat(nt)})
-  PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
-  return PPSpaghettiDF
-                             
 def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,injDF,wellIDs,verbose=0):
   '''
   prepPressureAndDisposalTimeSeriesPlots - take output from getPerWellPressureTimeSeriesQuantiles
