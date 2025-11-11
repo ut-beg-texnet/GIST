@@ -22,14 +22,15 @@ from gistMC import prepTotalPressureTimeSeriesSpaghettiPlot
 def runGistCore(input, wellcsv, injectioncsv):
     # Initialize gistMC class
     gistMC_instance = gistMC()
-    gistMC_instance.initPP()
+    porePressureParams = input.get("porePressureParams")
+    gistMC_instance.initPP(**porePressureParams)
     eq = input.get("eq")
     gistMC_instance.addWells(wellcsv, injectioncsv)
     forecastYears = input.get("years_diff")
     considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq,PE=False, responseYears=forecastYears)
 
     # r-t plot combination of considered well and excluded wells df reference plots.py
-    smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, 1980, [0.1, 2], eq, True)
+    smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, 1980, [gistMC_instance.diffPPMin, gistMC_instance.diffPPMax], eq, True)
 
     # disaggregationPlot plot
     currentWellsDF=considered_wells_df[considered_wells_df['EncompassingDay']<0.].reset_index(drop=True)
