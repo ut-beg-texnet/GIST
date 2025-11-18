@@ -7,6 +7,8 @@
 /src/__pycache__
 /.idea
 
+**/__pycache__/
+
 /src/data/disposal_inj.csv
 /src/data/disposal_well.csv
 

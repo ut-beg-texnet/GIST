@@ -28,19 +28,44 @@ helper = TexNetWebToolLaunchHelper(scratchPath)
 argsData = helper.argsData
 
 #getParameterValueWithStepIndexAndParamName
-Earthquake = helper.getParameterValueWithStepIndexAndParamName(0,"Earthquake").get("selectedRow").get("attributes")
+eventType = helper.getParameterValueWithStepIndexAndParamName(0,"eventType")
 
-date = Timestamp(Earthquake.get("Origin Date"), unit="ms")
-formatted_date = date.strftime("%Y-%m-%d")
+formattedEarthquake = {}
 
-formattedEarthquake = {
-    "Latitude": Earthquake.get("Latitude (WGS84)"),
-    "LatitudeError": Earthquake.get("Latitude Error (km)"),
-    "Longitude": Earthquake.get("Longitude (WGS84)"),
-    "LongitudeError": Earthquake.get("Longitude Error (km)"),
-    "Origin Date": formatted_date,
-    "EventID": Earthquake.get("EventID")
-}
+if eventType == 'Earthquake':
+
+    Earthquake = helper.getParameterValueWithStepIndexAndParamName(0,"Earthquake").get("selectedRow").get("attributes")
+
+    date = Timestamp(Earthquake.get("Origin Date"), unit="ms")
+    formatted_date = date.strftime("%Y-%m-%d")
+
+    formattedEarthquake = {
+        "Latitude": Earthquake.get("Latitude (WGS84)"),
+        "LatitudeError": Earthquake.get("Latitude Error (km)"),
+        "Longitude": Earthquake.get("Longitude (WGS84)"),
+        "LongitudeError": Earthquake.get("Longitude Error (km)"),
+        "Origin Date": formatted_date,
+        "EventID": Earthquake.get("EventID")
+    }
+
+if eventType == 'Scenario':
+
+    scenarioLoc = helper.getParameterValueWithStepIndexAndParamName(0,"scenarioLoc")
+    scenarioDate = helper.getParameterValueWithStepIndexAndParamName(0,"scenarioDate")
+    
+    date = Timestamp(scenarioDate, unit="ms")
+    formatted_date = date.strftime("%Y-%m-%d")
+
+    #this is a hypothecical earthquake
+    formattedEarthquake = {
+        "Latitude": scenarioLoc.get("y"),
+        "LatitudeError": 0,
+        "Longitude": scenarioLoc.get("x"),
+        "LongitudeError": 0,
+        "Origin Date": formatted_date,
+        "EventID": "AAAAAA"
+    }
+
 
 forecastDate = helper.getParameterValueWithStepIndexAndParamName(1,"forecastEndDate")
 
@@ -89,7 +114,7 @@ else:
     wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
     injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
 
-smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF = runGistCore(input, wellcsv, injectioncsv)
+smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF = runGistCore(input, wellcsv, injectioncsv)
 
 if disaggregationDF.empty:
     helper.addMessageWithStepIndex(1, "No Wells Found.", 2)
@@ -100,6 +125,8 @@ else:
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "disaggregationDF", disaggregationDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPQuantilesDF", totalPPQuantilesDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPSpaghettiDF", totalPPSpaghettiDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "allPerWellPPQuantilesDF", allPerWellPPQuantilesDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "allPerWellPPSpaghettiDF", allPerWellPPSpaghettiDF)
 
     GISTWells = pd.read_csv(wellcsv)
     GISTInjection = pd.read_csv(injectioncsv)

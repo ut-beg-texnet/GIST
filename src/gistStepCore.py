@@ -18,6 +18,7 @@ from gistMC import getWinWells
 from gistMC import summarizePPResults
 from gistMC import prepTotalPressureTimeSeriesQuantilesPlot
 from gistMC import prepTotalPressureTimeSeriesSpaghettiPlot
+from gistMC import getPerWellPressureTimeSeriesSpaghettiAndQuantiles
 
 def runGistCore(input, wellcsv, injectioncsv):
     # Initialize gistMC class
@@ -67,4 +68,26 @@ def runGistCore(input, wellcsv, injectioncsv):
     totalPPSpaghettiDF['timestamp'] = pd.to_datetime(totalPPSpaghettiDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
     totalPPSpaghettiDF = totalPPSpaghettiDF.sort_values('timestamp').reset_index(drop=True)
 
-    return smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF
+    allPerWellPPQuantilesDF,allPerWellPPSpaghettiDF = getPerWellPressureTimeSeriesSpaghettiAndQuantiles(dPTimeSeriesR,dayVecR,gistMC_instance.diffPPVec,wellIDsR,nQuantiles=11,epoch=pd.to_datetime('01-01-1970'))
+
+    # combine well name and well id to make the subgraph column needed for graph filtering. drop the unused columns.
+    allPerWellPPQuantilesDF['subgraph'] = allPerWellPPQuantilesDF['WellID'].map(
+        smallWellList.set_index('ID').apply(lambda row: f"{row['WellName']} ({row.name})", axis=1)
+    )
+
+    allPerWellPPQuantilesDF['timestamp'] = pd.to_datetime(allPerWellPPQuantilesDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
+    allPerWellPPQuantilesDF = allPerWellPPQuantilesDF.sort_values('timestamp').reset_index(drop=True)
+
+    allPerWellPPQuantilesDF = allPerWellPPQuantilesDF.drop(columns=['Days', 'Realization', 'Order', 'Date', 'WellID'])
+
+    allPerWellPPSpaghettiDF['subgraph'] = allPerWellPPSpaghettiDF['WellID'].map(
+        smallWellList.set_index('ID').apply(lambda row: f"{row['WellName']} ({row.name})", axis=1)
+    )
+
+    allPerWellPPSpaghettiDF['timestamp'] = pd.to_datetime(allPerWellPPSpaghettiDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
+    allPerWellPPSpaghettiDF = allPerWellPPSpaghettiDF.sort_values('timestamp').reset_index(drop=True)
+
+    allPerWellPPSpaghettiDF = allPerWellPPSpaghettiDF.drop(columns=['Days', 'Realization', 'Date', 'WellID'])
+     
+
+    return smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF

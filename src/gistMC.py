@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 import math
 import gc
-
+import time
 #############################################
 # Contains:                                 #
 #   Classes:                                #
@@ -42,11 +42,13 @@ import gc
 #       initPPAniso                         #
 #       writeRealizations                   #
 #       addWells                            #
-#       findWells                           #
-#       runPressureScenarios                #
-#       pressureScenario                    #
+#       findWells (deprecated)              #
+#       findWellsVec                        #
+#       runPressureScenarios (deprecated)   #
+#       runPressureScenariosVec             #
+#       pressureScenario (deprecated)       #
 #       runPressureGrid                     #
-#       runPressureScenariosTimeSeries      #
+#       runPressureScenariosTimeSeries (dep)#
 #       runPressureScenariosTimeSeriesConv  #
 #       pressureScenarioAniso               #
 #       runPoroelasticScenarios             #
@@ -79,8 +81,6 @@ import gc
 #       prepDisaggregationPlot              #
 #       getWinWells                         ###############
 #       getPerWellPressureTimeSeriesSpaghettiAndQuantiles #
-#       getPerWellPressureTimeSeriesQuantiles             #
-#       getPerWellPressureTimeSeriesSpaghetti             #
 #       prepPressureAndDisposalTimeSeriesPlots            #
 #       prepTotalPressureTimeSeriesQuantilesPlot          #
 #       prepTotalPressureTimeSeriesSpaghettiPlot          #
@@ -91,23 +91,23 @@ import gc
 #   gistMC.__init__                 #
 #   gistMC.initPP                   #
 #   gistMC.addWells                 #
-#   gistMC.findWells                #
+#   gistMC.findWellsVec             #
 ###################################
 # RT:                             #
 #   A +                           #
 #   gistMC.prepRTPlot             #
 ######################################
 # B: For all below using pressures:  #
-#   gistMC.runPressureScenarios      #
+#   gistMC.runPressureScenariosVec   #
 ######################################
 # Disaggregation:                 #
 #   A + B +                       #
 #   gistMC.summarizePPResults     #
 #   gistMC.prepDisaggregationPlot #
-###########################################
-# C: For all below using time series:     #
-#   gistMC.getWinWells                    #
-#   gistMC.runPressureScenariosTimeSeries #
+###############################################
+# C: For all below using time series:         #
+#   gistMC.getWinWells                        #
+#   gistMC.runPressureScenariosTimeSeriesConv #
 #####################################################
 # Total Quantiles Time Series:                      #
 #   A + B + C +                                     #
@@ -141,17 +141,15 @@ class gistMC:
   # initPE        - initialize poroelastic modeling                 #
   # initPPAniso   - initialize anisotropic pore pressure modeling   #
   # writeRealizations - output csv of parameter sets                #
-  ####################################################################
-  # addWells   - load injection and well info from injectionV3 files #
-  # findWells  - get list of potential wells for an earthquake       #
+  ######################################################################
+  # addWells     - load injection and well info from injectionV3 files #
+  # findWellsVec - get list of potential wells for an earthquake       #
   #####################################################################################
   # pressureImpulseResponse             - Produce impulse response for testing        #
   # poroelasticImpulseResponse - 
-  # runPressureScenarios                - run all pore pressure scenarios for EQ      #
-  # pressureScenario                    - individual pore pressure modeling case      #
+  # runPressureScenariosVec             - run all pore pressure scenarios for EQ      #
   # runPressureGrid                     - generate pressures over a grid              #
-  # runPressureScenariosTimeSeries      - generate per-well pressure time series      #
-  # runPressureScenariosTimeSeriesTest  - faster version of above                     #
+  # runPressureScenariosTimeSeriesConv  - generate per-well pressure time series      #
   # pressureScenarioAniso               - generate pore pressure with perm anisotropy #
   # runPoroelasticScenarios - run all poroelastic scenarios for EQ                    #
   # poroelasticScenario     - individual poroelastic modeling case                    #
@@ -216,6 +214,7 @@ class gistMC:
              alphav_min=1.08e-9,alphav_max=1.1e-9,
              beta_min=3.5e-10,beta_max=3.7e-10):
     """
+    #####################################
     # Initialize Pore Pressure modeling #
     ############################################################
     # Inputs: ##################################################
@@ -321,7 +320,7 @@ class gistMC:
     #     Runs after init and initPP #
     ##################################
     """
-    if self.runPP==False: print("gistMCLive.initPE Error: initPP must be run first!")
+    if self.runPP==False: raise ValueError("gistMCLive.initPE Error: initPP must be run first!")
     self.mu_min=mu_min
     self.mu_max=mu_max
     self.nu_min=nu_min
@@ -572,6 +571,7 @@ class gistMC:
   def addWells(self,wellFile=None,injFile=None,userWellFile=None,userInjFile=None,verbose=0):  
     """
     ##############################################
+    # addWells:                                  #
     # Input csv files of well and injection data #
     ##############################################
     # Inputs: ########################################################
@@ -588,20 +588,20 @@ class gistMC:
     """
     # Switches for user-defined files or existing files
     if wellFile==None and userWellFile==None:
-      print(' gistMC.addWells: no user or default well file given')
-      return 'Error: gistMC.addWells: no user or default well file given'
+      #print(' gistMC.addWells: no user or default well file given')
+      raise ValueError('Error: gistMC.addWells: no user or default well file given')
     elif wellFile!=None and injFile==None:
-      print (' gistMC.addWells: default well given but no default injection file given')
-      return 'Error: gistMC.addWells: no user or default injection file given'
+      #print (' gistMC.addWells: default well given but no default injection file given')
+      raise ValueError('Error: gistMC.addWells: no user or default injection file given')
     elif userWellFile!=None and userInjFile==None:
-      print (' gistMC.addWells: user well given but no user injection file given')
-      return 'Error: gistMC.addWells: user well given but no user injection file given'
+      #print (' gistMC.addWells: user well given but no user injection file given')
+      raise ValueError('Error: gistMC.addWells: user well given but no user injection file given')
     elif wellFile==None and injFile!=None:
-      print (' gistMC.addWells: default well not given but default injection file given')
-      return 'Error: gistMC.addWells: default well not given but default injection file given'
+      #print (' gistMC.addWells: default well not given but default injection file given')
+      raise ValueError('Error: gistMC.addWells: default well not given but default injection file given')
     elif userWellFile==None and userInjFile!=None:
-      print (' gistMC.addWells: user well not given but user injection file given')
-      return 'Error: gistMC.addWells: user well not given but user injection file given'
+      #print (' gistMC.addWells: user well not given but user injection file given')
+      raise ValueError('Error: gistMC.addWells: user well not given but user injection file given')
     elif userWellFile!=None and userInjFile!=None and wellFile==None and injFile==None:
       if verbose>0: print (' gistMC.addWells: user wells and injection provided, no default wells/injection')
       if verbose>0: print (' gistMC.addWells: no user wells and injection provided, only default wells/injection')
@@ -618,8 +618,8 @@ class gistMC:
       if verbose>0: print (' gistMC.addWells: both default and user wells and injection provided, merging required!')
       case='TwoSets'
     else:
-      print (' gistMC.addWells: unconsidered case')
-      return 'Error: gistMC.addWells: user well unconsidered case'
+      #print (' gistMC.addWells: unconsidered case')
+      raise ValueError('Error: gistMC.addWells: user well unconsidered case')
     if case=='OneSet':
       #####################
       # Read in well file #
@@ -647,7 +647,7 @@ class gistMC:
       # Error checking for column names:
       requiredColumns=['StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','ID','WellName','APINumber']
       for col in requiredColumns:
-        if col not in self.wellDF.columns:  print(' gistMC.addWells: ERROR: ',col,' not in well file')
+        if col not in self.wellDF.columns:  raise ValueError(' gistMC.addWells: ERROR: ',col,' not in well file')
     elif case=='TwoSets':
       print(' gistMC.addWells: Two sets - need to develop merge.')
     self.runAddWells=True
@@ -656,7 +656,8 @@ class gistMC:
   def findWells(self,eq,PE=False,responseYears=0.,endDate=None,verbose=0):
     """
     ###########################################################
-    # Get subset of wells within contribution distance/time   #
+    # findWells: DEPRECATED! Use findWellsVec instead!        #
+    #   Get subset of wells within contribution distance/time #
     ################################################################################
     # Input:                                                                       #
     #               eq: Earthquake dictionary - TexNet csv output                  #
@@ -866,11 +867,239 @@ class gistMC:
       print(' gistMC.findWells: ',consideredWellsDF.shape[0],' wells considered')
       print(' gistMC.findWells: ',numDataWells,' wells with reported volumes, with ',injDF.shape[0],' injection values')
     return consideredWellsDF,excludedWellsDF,injDF
-    
+  
+  def findWellsVec(self,eq,PE=False,responseYears=0.,endDate=None,verbose=0):
+    """
+    #########################################################
+    # finWellsVec:                                          #
+    # Get subset of wells within contribution distance/time #
+    ################################################################################
+    # Input:                                                                       #
+    #               eq: Earthquake dictionary - TexNet csv output                  #
+    #               PE: if using poroelasticity, multiply diffusion distances by 6 #
+    #    responseYears: Duration of response in years. Extend the time of the well #
+    #                   selection by this amount.                #
+    #          endDate: if given, use this as the time for the selection           #
+    ################################################################################
+    # Outputs:                                        #
+    #    consideredWells: dataframe of selected wells #
+    #                     this includes wells in forecast
+    #                     use 'encompassingDay'>0 to filter
+    #       ignoredWells: dataframe of ignored wells  #
+    #              injDF: dataframe of injection data #
+    ###################################################
+    # Assumptions: ##################
+    #     Runs after init, addWells #
+    #################################
+    """
+    #####################
+    # Initialize arrays #
+    #####################
+    wellDistances=np.zeros([self.nw])
+    diffusionDistances=np.zeros([self.nw])
+    encompassingDays=np.zeros([self.nw])
+    encompassingDiffusivity=np.zeros([self.nw])
+    dxs=np.zeros([self.nw])
+    dys=np.zeros([self.nw])
+    ddRatios=np.zeros([self.nw])
+    wellDurations=np.zeros([self.nw])
+    ##########################################
+    # Get uncertainty for the earthquake     #
+    # this is one standard deviation so we   #
+    # are not being as conservative possible #
+    ##########################################
+    eqUncert=math.sqrt(eq['LatitudeError']**2+eq['LongitudeError']**2)
+    ############################################################################
+    # Step 1: compute per-well diffusion distances and distances to earthquake #
+    # Get rid of loop over wells
+    ############################################################################
+    #####################################################################
+    # Get number of days from start of injection to the earthquake date #
+    #####################################################################
+    if verbose>1:
+      print(' gistMC.findWellsVec: ',self.nw,'wells start date is ',pd.to_datetime(self.wellDF['StartDate']).min(),pd.to_datetime(self.wellDF['StartDate']).max())
+      print(' gistMC.findWellsVec: ',pd.to_datetime(eq['Origin Date']))
+    # Should I fill NaT values with something?
+    injectionDuration=(pd.to_datetime(eq['Origin Date'])-pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)).dt
+    injectionDays=injectionDuration.days
+    # This is still returning NaNs and I don't know why
+    if verbose>1: print(' gistMC.findWellsVec injectionDays',min(injectionDays),max(injectionDays),pd.to_datetime(eq['Origin Date']),pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch))
+    wellDurations=injectionDays/365.25
+    ###########################################################################
+    # Find diffusion distance for each well at that date                      #
+    # Equation 2.13 in documentation - take maximum pore pressure diffusivity #
+    # In the case of poroelastic stressing, increase distance by 6 X          #
+    #   This factor needs to be automatically computed in the future          #
+    ###########################################################################
+    injectionDaysClip=np.clip(injectionDays,a_min=0.,a_max=None)
+    if PE:
+      diffusionDistances=6.*0.001*np.sqrt(4.*np.pi*self.diffPPMax*injectionDaysClip*24*60*60)
+    else:
+      diffusionDistances=0.001*np.sqrt(4.*np.pi*self.diffPPMax*injectionDaysClip*24*60*60)
+    ##############################################
+    # Compute distances from wells to earthquake #
+    ##############################################
+    wellDistances=haversineSeries(pd.Series(eq['Latitude'],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLatitude'],pd.Series(eq['Longitude'],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLongitude'])
+    if verbose>1: print(' gistMC.findWellsVec distances',min(wellDistances),max(wellDistances))
+    ######################################################
+    # Compute encompassing dates - what time will the    #
+    # diffusion front from this well pass the epicenter? #
+    # This is relative to the earthquake date            #
+    ######################################################
+    # First calculate the number of days for the well's  #
+    # pressure front to reach the epicenter relative to  #
+    # the wells first injection date                     #
+    #######################################################
+    # To-do: include earthquake location uncertainty here #
+    #######################################################
+    injWellDaysToEpicenter=(1000000.*wellDistances*wellDistances /(4. * np.pi * self.diffPPMax))/(24*60*60)
+    ##############################################################
+    # Now add that number of days to the well time to get a date #
+    # This is overflowing pd datetime, so clip things at 100 years #
+    ##############################################################
+    # Clip injWellDaysAtEpicenter
+    if verbose>1: print(' gistMC.findWellsVec injWellDaysToEpicenter',min(injWellDaysToEpicenter),max(injWellDaysToEpicenter),np.count_nonzero(np.isnan(injWellDaysToEpicenter)),' nans')
+    injWellDaysToEpicenterClip=pd.Series(np.clip(injWellDaysToEpicenter,a_min=0,a_max=36500))
+    if verbose>1: print(' gistMC.findWellsVec injWellDaysToEpicenterClip',min(injWellDaysToEpicenterClip),max(injWellDaysToEpicenterClip),injWellDaysToEpicenterClip.isna().sum(),' nans')
+    # Vectorized?
+    injWellDaysToEpicenterClipTD=pd.to_timedelta(injWellDaysToEpicenterClip,unit='d')
+    if verbose>1: print(' gistMC.findWellsVec injWellDaysToEpicenterClipTD',min(injWellDaysToEpicenterClipTD),max(injWellDaysToEpicenterClipTD),injWellDaysToEpicenterClipTD.isna().sum(),' nans')
+    injWellDaysToEpicenterClipTD.index=self.wellDF.index
+    injWellDateAtEpicenter = pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)+injWellDaysToEpicenterClipTD
+    if verbose>1: print(' gistMC.findWellsVec injWellDateAtEpicenter',min(injWellDateAtEpicenter),max(injWellDateAtEpicenter),injWellDateAtEpicenter.isna().sum(),' nans')
+    ###################################################
+    # Then subtract off the date of the earthquake to #
+    # get a number of days relative to the earthquake #
+    ###################################################
+    encompassingDays=daysSinceDate(pd.to_datetime(eq['Origin Date']),injWellDateAtEpicenter,verbose=1)
+    if verbose>1: print(' gistMC.findWellsVec encompassingDays',min(encompassingDays),max(encompassingDays),np.count_nonzero(np.isnan(encompassingDays)),' nans')
+    #############################################################
+    # Compute encompassing diffusivity - the diffusivity needed #
+    # for this well to have been included in the analysis.      #
+    #############################################################
+    encompassingDiffusivity=(1000000.*wellDistances*wellDistances)/(4. * np.pi * injectionDays*24*60*60)
+    ################################################################
+    # Get an approximate x and y distance for poroelastic modeling #
+    # Will also be needed for anisotropic permeability in v2       #
+    ################################################################
+    [dxs,dys]=haversineSeriesXY(pd.Series(eq['Latitude'],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLatitude'],pd.Series(eq['Longitude'],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLongitude'])
+    #
+    # Ratio of diffusion distance to EQ distance
+    # Smaller numbers mean more potential for influence
+    # (with constant parameters)
+    ddRatios[diffusionDistances==0.]=-1
+    if PE:
+      ddRatios[diffusionDistances>0.]=6.*wellDistances[diffusionDistances>0.]/diffusionDistances[diffusionDistances>0.]
+    else:
+      ddRatios[diffusionDistances>0.]=wellDistances[diffusionDistances>0.]/diffusionDistances[diffusionDistances>0.]
+    ################################################################
+    # Step 2: Select wells where the pressure front from that well #
+    #         has reached the epicenter by the earthquake date     #
+    ################################################################
+    if endDate is None:
+      consideredMask = encompassingDays<(responseYears*365.25)
+    else:
+      responseDays=(pd.to_datetime(endDate)-pd.to_datetime(eq['Origin Date'])).days
+      consideredMask = encompassingDays<responseDays
+    if verbose>0: print('gistMC.findWellsVec:  Selecting ',sum(consideredMask),' and excluding ',sum(~consideredMask),' wells')
+    if sum(consideredMask)==0: raise ValueError('No wells were selected for this event. Find more wells or increase permeability.')
+    #############################################################################
+    # Prior code used the  diffusionDistances>(wellDistances-eqUncert) criteria #
+    # this made it harder to select wells for the forecast later on             #
+    #############################################################################
+    consideredWellsDF=self.wellDF[consideredMask].reset_index(drop=True)
+
+    consideredWellsDF['Distances']=wellDistances[consideredMask].reset_index(drop=True)
+    consideredWellsDF['DXs']=dxs[consideredMask].reset_index(drop=True)
+    consideredWellsDF['DYs']=dys[consideredMask].reset_index(drop=True)
+    consideredWellsDF['DDRatio']=ddRatios[consideredMask]
+    # Add a column with the time injecting prior to the earthquake
+    consideredWellsDF['YearsInjecting']=wellDurations[consideredMask].reset_index(drop=True)
+    consideredWellsDF['EncompassingDay']=encompassingDays[consideredMask].reset_index(drop=True)
+    consideredWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[consideredMask].reset_index(drop=True)
+    consideredWellsDF['EventID']=eq['EventID']
+    if verbose>1: print(' gistMC.findWellsVec consideredWellsDF[EncompassingDays]',min(consideredWellsDF['EncompassingDay']),max(consideredWellsDF['EncompassingDay']),consideredWellsDF['EncompassingDay'].isna().sum(),' nans')
+    ################################################################################
+    # Create dataframe of wells that are ignored - this needs to be output as a QC #
+    ################################################################################
+    excludedWellsDF=self.wellDF[~consideredMask].reset_index(drop=True)
+    excludedWellsDF['Distances']=wellDistances[~consideredMask]
+    excludedWellsDF['DXs']=dxs[~consideredMask]
+    excludedWellsDF['DYs']=dys[~consideredMask]
+    excludedWellsDF['DDRatio']=ddRatios[~consideredMask]
+    # Add a column with the time injecting prior to the earthquake
+    excludedWellsDF['YearsInjecting']=wellDurations[~consideredMask]
+    excludedWellsDF['EncompassingDay']=encompassingDays[~consideredMask]
+    excludedWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[~consideredMask]
+    excludedWellsDF['EventID']=eq['EventID']
+    ##########################################################################
+    # Step 3: Pull injection data from injection file that matches well list #
+    #         and calculate total injected volume for all wells at EQ date   #
+    ##########################################################################
+    # Get list of IDs #
+    ###################
+    ids=consideredWellsDF['ID']
+    excludedIDs=excludedWellsDF['ID']
+    #####################
+    # Open self.injFile #
+    #####################
+    iter_csv=pd.read_csv(self.injFile, iterator=True,chunksize=100000)
+    #############################################################
+    # Shelly suggests looking at SPARKF for reading through this #
+    #############################################################
+    injDF=pd.DataFrame()
+    injExcludedDF=pd.DataFrame()
+    for chunk in iter_csv:
+      #############################################
+      # Collect injection data for selected wells #
+      #############################################
+      injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
+      ###############################################
+      # Collect injection data for unselected wells #
+      ###############################################
+      injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
+    ############################################################
+    # Do we need this? Peter commented it out - Bill had it in #
+    ############################################################
+    #injDF['Date']=pd.to_datetime(injDF['Date'])
+    ############################################################
+    # Get the number of wells selected from the injection file #
+    ############################################################
+    numDataWells=len(pd.unique(injDF['ID']))
+    numExcludedWells=len(pd.unique(injExcludedDF['ID']))
+    if verbose>0: print(" gistMC.findWellsVec included: ",consideredWellsDF.shape[0],numDataWells,len(ids))
+    if verbose>0: print(" gistMC.findWellsVec excluded: ",excludedWellsDF.shape[0],numExcludedWells,len(excludedIDs))
+    totalVolumes=np.zeros([len(ids)])
+    injDF['BPD']=injDF['BPD'].fillna(0.)
+    injExcludedDF['BPD']=injExcludedDF['BPD'].fillna(0.)
+    totalIncludedVolumesVecSeries=injDF.groupby('ID')['BPD'].sum()*self.injDT
+    totalExcludedVolumesVecSeries=injExcludedDF.groupby('ID')['BPD'].sum()*self.injDT
+    totalVolumesIncludedSeries=totalIncludedVolumesVecSeries[totalIncludedVolumesVecSeries.index.isin(ids)]
+    totalVolumesExcludedSeries=totalExcludedVolumesVecSeries[totalExcludedVolumesVecSeries.index.isin(excludedIDs)]
+    if verbose>0: print(" gistMC.findWellsVec separating volumes, consideredWells ",totalVolumesIncludedSeries.info(),totalVolumesIncludedSeries.shape[0],totalVolumesIncludedSeries.min(),totalVolumesIncludedSeries.max(),totalVolumesIncludedSeries.isna().sum( ),' nans')
+    if verbose>0: print(" gistMC.findWellsVec separating volumes, excludedWells ",totalVolumesExcludedSeries.info(),totalVolumesExcludedSeries.shape[0],totalVolumesExcludedSeries.min(),totalVolumesExcludedSeries.max(),totalVolumesExcludedSeries.isna().sum( ),' nans')
+    ########################################################
+    # Need to do pandas merges as the indicies don't match #
+    ########################################################
+    consideredWellsDF=pd.merge(consideredWellsDF, totalVolumesIncludedSeries.to_frame().reset_index().rename(columns={'index': 'ID','BPD':'TotalBBL'}), on='ID', how='left')
+    consideredWellsDF['TotalBBL']=consideredWellsDF['TotalBBL'].fillna(0.)
+    excludedWellsDF=pd.merge(excludedWellsDF, totalVolumesExcludedSeries.to_frame().reset_index().rename(columns={'index': 'ID','BPD':'TotalBBL'}), on='ID', how='left')
+    excludedWellsDF['TotalBBL']=excludedWellsDF['TotalBBL'].fillna(0.)
+    if verbose>0:
+      ##########################################
+      # Print total number of wells selected   #
+      # and wells that have reported injection #
+      ##########################################
+      print(' gistMC.findWellsVec: ',consideredWellsDF.shape[0],' wells considered')
+      print(' gistMC.findWellsVec: ',numDataWells,' wells with reported volumes, with ',injDF.shape[0],' injection values')
+    return consideredWellsDF,excludedWellsDF,injDF
+
   def runPressureScenarios(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
     """
-    ###########################################
-    # Run all Monte Carlo pore pressure cases #
+    ############################################
+    # runPressureScenarios                     #
+    # DEPRECATED - use runPressureScenariosVec #
+    #Run all Monte Carlo pore pressure cases #
     ###########################################
     # Inputs: ##############################################
     #                 eq: earthquake dictionary            #
@@ -916,6 +1145,7 @@ class gistMC:
     pressures=np.zeros([nwC,nReal])
     percentages=np.zeros([nwC,nReal])
     totalPressures=np.zeros([nwC,nReal])
+    lags=np.zeros([nwC,nReal])
     ####################################
     # Loop over wells in consideration #
     # Secondary loop is realizations   #
@@ -952,16 +1182,17 @@ class gistMC:
       for iReal in range(nReal):
         pressure=self.pressureScenario(bpds,days,eqDay,dist,iReal,(SVec[iReal],TVec[iReal],rhoVec[iReal]))
         pressures[iwc,iReal]=pressure
+        lags[iwc,iReal]=(dist*dist/(4.*np.pi * TVec[iReal]/SVec[iReal]))/(24*60*60)
     ##################################
     # Form dataframe of realizations #
     ##################################
-    scenarios=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','Pressures','TotalPressure','Percentages','Realization'])
+    scenarios=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','LagInDays','Pressures','TotalPressure','Percentages','Realization'])
     ###############################
     # Loop over realizations      #
     # for disaggregation to wells #
     ###############################
     for iReal in range(nReal):
-      scenarioDF=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','Pressures','TotalPressure','Percentages','Realization'])
+      scenarioDF=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','LagInDays','Pressures','TotalPressure','Percentages','Realization'])
       ######################################
       # Sum pressures for this realization #
       # and disaggregate - equation 4.9    #
@@ -987,6 +1218,7 @@ class gistMC:
       scenarioDF['Latitude']=consideredWells['SurfaceHoleLatitude']
       scenarioDF['Longitude']=consideredWells['SurfaceHoleLongitude']
       scenarioDF['NumWells']=nwCnz
+      scenarioDF['LagInDays']=lags[:,iReal]
       ##########################
       # Add realization number #
       ##########################
@@ -1001,11 +1233,12 @@ class gistMC:
     ####################
     return scenarios
 
-  def runPressureScenariosVectorized(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
+  def runPressureScenariosVec(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
     """
-    ###########################################
-    # Run all Monte Carlo pore pressure cases #
-    ###########################################
+    ################################################
+    # runPressureScenariosVec:                     #
+    #     Monte Carlo pore pressure disaggregation #
+    ################################################
     # Inputs: ##############################################
     #                 eq: earthquake dictionary            #
     #    consideredWells: dataframe of selected wells      #
@@ -1061,6 +1294,7 @@ class gistMC:
     ##############################################
     r2=wellDistances*wellDistances
     if verbose>1: print('runPressureScenariosVectorized r2 min/max: ',min(r2),max(r2))
+    lags=(r2.reshape((nwC,1)).repeat(self.nReal,1)/(4.*np.pi * TVec.reshape(1,self.nReal).repeat(nwC,0)/SVec.reshape(1,self.nReal).repeat(nwC,0)))/(24*60*60)
     ################################################
     # Compute property-related part of ppp [nReal] #
     # To-do: extend to size [nReal,nwC]            # 
@@ -1110,10 +1344,7 @@ class gistMC:
     # of boxcars ranging from it*dt to dt and dot product   #
     # it with the first 'it' values of the dQdtArray to get #
     # the time series output at 'it'. This is really a      #
-    # convolution of epp and dQdtArray on the last axis and #
-    # there should be a way to make this more efficient!    #
-    # scipy.ndimage.convolve1d(dQdtarray.reshape((nwC,1,it)).repeat(self.nReal,1), epp, axis=-1, mode='constant')
-    # To-do: Use Samson Marty's fftconvolve approach
+    # convolution of epp and dQdtArray on the last axis     #
     #########################################################
     timeStepsSum1=np.sum(epp[:,:,-ieq:] * dQdtArray[:,:ieq].reshape((nwC,1,ieq)).repeat(self.nReal,1),axis=2)
     timeStepsSum2=np.sum(epp[:,:,-(ieq+1):] * dQdtArray[:,:ieq+1].reshape((nwC,1,ieq+1)).repeat(self.nReal,1),axis=2)
@@ -1140,13 +1371,15 @@ class gistMC:
     # Get dataframe of output scenarios from #
     # input numpy arrays and well dataframe  #
     ##########################################
-    scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
+    scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages,lags)
     return scenarioDF
 
   def runPressureScenariosTimeSeries(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
     """
     ###############################################################################
-    # runPressureScenariosTimeSeries:                                             #
+    # runPressureScenariosTimeSeries: 
+    #        DEPRECATED - use runPressureScenariosTimeSeriesConv                  #
+    ###############################################################################
     #        Version of pore pressure modeling to output time series of pressures.#
     #        This will be slower than runPressureScenarios which only puts out    #
     #        pressures at the EQ time at one time.                                #
@@ -1201,11 +1434,11 @@ class gistMC:
     (wellIDs,nwC,dayVec,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,f)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None)
     if verbose>1: print('runPressureScenariosTimeSeries time axis information - nt:',nt,'; ot:',ot,'; dt:',self.injDT,' earthquake index: ',ieq)
     ###########################################
-    # Convert bpdArray to Q - m3/s [nt+1,nwC] #
+    # Convert bpdArray to Q - m3/s [nwC,nt+1] #
     ###########################################
     QArray=1.84013e-6 *bpdArray
     #######################################################
-    # Take a derivative of QArray along the time (0) axis #
+    # Take a derivative of QArray along the time (1) axis #
     # This array now has one fewer time samples [nwC,nt]#
     #######################################################
     dQdtArray=np.diff(QArray,axis=1)
@@ -1267,10 +1500,7 @@ class gistMC:
       # of boxcars ranging from it*dt to dt and dot product   #
       # it with the first 'it' values of the dQdtArray to get #
       # the time series output at 'it'. This is really a      #
-      # convolution of epp and dQdtArray on the last axis and #
-      # there should be a way to make this more efficient!    #
-      # scipy.ndimage.convolve1d(dQdtarray.reshape((nwC,1,it)).repeat(self.nReal,1), epp, axis=-1, mode='constant')
-      # To-do: Use Samson Marty's fftconvolve approach
+      # convolution of epp and dQdtArray on the last axis     #
       #########################################################
       timeStepsSum=np.sum(epp[:,:,-it:] * dQdtArray[:,:it].reshape((nwC,1,it)).repeat(nReal,1),axis=2)
       ########################################################################
@@ -1313,147 +1543,10 @@ class gistMC:
     else:
       return dP,wellIDs,dayVec
 
-  def runPressureScenariosTimeSeriesTest(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
-    """
-    ###############################################################################
-    # runPressureScenariosTimeSeries:                                             #
-    #        Version of pore pressure modeling to output time series of pressures.#
-    #        This will be slower than runPressureScenarios which only puts out    #
-    #        pressures at the EQ time at one time.                                #
-    ###############################################################################
-    # Inputs:                                                                    #
-    #        eq:               earthquake dataframe with 'Origin Date' column    #
-    #        consideredWells:  dataframe of wells produced by self.findWells     #
-    #                          with 'ID' and 'Distances' columns                 #
-    #        injDF:            dataframe of injection produced by self.findWells #
-    #                          with 'ID', 'Days' and 'BPD' columns               #
-    #        SVec(Optional):  Vector of storativities for sensitivity analysis   #
-    #        TVec(Optional):  Vector of transmissivities for sensitivity analysis#          
-    ##############################################################################
-    # Outputs:                                                                   #
-    #        scenarioDF:       dataframe of pore pressure contribution scenarios #
-    #                          with many columns at earthquake date              #
-    #        dP:               pressure time series at eq location               #
-    #                          nwC x nReal is pretty big                         #
-    #                          size(nwC x nReal x nt)                            #
-    ##############################################################################
-    # To-do:  Optionally give a list of r values to compute on a grid #
-    #         Currently implemented in runPressureGrid                #
-    #         Add different values for pressure sensitivity test      #
-    # CURRENTLY BROKEN FOR MULTIPLE WELLS
-    ###################################################################
-    """
-    if SVec is None:
-      SVec=self.SVec
-      nReal=self.nReal
-    else:
-      SVec=SVec
-      nReal=len(SVec)
-    if TVec is None:
-      TVec=self.TVec
-    else:
-      TVec=TVec
-    if rhoVec is None:
-      rhoVec=self.rhoVec
-    else:
-      rhoVec=rhoVec
-    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
-    ########################################################################
-    # Prep injection data to get arrays needed for vectorized calculations #
-    ########################################################################
-    (wellIDs,nwC,dayVec,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,f)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None,verbose=verbose)
-    if verbose>0: print('runPressureScenariosTimeSeries input time axis information - nt:',nt,'; ot:',ot,'; dt:',self.injDT,' earthquake index: ',ieq,' f ',f)
-    if verbose>0: print('runPressureScenariosTimeSeries output time axis information - len(secArray):',nt,'; min(secArray):',ot,'; dt:',secArray[1]-secArray[0],' earthquake index: ',ieq,' f ',f)
-    ###########################################
-    # Convert bpdArray to Q - m3/s [nwC,nt+1] #
-    ###########################################
-    QArray=1.84013e-6 *bpdArray
-    #######################################################
-    # Take a derivative of QArray along the time (0) axis #
-    # This array now has one fewer time samples [nwC,nt]#
-    #######################################################
-    dQdtArray=np.diff(QArray,axis=1)
-    ##############################################
-    # Compute r squared for all wells [nwC] #
-    ##############################################
-    r2=wellDistances*wellDistances
-    if verbose>1: print('runPressureScenariosTimeSeries r2 min/max: ',min(r2),max(r2))
-    #####################################################
-    # Compute property-related part of ppp [nReal] #
-    #####################################################
-    TSOver4TT=TVec*SVec/(4.*TVec*TVec)
-    if verbose>1: print('runPressureScenariosTimeSeries TSOver4TT min/max: ',min(TSOver4TT.flatten()),max(TSOver4TT.flatten()))
-    #######################################################################
-    # Compute outer product of r2 and TSOver4TT to get ppp [nwC,nReal] #
-    #######################################################################
-    ppp=np.outer(r2,TSOver4TT)
-    if verbose>1: print('runPressureScenariosTimeSeries ppp min/max: ',min(ppp.flatten()),max(ppp.flatten()))
-    #############################
-    # Compute gRhoOverT [nReal] #
-    #############################
-    gRhoOverT=rhoVec*self.g/(4.*np.pi*TVec)
-    ########################
-    # Initialize output dP #
-    ########################
-    dP=np.zeros([nwC,nReal,nt])
-    ######################################
-    # Convert injDT from days to seconds #
-    ###################################### 
-    dts=self.injDT*24*60*60
-    #######################################################################################
-    # Create a vector of injection durations starting with all time and ending with dt.   #
-    # Variable-injection Theis modeling sums a shortening series of boxcars with          #
-    # different heights corresponding to changes in injection rates over time - dQdtArray #
-    #######################################################################################
-    durations=np.max(secArray)-secArray+dts
-    if verbose>1: print('runPressureScenariosTimeSeries durations min/max: ',min(durations),max(durations))
-    #######################################################################################
-    # This has the well function in it - sc.exp1. Moving this out of the loop speeds up   #
-    # computation vs. FSP for a time series by O(nt). epp is [nwC,nReal,nt].              #
-    # We reuse parts of this array in the summation as we assume that dt is fixed.        #
-    # I'm sure that there are better ways to broadcast these shapes but I don't know how! #
-    #######################################################################################
-    epp=sc.exp1(ppp.reshape((nwC,nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(nReal,1))
-    if verbose>1: print('runPressureScenariosTimeSeries epp min/max: ',min(epp.flatten()),max(epp.flatten()))
-    #dP=np.zeros([nwC,self.nReal,nt])
-    #
-    # Use convolution with the 
-    for iW in range(nwC):
-      if iW%10==0: print('runPressureScenariosTimeSeriesTest Well ',iW+1,' of ',nwC)
-      # Loop over wells
-      #   input should be epp[iWell,:,:], 1D weights dQdt[iWell,:]
-      #    How do I center the filter? dQdtArray is nw x nt
-      #dP[iW,:,:]=-np.flip(sn.convolve1d(input=epp[iW,:,:], weights=dQdtArray[iW,:], axis=-1, mode='constant',cval=0,origin=-int((nt-1)/2)),axis=1)
-      dP[iW,:,:]=-np.flip(sn.convolve1d(input=epp[iW,:,:], weights=dQdtArray[iW,:], axis=-1, mode='constant',cval=0),axis=1)
-      #for iR in range(nReal):
-      #  dP[iW,iR,:]=sn.correlate1d(input=dQdtArray[iW,:], weights=epp[iW,iR,:], axis=-1, mode='constant',cval=0)
-    dP=dP * gRhoOverT.reshape((1,nReal,1)).repeat(nwC,0).repeat(nt,2) / 6894.76
-    ###################################################
-    # Linear interpolation between the two time steps #
-    # bounding the EQ time dPatEQ [nw,nReal]          #
-    ###################################################
-    dPatEQ=((1.-f)*dP[:,:,ieq])+(f*dP[:,:,ieq+1])
-    ###########################################################
-    # Sum over wells to get total Pressure at EQ time [nReal] #
-    ###########################################################
-    totalPressureAtEQ=np.sum(dPatEQ,axis=0,keepdims=True)
-    #########################################################
-    # Calculate percentages for each realization [nw,nReal] #
-    #########################################################
-    percentages=100.* dPatEQ / totalPressureAtEQ.repeat(nwC,0)
-    ##########################################
-    # Get dataframe of output scenarios from #
-    # input numpy arrays and well dataframe  #
-    ##########################################
-    scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
-    # Check for negative pressures
-    if np.any(dP<0.): print("runPressureScenariosTimeSeries: Negative pressures found: ",np.argmin(dP))
-    return scenarioDF,dP,wellIDs,dayVec
-
   def runPressureScenariosTimeSeriesConv(self,eq,consideredWells,injDF,SVec=None,TVec=None,rhoVec=None,verbose=0):
     """
     ###############################################################################
-    # runPressureScenariosTimeSeries:                                             #
+    # runPressureScenariosTimeSeriesConv:                                         #
     #        Version of pore pressure modeling to output time series of pressures.#
     #        This will be slower than runPressureScenarios which only puts out    #
     #        pressures at the EQ time at one time.                                #
@@ -1557,7 +1650,7 @@ class gistMC:
     # dP output should be [nwC,nReal,nt]
     # dQdtArray is [nwC,nt]
     # epp is [nwC,nReal,nt]
-    dP=-np.flip(sg.fftconvolve(epp[:,:,:],dQdtArray[:,np.newaxis,:], mode='same'),axis=2)
+    dP=sg.fftconvolve(np.flip(epp[:,:,:],axis=2),dQdtArray[:,np.newaxis,:].repeat(nReal,1), mode='full',axes=(2,))
     #for iW in range(nwC):
     #  if iW%10==0: print('runPressureScenariosTimeSeriesTest Well ',iW+1,' of ',nwC)
     #  # Loop over wells
@@ -1565,7 +1658,7 @@ class gistMC:
     #  #    How do I center the filter? dQdtArray is nw x nt
     #  dP[iW,:,:]=-np.flip(sn.convolve1d(input=epp[iW,:,:], weights=dQdtArray[iW,:], axis=-1, mode='constant',cval=0,origin=-int((nt-1)/2)),axis=1)
     #  #  dP[iW,iR,:]=sn.correlate1d(input=dQdtArray[iW,:], weights=epp[iW,iR,:], axis=-1, mode='constant',cval=0)
-    dP=dP * gRhoOverT.reshape((1,nReal,1)).repeat(nwC,0).repeat(nt,2) / 6894.76
+    dP=dP[:,:,:nt] * gRhoOverT.reshape((1,nReal,1)).repeat(nwC,0).repeat(nt,2) / 6894.76
     ###################################################
     # Linear interpolation between the two time steps #
     # bounding the EQ time dPatEQ [nw,nReal]          #
@@ -1585,7 +1678,7 @@ class gistMC:
     ##########################################
     scenarioDF=self.pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages)
     # Check for negative pressures
-    if np.any(dP<0.): print("runPressureScenariosTimeSeriesConv: Negative pressures found: ",np.argmin(dP))
+    if np.any(dP<-0.000000001): print("runPressureScenariosTimeSeriesConv: Negative pressures found: ",np.argmin(dP,axis=None),np.min(dP))
     return scenarioDF,dP,wellIDs,dayVec
   
   def runPressureGrid(self,wellDF,injDF,grid,dt=10,verbose=0):
@@ -1652,8 +1745,8 @@ class gistMC:
     #  # Loop over wells
     #  dP[:,:,iW,:,:]=-np.flip(sn.convolve1d(input=epp[:,:,iW,:,:], weights=dQdtArray[iW,:], axis=-1, mode='constant',cval=0),axis=3)
     #dP=dP * gRhoOverT.reshape((1,1,1,self.nReal,1)).repeat(nw,2).repeat(nx,0).repeat(ny,1).repeat(nt,4) / 6894.76
-    dP=-np.flip(sg.fftconvolve(epp[:,:,:,:,:],dQdtArray[np.newaxis,np.newaxis,:,np.newaxis,:], mode='same'),axis=4)
-    dP= dP*gRhoOverT.reshape((1,1,1,self.nReal,1)).repeat(nw,2).repeat(nx,0).repeat(ny,1).repeat(nt,4) / 6894.76
+    dP=sg.fftconvolve(np.flip(epp[:,:,:,:,:],axis=4),dQdtArray[np.newaxis,np.newaxis,:,np.newaxis,:], mode='full',axes=(4,))
+    dP= dP[:,:,:,:,:nt]*gRhoOverT.reshape((1,1,1,self.nReal,1)).repeat(nw,2).repeat(nx,0).repeat(ny,1).repeat(nt,4) / 6894.76
     #for it in range(1,nt):
     #  #timeStepsSum=np.sum(epp[:,:,:,:,-it:] * dQdtArray[:,:it].reshape((1,1,nw,1,it)).repeat(self.nReal,3),axis=4)
     #  dP[:,:,:,:,it]=timeStepsSum.reshape(nx,ny,nw,self.nReal) * gRhoOverT.reshape((1,1,1,self.nReal)).repeat(nw,2).repeat(nx,0).repeat(ny,1) / 6894.76
@@ -2331,7 +2424,7 @@ class gistMC:
     at an earthquake epicenter at a specified point in the future, what would it be?
     Create a per well and per realization value
      Sum over time
-      dqdt[i] / 4 pi kappa h duration[i]   exp( -R2 / 4D duration[i])
+      dqdt[i] / 4 pi kappa h duration[i]   exp( -r2 / 4D duration[i])
     #Parameters:
 	  #t_eq: time of earthquake
 	  #t_future : Future Time (Response Time) after t_eq
@@ -2653,7 +2746,7 @@ class gistMC:
     sensitivitySumDF=sensitivitySumDF.sort_values(by='MaxVal',ascending=False)
     return sensitivityDF,sensitivitySumDF
   
-  def pressureScenariosToDF(self,eq,consideredWells,dPAtEQ,totalPressureAtEQ,percentages,verbose=0):
+  def pressureScenariosToDF(self,eq,consideredWells,dPAtEQ,totalPressureAtEQ,percentages,lags=None,verbose=0):
     """
     ##################################################################################
     # pressureScenariosToDF(eq,consideredWells,dPatEQ,totalPressureAtEQ,percentages) #
@@ -2674,12 +2767,14 @@ class gistMC:
     #      percentages:        Numpy array of per-well relative contributions #
     #                          at earthquake epicenter/Time                   #
     #                          [consideredWells.shape()[0], self.nReal]       #
+    #      lags (optional):    Numpy array of per-well time lags to epicenter #
+    #                          [consideredWells.shape()[0], self.nReal]       #
     ########################################################################################
     # Output:                                                                              #
     #      scenarioDF:         Dataframe with consideredWells.shape()[0] x self.nReal rows #
     ########################################################################################
     """
-    allScenariosDF=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','Pressures','TotalPressure','Percentages','Realization'])
+    allScenariosDF=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','Pressures','TotalPressure','Percentages','LagInDays','Realization'])
     ##################################################
     # Number of wells with a meaningful contribution #
     ##################################################
@@ -2701,7 +2796,7 @@ class gistMC:
     # guaranteed!                 #
     ###############################
     for iReal in range(nReal):
-      scenarioDF=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','Pressures','TotalPressure','Percentages','Realization'])
+      scenarioDF=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','Pressures','TotalPressure','Percentages','LagInDays','Realization'])
       ######################################
       # Sum pressures for this realization #
       # and disaggregate - equation 4.9    #
@@ -2725,6 +2820,7 @@ class gistMC:
       scenarioDF['ID']=consideredWells['ID']
       scenarioDF['Latitude']=consideredWells['SurfaceHoleLatitude']
       scenarioDF['Longitude']=consideredWells['SurfaceHoleLongitude']
+      if lags is not None: scenarioDF['LagInDays']=lags[:,iReal]
       scenarioDF['NumWells']=nwCnz
       ##########################
       # Add realization number #
@@ -2777,12 +2873,14 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,verbose
   ##############################################################################
   # Rates in BPD, distances in m, time in days                                 #
   # Since we are taking differences, we prepend by one time sample with a zero #
+  # We need error checking
   ##############################################################################
   """
   ###################
   # Number of wells #
   ###################
   nwC=consideredWells.shape[0]
+  if nwC==0: raise ValueError(' prepInj: ERROR: No wells provided')
   ################################################
   # Form numpy arrays of well numbers, distances #
   ################################################
@@ -2802,7 +2900,10 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,verbose
     dxdyArray=dxdyArray
   ############################################################
   # Set beginning of bdpArray as the earliest injection date #
+  # Check to make sure that injDF has some entries
   ############################################################
+  if verbose>0: print(' prepInj: size of InjDF ',injDF.shape[0])
+  if injDF.shape[0]==0: raise ValueError(' prepInj: ERROR: No injection data provided')
   minT=min(injDF['Days'])
   #########################################################
   # We need to prepend by a zero since we use differences #
@@ -2815,10 +2916,13 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,verbose
   ##########################################################
   if endDate is not None:
     maxT=endDate
+    if verbose>1: print(' prepInj: endDate of ',endDate,' selected')
   elif eqDay is not None:
     maxT=max(int(round((eqDay-ot)/dt))*dt,max(injDF['Days']))+dt
+    if verbose>1: print(' prepInj: eqDay of ',eqDay,' used ',maxT)
   else:
     maxT=max(injDF['Days'])+dt
+    if verbose>1: print(' prepInj: endDate based on injection data at ',maxT)
   ###################################################
   # nt includes the prepended value and covers maxT #
   ###################################################
@@ -2878,6 +2982,7 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,verbose
     # Get the first point #
     #######################
     ieq=int(feq)
+    if verbose>0: print(' prepInj: eqIndex is ',ieq,' out of ',nt)
     #####################################
     # Get a linear interpolation weight #
     #####################################
@@ -3118,6 +3223,21 @@ def getDates(inDF,epoch,dayName='Days',default=99999999,verbose=0):
   outDF[outName]=dateList
   return outDF
 
+def datesFromEpoch(epoch,dayOffsetSeries):
+  epochSeries=pd.Series(pd.TimeStamp(epoch), index=range(len(dayOffsetSeries)))
+  dateSeries=epochSeries+pd.Timedelta(dayOffsetSeries,unit='day')
+  return dateSeries
+
+def datesFromTwoSeries(startDateSeries,dayOffsetSeries):
+  #dateSeries=startDateSeries+pd.Timedelta(dayOffsetSeries,unit='day')
+  dateSeries=startDateSeries+dayOffsetSeries
+  return dateSeries
+
+def daysSinceDate(epoch,dateSeries,verbose=0):
+  daySeries=(pd.to_datetime(dateSeries)-pd.Series(pd.to_datetime(epoch),index=range(len(dateSeries)))).dt.days
+  if verbose>0: print(dateSeries,daySeries)
+  return daySeries
+
 def logSpace(centerVal,logUncertainty,clip=None,verbose=0):
   """
   ################################################
@@ -3175,7 +3295,45 @@ def haversineXY(lat1,lat2,lon1,lon2):
   if lat1<lat2: dy=-dy
   if lon1<lon2: dx=-dx
   return [dx,dy]
-  
+
+def haversineSeriesXY(latSeries1,latSeries2,lonSeries1,lonSeries2):
+  """
+  ##################################################
+  # Estimate X / Y distances between Lat/Lon pairs #
+  # This runs Haversite twice using midpoints      #
+  # Not exact, but close enough for us             #
+  ##################################################
+  # Inputs: ##########################################
+  #   latSeries1:  latitude of 1st point (decimal degrees) #
+  #   latSeries2:  latitude of 2nd point (decimal degrees) #
+  #   lonSeries1: longitude of 1st point (decimal degrees) #
+  #   lonSeries2: longitude of 2nd point (decimal degrees) #
+  ####################################################
+  # Outputs: ###################################
+  #   dxSeries:  approximate x-distance (kilometers) #
+  #   dySeries:  approximate y-distance (kilometers) #
+  ##############################################
+  # Assumptions: #####################
+  #   Sea level, earth is a sphere   #
+  #   Probably breaks near the poles #
+  """
+  ###############################################################
+  # Run Haversine once with latitudes, taking average longitude #
+  ###############################################################
+  dySeries=haversineSeries(latSeries1,latSeries2,0.5*(lonSeries1+lonSeries2),0.5*(lonSeries1+lonSeries2))
+  ######################################################
+  # Run again with longitudes, taking average latitude #
+  ######################################################
+  dxSeries=haversineSeries(0.5*(latSeries1+latSeries2),0.5*(latSeries1+latSeries2),lonSeries1,lonSeries2)
+  #######################################################
+  # Sign conventions, negative is Southwest from 1 to 2 #
+  #######################################################
+  #if lat1<lat2: dy=-dy
+  dySeries[latSeries1<latSeries2]=-dySeries[latSeries1<latSeries2]
+  #if lon1<lon2: dx=-dx
+  dxSeries[lonSeries1<lonSeries2]=-dxSeries[lonSeries1<lonSeries2]
+  return [dxSeries,dySeries]
+
 def haversine(lat1,lat2,lon1,lon2):
   """
   ###################################################
@@ -3218,6 +3376,49 @@ def haversine(lat1,lat2,lon1,lon2):
   ######################################
   d=6373.0*c
   return d
+
+def haversineSeries(latSeries1,latSeries2,lonSeries1,lonSeries2):
+  """
+  ###################################################
+  # Great-circle distance between two lat/lon pairs #
+  ###################################################
+  # Input series: ##########################################
+  #   latSeries1:  latitude of 1st point (decimal degrees) #
+  #   latSeries2:  latitude of 2nd point (decimal degrees) #
+  #   lonSeries1: longitude of 1st point (decimal degrees) #
+  #   lonSeries2: longitude of 2nd point (decimal degrees) #
+  ####################################################
+  # Outputs: ####################
+  #   dSeries:  distance (kilometers) #
+  ###############################
+  # Assumptions: #####################
+  #   Sea level, earth is a sphere   #
+  #   Probably breaks near the poles #
+  ##########################################
+  """
+  ##########################################
+  # Convert inputs from degrees to radians #
+  ##########################################
+
+  rlatSeries1=np.deg2rad(latSeries1)
+  rlatSeries2=np.deg2rad(latSeries2)
+  rlonSeries1=np.deg2rad(lonSeries1)
+  rlonSeries2=np.deg2rad(lonSeries2)
+  ###############
+  # Differences #
+  ###############
+  dlonSeries=rlonSeries2-rlonSeries1
+  dlatSeries=rlatSeries2-rlatSeries1
+  aSeries=np.sin(dlatSeries/2)**2 + np.cos(rlatSeries1)*np.cos(rlatSeries2)*np.sin(dlonSeries/2)**2
+  try:
+    cSeries=2*np.arctan2(np.sqrt(aSeries),np.sqrt(1.-aSeries))
+  except:
+    print('haversine error: ',aSeries,dlatSeries,dlonSeries,rlatSeries1,rlatSeries2)
+  ######################################
+  # Scale by radius of the earth in km #
+  ######################################
+  dSeries=6373.0*cSeries
+  return dSeries
 
 def formEffectiveStressTensor(stresses,pressure):
   """
@@ -3461,7 +3662,7 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   smallWells=smallWellPPDF['ID'].unique()
   nSmallWells=len(smallWells)
   # Now create sum of "all small wells" for each scenario
-  sumSmallWellPPDF=pd.DataFrame(columns=['EventID','EventLatitude', 'EventLongitude','Pressures','TotalPressure', 'Percentages', 'Realization'])
+  sumSmallWellPPDF=pd.DataFrame(columns=['EventID','EventLatitude', 'EventLongitude','Pressures','TotalPressure', 'Percentages', 'lagInDays','Realization'])
   ids=[]
   names=[]
   pressures=[]
@@ -3471,6 +3672,7 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   eventIDs=[]
   eventLats=[]
   eventLons=[]
+  lags=[]
   smallName='Sum of All '+str(nSmallWells)+' Others Below '+str(threshold)+' PSI'
   for ir in range(nReal):
     smallWellScenario=smallWellPPDF[smallWellPPDF['Realization']==float(ir)]
@@ -3482,6 +3684,7 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
     eventLats.append(smallWellScenario['EventLatitude'])
     eventLons.append(smallWellScenario['EventLongitude'])
     names.append(smallName)
+    lags.append(smallWellScenario['LagInDays'].mean())
     ids.append(0)
   if verbose>0: print(' disaggregationPlotPP: ',len(smallWells),' minimally-contributing wells sorted')
   sumSmallPPDF=pd.DataFrame()
@@ -3493,6 +3696,7 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   sumSmallPPDF['EventLatitude']=eventLats
   sumSmallPPDF['EventLongitude']=eventLons
   sumSmallPPDF['Name']=names
+  sumSmallPPDF['LagInDays']=lags
   sumSmallPPDF['ID']=ids
   # Combine small sums with other wells
   smallPPDF=pd.concat([filtPPScenariosDF,sumSmallPPDF],ignore_index=True)
@@ -3506,6 +3710,8 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   smallPPDF['Order'] = smallPPDF.groupby('Realization')['Percentages'].rank(method='dense', ascending=False)
   smallPPDF.loc[smallPPDF['Order']>nOrder,'Order'] = nOrder+1
   return smallPPDF,smallWellIDList
+
+#def prepLagPlot(ppDF, lagClipInDays=1000.,verbose=0):
 
 def prepDisaggregationPlot(smallPPDF,smallWellIDList,jitter=0.,verbose=0):
   """
@@ -3563,6 +3769,7 @@ def getWinWells(summaryDF,wellsDF,injDF,verbose=0):
 
 def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,wellIDs,nQuantiles=11,epoch=pd.to_datetime('01-01-1970'),verbose=0):
   '''
+  getPerWellPressureTimeSeriesSpaghettiAndQuantiles: 
   Generate input to a time series line plot from numpy array of time series pressures.
   Inputs:
     deltaPP    - output from runTimeSeries (nw, nReal, nt)
@@ -3612,71 +3819,6 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
   PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
   return PPQuantilesDF,PPSpaghettiDF
 
-def getPerWellPressureTimeSeriesQuantiles(deltaPP,dayVec,wellIDs,nQuantiles=11,epoch=pd.to_datetime('01-01-1970'),verbose=0):
-  '''
-  Generate input to a time series line plot from numpy array of time series pressures.
-  Inputs:
-    deltaPP    - output from runTimeSeries (nw, nReal, nt)
-    dayVec     - vector of length nt with days from start of epoch (1970)
-    wellIDs    - vector of integer well identifiers (nw)
-    nQuantiles - number of curves to generate evenly distributed around the number of 
-                 realizations, default 11. This should be odd to get the median.
-  Outputs:
-    PPQuantilesDF - dataframe with columns: Day,WellID,DeltaPressure,Percentile
-  '''
-  nReal=deltaPP.shape[1]
-  nt=deltaPP.shape[2]
-  nw=deltaPP.shape[0]
-  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - sizes: ',nReal,nt,nw)
-  PPQuantilesDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
-  #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
-  # Calculate order ofdeltaPP for each value to get percentiles
-  #deltaPPArgSort=np.argsort(deltaPP,axis=1)
-  if verbose>1: print('getPerWellPressureTimeSeriesQuantiles - after argsort: ',nReal,nt,nw)
-  deltaPPSorted=np.zeros([nReal,nt])
-  deltaPPOrder=np.zeros([nReal,nt])
-  deltaPPPercentile=np.zeros([nReal,nt])
-  ptiles_list=list(range(0,nReal))
-  ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
-  indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
-  quantiles=[ptiles[i] for i in indices]
-  if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - quantiles: ',quantiles)
-  for iw in range(nw):
-    deltaPPArgSort=np.argsort(deltaPP[iw,:,:].reshape([nReal,nt]),axis=0)
-    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - well: ',iw,' of ',nw)
-    for it in range(nt):
-      for iR in range(nReal):
-        deltaPPSorted[deltaPPArgSort[iR,it],it]=deltaPP[iw,iR,it]
-        deltaPPPercentile[deltaPPArgSort[iR,it],it]=round(100.*iR/(nReal-1),1)
-        deltaPPOrder[deltaPPArgSort[iR,it],it]=iR
-    # Now just extract dataframe for this well
-    if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - array sizes: ',deltaPP[iw,:,:].shape,deltaPPPercentile[:,:].shape,deltaPPOrder[:,:].shape),np.tile(dayVec,nReal).shape,np.arange(nReal).repeat(nt).shape,np.repeat(wellIDs[iw],nReal*nt)
-    d={'DeltaPressure':deltaPP[iw,:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Order':deltaPPOrder[:,:].flatten(),'Percentile':deltaPPPercentile[:,:].flatten(),'WellID':np.repeat(wellIDs[iw],nReal*nt)}
-    wellPPDF=pd.DataFrame(d)
-    winWellPPDF=wellPPDF[wellPPDF['Percentile'].isin(quantiles)]
-    PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
-  PPQuantilesDF['Date']=epoch+pd.to_timedelta(PPQuantilesDF['Days'],unit='d')
-  return PPQuantilesDF
-
-def getPerWellPressureTimeSeriesSpaghetti(deltaPP,dayVec,diffPPVec,wellIDs,epoch=pd.to_datetime('01-01-1970'),verbose=0):
-  '''
-  Generate input to a time series line plot from numpy array of time series pressures.
-  Inputs:
-    deltaPP    - output from runTimeSeries (nw, nReal, nt)
-    dayVec     - vector of length nt with days from start of epoch (1970)
-    diffPPVec  - vector of diffusivities for different realizations (nReal)
-    wellIDs    - vector of integer well identifiers (nw)
-  Outputs:
-    PPSpaghettiDF - dataframe with columns: Day,WellID,DeltaPressure,Realization,Diffusivity
-  '''
-  nReal=deltaPP.shape[1]
-  nt=deltaPP.shape[2]
-  nw=deltaPP.shape[0]
-  PPSpaghettiDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
-  PPSpaghettiDF=pd.DataFrame({'DeltaPressure':deltaPP[:,:,:].flatten(), 'Days':np.tile(dayVec,nw*nReal), 'Realization':np.tile(np.arange(nReal),nw).repeat(nt),'WellID':np.repeat(wellIDs,nReal*nt), 'Diffusivity':np.tile(diffPPVec,nw).repeat(nt)})
-  PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
-  return PPSpaghettiDF
-                             
 def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,injDF,wellIDs,verbose=0):
   '''
   prepPressureAndDisposalTimeSeriesPlots - take output from getPerWellPressureTimeSeriesQuantiles
