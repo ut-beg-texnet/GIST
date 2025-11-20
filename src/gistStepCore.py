@@ -28,10 +28,17 @@ def runGistCore(input, wellcsv, injectioncsv):
     eq = input.get("eq")
     gistMC_instance.addWells(wellcsv, injectioncsv)
     forecastYears = input.get("years_diff")
+
+    print("Info: Finding Wells")
+
     considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWells(eq,PE=False, responseYears=forecastYears)
+
+    print("Info: Generating r-t Plot")
 
     # r-t plot combination of considered well and excluded wells df reference plots.py
     smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, 1980, [gistMC_instance.diffPPMin, gistMC_instance.diffPPMax], eq, True)
+
+    print("Info: Generating Disaggregation Plot")
 
     # disaggregationPlot plot
     currentWellsDF=considered_wells_df[considered_wells_df['EncompassingDay']<0.].reset_index(drop=True)
@@ -55,6 +62,8 @@ def runGistCore(input, wellcsv, injectioncsv):
                 filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
   
     disaggregationDF = prepDisaggregationPlot(filteredDF,orderedWellList,jitter=0.1)
+
+    print("Info: Generating Time Series Plots")
 
     # time series plot
     winWellsDF,winInjDF = getWinWells(filteredDF,currentWellsDF,inj_df)

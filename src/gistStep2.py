@@ -32,6 +32,8 @@ eventType = helper.getParameterValueWithStepIndexAndParamName(0,"eventType")
 
 formattedEarthquake = {}
 
+print("Info: Starting Analysis")
+
 if eventType == 'Earthquake':
 
     Earthquake = helper.getParameterValueWithStepIndexAndParamName(0,"Earthquake").get("selectedRow").get("attributes")
