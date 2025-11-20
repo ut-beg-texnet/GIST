@@ -47,7 +47,7 @@ def runGistCore(input, wellcsv, injectioncsv):
 
     # if scenarioDF is empty then we need to abort
     if scenarioDF.empty:
-        return smallPPDF, smallWellList, scenarioDF, []
+        return smallPPDF, smallWellList, scenarioDF, [], [], [] ,[], []
 
     dPCutoff=0.5
     filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
