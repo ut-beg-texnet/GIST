@@ -74,7 +74,7 @@ import warnings
 #       prepInj                             #
 #       extendDisposal                      #
 #     Error checking:                       #
-#       checkSTRho
+#       checkSTRho                          #
 #       checkEQ                             #
 #       checkParameters                     #
 #       checkWellFile                       #
@@ -1039,12 +1039,12 @@ class gistMC:
     ####################################
     # Sanity check on well start dates #
     ####################################
-    if firstWellStartDate>pd.to_datetime(eq['Origin Date'][0]): raise ValueError('gistMC.findWellsVec ERROR: All wells started injecting after the earthquake.')
+    if firstWellStartDate>pd.to_datetime(eq['Origin Date']): raise ValueError('gistMC.findWellsVec ERROR: All wells started injecting after the earthquake.')
     # Should I fill NaT values with something?
-    injectionDuration=(pd.to_datetime(eq['Origin Date'][0])-pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)).dt
+    injectionDuration=(pd.to_datetime(eq['Origin Date'])-pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)).dt
     injectionDays=injectionDuration.days
     # This is still returning NaNs and I don't know why
-    if verbose>1: print(' gistMC.findWellsVec injectionDays',pd.to_datetime(eq['Origin Date'][0]),pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch))
+    if verbose>1: print(' gistMC.findWellsVec injectionDays',pd.to_datetime(eq['Origin Date']),pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch))
     wellDurations=injectionDays/365.25
     wellDurationsMin=min(wellDurations)
     wellDurationsMax=max(wellDurations)
@@ -1066,7 +1066,7 @@ class gistMC:
     ##############################################
     # Compute distances from wells to earthquake #
     ##############################################
-    wellDistances=haversineSeries(pd.Series(eq['Latitude'][0],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLatitude'],pd.Series(eq['Longitude'][0],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLongitude'])
+    wellDistances=haversineSeries(pd.Series(eq['Latitude'],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLatitude'],pd.Series(eq['Longitude'],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLongitude'])
     if verbose>1: print(' gistMC.findWellsVec distances',min(wellDistances),max(wellDistances))
     #######################################################
     # Sanity check for minimum and maximum well distances #
@@ -1103,7 +1103,7 @@ class gistMC:
     # Then subtract off the date of the earthquake to #
     # get a number of days relative to the earthquake #
     ###################################################
-    encompassingDays=daysSinceDate(pd.to_datetime(eq['Origin Date'][0]),injWellDateAtEpicenter,verbose=1)
+    encompassingDays=daysSinceDate(pd.to_datetime(eq['Origin Date']),injWellDateAtEpicenter,verbose=1)
     if verbose>1: print(' gistMC.findWellsVec encompassingDays',min(encompassingDays),max(encompassingDays),np.count_nonzero(np.isnan(encompassingDays)),' nans')
     #############################################################
     # Compute encompassing diffusivity - the diffusivity needed #
@@ -1114,7 +1114,7 @@ class gistMC:
     # Get an approximate x and y distance for poroelastic modeling #
     # Will also be needed for anisotropic permeability in v2       #
     ################################################################
-    [dxs,dys]=haversineSeriesXY(pd.Series(eq['Latitude'][0],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLatitude'],pd.Series(eq['Longitude'][0],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLongitude'])
+    [dxs,dys]=haversineSeriesXY(pd.Series(eq['Latitude'],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLatitude'],pd.Series(eq['Longitude'],index=range(len(self.wellDF.index))),self.wellDF['SurfaceHoleLongitude'])
     #
     # Ratio of diffusion distance to EQ distance
     # Smaller numbers mean more potential for influence
@@ -1131,7 +1131,7 @@ class gistMC:
     if endDate is None:
       consideredMask = encompassingDays<(responseYears*365.25)
     else:
-      responseDays=(pd.to_datetime(endDate)-pd.to_datetime(eq['Origin Date'][0])).days
+      responseDays=(pd.to_datetime(endDate)-pd.to_datetime(eq['Origin Date'])).days
       consideredMask = encompassingDays<responseDays
     if verbose>0: print('gistMC.findWellsVec:  Selecting ',sum(consideredMask),' and excluding ',sum(~consideredMask),' wells')
     # Should I throw an error or should I return the R-T plot showing the wells? What about a list of the nearest well?
@@ -1153,7 +1153,7 @@ class gistMC:
     consideredWellsDF['YearsInjecting']=wellDurations[consideredMask].reset_index(drop=True)
     consideredWellsDF['EncompassingDay']=encompassingDays[consideredMask].reset_index(drop=True)
     consideredWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[consideredMask].reset_index(drop=True)
-    consideredWellsDF['EventID']=eq['EventID'][0]
+    consideredWellsDF['EventID']=eq['EventID']
     if verbose>1: print(' gistMC.findWellsVec consideredWellsDF[EncompassingDays]',min(consideredWellsDF['EncompassingDay']),max(consideredWellsDF['EncompassingDay']),consideredWellsDF['EncompassingDay'].isna().sum(),' nans')
     ################################################################################
     # Create dataframe of wells that are ignored - this needs to be output as a QC #
@@ -1170,7 +1170,7 @@ class gistMC:
     excludedWellsDF['YearsInjecting']=wellDurations[~consideredMask]
     excludedWellsDF['EncompassingDay']=encompassingDays[~consideredMask]
     excludedWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[~consideredMask]
-    excludedWellsDF['EventID']=eq['EventID'][0]
+    excludedWellsDF['EventID']=eq['EventID']
     ##########################################################################
     # Step 3: Pull injection data from injection file that matches well list #
     #         and calculate total injected volume for all wells at EQ date   #
@@ -1441,7 +1441,7 @@ class gistMC:
     ######################################################
     # Convert earthquake origin date to days since epoch #
     ######################################################
-    eqDay=(pd.to_datetime(eq['Origin Date'][0])-self.epoch).days
+    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
     ########################################################################
     # Prep injection data to get arrays needed for vectorized calculations #
     # Sanity checks for eqDay, consideredWells and injDF are in prepInj    #
@@ -1729,7 +1729,7 @@ class gistMC:
     #        pressures at the EQ time at one time.                                #
     ###############################################################################
     # Inputs:                                                                    #
-    #        eq:               earthquake dataframe with 'Origin Date' column    #
+    #        eq:               earthquake dictionary with 'Origin Date' entry    #
     #        consideredWells:  dataframe of wells produced by self.findWells     #
     #                          with 'ID' and 'Distances' columns                 #
     #        injDF:            dataframe of injection produced by self.findWells #
@@ -1765,7 +1765,7 @@ class gistMC:
     # Sanity check on input EQ #
     ############################
     checkEQ(eq)
-    eqDay=(pd.to_datetime(eq['Origin Date'][0])-self.epoch).days
+    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
     ########################################################################
     # Prep injection data to get arrays needed for vectorized calculations #
     # Also sanity checks disposal and earthquake information               #
@@ -2058,7 +2058,7 @@ class gistMC:
             for a single realization?
             - This code needs cleaning up, lots of duplicated work!
     """
-    eqDay=(pd.to_datetime(eq['Origin Date'][0])-self.epoch).days
+    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
     # Go from the consideredWells and injDF dataframes to
     # numpy arrays of rates (nw,nt), well distances (2,nw), and times (nt)
     # This should be a separate subroutine
@@ -2155,7 +2155,7 @@ class gistMC:
     """
     # Convert earthquake origin date to days since epoch #
     ######################################################
-    eqDay=(pd.to_datetime(eq['Origin Date'][0])-self.epoch).days
+    eqDay=(pd.to_datetime(eq['Origin Date'])-self.epoch).days
     
     #######################################################
     # Post number of wells considered for this earthquake #
@@ -2932,8 +2932,8 @@ class gistMC:
     # Take numpy output of pressureScenarios and convert it to a dataframe #
     ######################################################################### #
     # Inputs:                                                                 #
-    #      eq:                 Dataframe of earthquake                        #
-    #                          with EventID, Latitude, and Longitude columns  #
+    #      eq:                 Dictionary of earthquake                       #
+    #                          with EventID, Latitude, and Longitude entries  #
     #      consideredWells:    Dataframe of wells from findWells              #
     #                          with APINumber, WellName, ID,                  #
     #                          SurfaceHoleLatitude, and SurfaceHoleLongitude  #
@@ -4263,31 +4263,35 @@ def checkSTRho(SVec,TVec,rhoVec,nReal,verbose=0):
 
 # I need to fix all of the below to only use warnings.warn and ValueError
 
-def checkEQ(eqDF,verbose=0):
+def checkEQ(eqDict,verbose=0):
   '''
-  checkEQ: sanity check of input earthquake dataframe.
-  Input: eqDF - dataframe of earthquake
-  Output: warnings, errors - lists of issues found
-  eqDF should have one row.
+  checkEQ: sanity check of input earthquake.
+  Input: eqDict - dictionary of earthquake
+  Output: None
+      Warnings via warnings.warn
+      Errors raised as ValueError
   Required columns: EventID, OriginDate, Latitude, Longitude,
     LatitudeError, LongitudeError
   '''
+  #
+  # Check type of eqDict #
+  #
+  if not isinstance(eqDict,dict): raise ValueError("gistMC.checkEQ ERROR: Input eqDict must be a dictionary but is instead "+str(type(eqDict)))
   ##############################
   # Check for required columns #
   ##############################
-  if 'EventID' not in eqDF.columns:                         raise ValueError('gistMC.checkEQ ERROR: EventID not in eqDF')
-  if 'Origin Date' not in eqDF.columns:                      raise ValueError('gistMC.checkEQ ERROR: OriginDate not in eqDF')
-  if 'Latitude' not in eqDF.columns:                        raise ValueError('gistMC.checkEQ ERROR: Latitude not in eqDF')
-  if 'Longitude' not in eqDF.columns:                       raise ValueError('gistMC.checkEQ ERROR: Longitude not in eqDF')
-  if 'LatitudeError' not in eqDF.columns:                   raise ValueError('gistMC.checkEQ ERROR: LatitudeError not in eqDF')
-  if 'LongitudeError' not in eqDF.columns:                  raise ValueError('gistMC.checkEQ ERROR: LongitudeError not in eqDF')
-  if len(eqDF)==0:                                          raise ValueError('gistMC.checkEQ ERROR: eqDF is empty')
-  if eqDF['Latitude'][0]>90 or eqDF['Latitude'][0]<-90:     raise ValueError('gistMC.checkEQ ERROR: Latitude '+eqDF['Latitude'][0]+' not in range [-90,90]')
-  if eqDF['Longitude'][0]>180 or eqDF['Longitude'][0]<-180: raise ValueError('gistMC.checkEQ ERROR: Longitude '+eqDF['Longitude'][0]+' not in range [-180,180]')
-  if len(eqDF)>1:                                           warnings.warn('gistMC.checkEQ WARNING: eqDF has more than one row',UserWarning,stacklevel=2)
-  if eqDF['Latitude'][0]>80. or eqDF['Latitude'][0]<-80:    warnings.warn('gistMC.checkEQ WARNING: Latitude '+eqDF['Latitude'][0]+' close to poles, distances will be inaccurate.',UserWarning,stacklevel=2)
-  if eqDF['LongitudeError'][0]>100.:                        warnings.warn('gistMC.checkEQ WARNING: LongitudeError '+eqDF['LongitudeError'][0]+' is very large, should be in km.',UserWarning,stacklevel=2)
-  if eqDF['LatitudeError'][0]>100.:                         warnings.warn('gistMC.checkEQ WARNING: LongitudeError '+eqDF['LongitudeError'][0]+' is very large, should be in km.',UserWarning,stacklevel=2)
+  if len(eqDict)==0:                                  raise ValueError('gistMC.checkEQ ERROR: eqDict is empty')
+  if 'EventID' not in eqDict:                         raise ValueError('gistMC.checkEQ ERROR: EventID not in eqDict')
+  if 'Origin Date' not in eqDict:                     raise ValueError('gistMC.checkEQ ERROR: OriginDate not in eqDict')
+  if 'Latitude' not in eqDict:                        raise ValueError('gistMC.checkEQ ERROR: Latitude not in eqDict')
+  if 'Longitude' not in eqDict:                       raise ValueError('gistMC.checkEQ ERROR: Longitude not in eqDict')
+  if 'LatitudeError' not in eqDict:                   raise ValueError('gistMC.checkEQ ERROR: LatitudeError not in eqDict')
+  if 'LongitudeError' not in eqDict:                  raise ValueError('gistMC.checkEQ ERROR: LongitudeError not in eqDict')
+  if eqDict['Latitude']>90 or eqDict['Latitude']<-90: raise ValueError('gistMC.checkEQ ERROR: Latitude '+eqDFict['Latitude']+' not in range [-90,90]')
+  if eqDict['Longitude']>180 or eqDict['Longitude']<-180: raise ValueError('gistMC.checkEQ ERROR: Longitude '+eqDict['Longitude']+' not in range [-180,180]')
+  if eqDict['Latitude']>80. or eqDict['Latitude']<-80: warnings.warn('gistMC.checkEQ WARNING: Latitude '+eqDict['Latitude']+' close to poles, distances will be inaccurate.',UserWarning,stacklevel=2)
+  if eqDict['LongitudeError']>100.:                        warnings.warn('gistMC.checkEQ WARNING: LongitudeError '+eqDict['LongitudeError']+' is very large, should be in km.',UserWarning,stacklevel=2)
+  if eqDict['LatitudeError']>100.:                         warnings.warn('gistMC.checkEQ WARNING: LongitudeError '+eqDict['LongitudeError']+' is very large, should be in km.',UserWarning,stacklevel=2)
   return
 
 def checkWellDF(wellDF,verbose=0):
@@ -4396,11 +4400,10 @@ def checkWellFile(wellFile,boundsDictionary=None,verbose=0):
   Outputs:
     wellDF      - well Dataframe
     infoText    - text describing test results
-    warningText - warnings, could be empty. Code will run but results might be bad
-    errorText   - errors, could be empty. Code will not run.
+  Warnings raised as warnings.warn
+  Errors raised a ValueError
   '''
   usedStringColumns=['APINumber','UICNumber','WellName']
-  #usedNumericColumns=['ID','PermittedMaxLiquidBPD','StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','Distances','YearsInjecting','EncompassingDay','TotalBBL']
   usedNumericColumns=['ID','PermittedMaxLiquidBPD','StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude']
   setStringColumns=set(usedStringColumns)
   setNumericColumns=set(usedNumericColumns)
@@ -4457,10 +4460,15 @@ def checkWellFile(wellFile,boundsDictionary=None,verbose=0):
     nOver=sum(overBoundMask)
     if nUnder>0: warningText=warningText+' '+column+' has '+str(nUnder)+' values <'+str(bounds[0])+' out of '+str(len(underBoundMask)+'\n')
     if nOver>0: warningText=warningText+' '+column+' has '+str(nOver)+' values >'+str(bounds[1])+' out of '+str(len(overBoundMask)+'\n')
-  if warningText=='': infoText=infoText+'No warnings found!\n'
-  if errorText=='': infoText=infoText+'No errors found!\n'
-  return wellDF,infoText,warningText,errorText
-
+  if warningText=='':
+    infoText=infoText+'No warnings found!\n'
+  else:
+    warnings.warn('checkWellFile WARNINGS: '+warningText)
+  if errorText=='':
+    infoText=infoText+'No errors found!\n'
+    return wellDF,infoText
+  else:
+    raise ValueError('checkWellFile ERROR: '+errorText)
 
 def checkInjFile(injFile,wellDF=None,boundsDictionary=None,epoch=pd.to_datetime('01-01-1970'),verbose=0):
   '''
@@ -4479,8 +4487,8 @@ def checkInjFile(injFile,wellDF=None,boundsDictionary=None,epoch=pd.to_datetime(
   Outputs:
     injDF       - disposal Dataframe
     infoText    - text describing test results
-    warningText - warnings, could be empty. Code will run but results might be bad
-    errorText   - errors, could be empty. Code will not run.
+  Warnings raise warnings.warn
+  Errors raise ValueError
   '''
   injDF=pd.read_csv(injFile)
   # Check columns
@@ -4530,4 +4538,12 @@ def checkInjFile(injFile,wellDF=None,boundsDictionary=None,epoch=pd.to_datetime(
     if len(wellIDNotPresentInInj)>0: infoText=infoText+' '+str(len(wellIDNotPresentInInj))+' wells with well data are not present in the injection file.\n'
   # Get distances of wells not present in injection file? What else?
   if errorText=='': infoText=infoText+'All well injection data are in expected bounds\n'
-  return injDF,infoText,warningText,errorText
+  if warningText=='':
+    infoText=infoText+'No warnings found!\n'
+  else:
+    warnings.warn('checkInjFile WARNINGS: '+warningText)
+  if errorText=='':
+    infoText=infoText+'No errors found!\n'
+    return wellDF,infoText
+  else:
+    raise ValueError('checkInjFile ERROR: '+errorText)
