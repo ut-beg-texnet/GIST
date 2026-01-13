@@ -16,6 +16,10 @@ Injection processing, GIST computation, and visualization are broken up into sep
   
 	GIST_RunTemplate_texnet2024oqfb_deep.ipynb      - Jupyter notebook of all compute for one example
 
+	GIST_RunTemplate_ErrorReportin_Step1.ipynb		- Jupyter notebook for GIST with improved error reporting, step 1
+	GIST_RunTemplate_ErrorReportin_Step2.ipynb		- Jupyter notebook for GIST with improved error reporting, step 2
+	GIST_RunTemplate_ErrorReportin_Step3.ipynb		- Jupyter notebook for GIST with improved error reporting, step 3
+
 	GIST_RegressionTests.ipynb			- Jupyter notebook reproducing FSP results for modeling regression tests,
  							  validation of pore pressure modeling.
 
