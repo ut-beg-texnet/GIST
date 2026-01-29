@@ -3127,6 +3127,7 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,epoch=p
     ###########################
     if eqDay<dayLowerBound: raise ValueError(' gistMC.prepInj ERROR: eqDay is before 1950: '+str(epoch+pd.to_timedelta(eqDay,'D')))
     if eqDay>dayUpperBound: raise ValueError(' gistMC.prepInj ERROR: eqDay is after 2050: '+str(epoch+pd.to_timedelta(eqDay,'D')))
+    if eqDay>maxT: raise ValueError(' gistMC.prepInj ERROR: eqDay '+str(epoch+pd.to_timedelta(eqDay,'D'))+' is after end of injection data: '+str(epoch+pd.to_timedelta(maxT,D)))
     maxT=max(int(round((eqDay-ot)/dt))*dt,max(injDF['Days']))+dt
     if verbose>1: print(' prepInj: eqDay of ',eqDay,' used ',maxT)
   else:
