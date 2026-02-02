@@ -240,7 +240,7 @@ class gistMC:
     #       nta_min/max :  Fluid viscosity    (Pascal-seconds) #
     #       kMD_min/max :  Permeability         (millidarcies) #
     #         h_min/max :  Injection interval thickness (feet) #
-    #    alphav_min/max :  Vertical compressibility     (1/Pa) #
+    #    alphav_min/max :  Bulk Rock compressibility    (1/Pa) #
     #      beta_min/max :  Fluid compressibility        (1/Pa) #
     ############################################################
     # Assumptions: ########
@@ -396,20 +396,20 @@ class gistMC:
     if self.beta_min<0.0000000003: warnings.warn("gistMC.initPP WARNING: Minimum fluid compressibility of "+str(self.beta_min)+" 1/Pa is very low.", UserWarning, stacklevel=2)
 
     #####################################################
-    # alphav_min/max :  Vertical compressibility (1/Pa) #
+    # alphav_min/max :  Bulk Rock compressibility (1/Pa) #
     #####################################################
     #  Error checking  #
     ####################
-    if not isinstance(self.alphav_max, float): raise ValueError("gistMC.initPP ERROR: Maximum vertical compressibility "+str(self.alphav_max)+" is not a float.")
-    if not isinstance(self.alphav_min, float): raise ValueError("gistMC.initPP ERROR: Minimum vertical compressibility "+str(self.alphav_min)+" is not a float.")
-    if self.alphav_max<self.alphav_min: raise ValueError("gistMC.initPP ERROR: Maximum vertical compressibility "+str(self.alphav_max)+" 1/Pa < Minimum vertical compressibility "+str(self.alphav_min)+" 1/Pa")
-    if self.alphav_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum vertical compressibility must be positive, not "+str(self.alphav_min)+" 1/Pa")
-    if self.alphav_max>=0.000001: raise ValueError("gistMC.initPP ERROR: Maximum vertical compressibility must be less than clay (0.000001 1/Pa), not "+str(self.alphav_max)+" 1/Pa")
+    if not isinstance(self.alphav_max, float): raise ValueError("gistMC.initPP ERROR: Maximum bulk rock compressibility "+str(self.alphav_max)+" is not a float.")
+    if not isinstance(self.alphav_min, float): raise ValueError("gistMC.initPP ERROR: Minimum bulk rock compressibility "+str(self.alphav_min)+" is not a float.")
+    if self.alphav_max<self.alphav_min: raise ValueError("gistMC.initPP ERROR: Maximum bulk rock compressibility "+str(self.alphav_max)+" 1/Pa < Minimum bulk rock compressibility "+str(self.alphav_min)+" 1/Pa")
+    if self.alphav_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum bulk rock compressibility must be positive, not "+str(self.alphav_min)+" 1/Pa")
+    if self.alphav_max>=0.000001: raise ValueError("gistMC.initPP ERROR: Maximum bulk rock compressibility must be less than clay (0.000001 1/Pa), not "+str(self.alphav_max)+" 1/Pa")
     ##############
     #  Warnings  #
     ##############
-    if self.alphav_max>0.00000001: warnings.warn("gistMC.initPP WARNING: Maximum vertical compressibility of "+str(self.alphav_max)+" 1/Pa is very high.", UserWarning, stacklevel=2)
-    if self.alphav_min<0.00000000001: warnings.warn("gistMC.initPP WARNING: Minimum vertical compressibility of "+str(self.alphav_min)+" 1/Pa is very low.", UserWarning, stacklevel=2)
+    if self.alphav_max>0.00000001: warnings.warn("gistMC.initPP WARNING: Maximum bulk rock compressibility of "+str(self.alphav_max)+" 1/Pa is very high.", UserWarning, stacklevel=2)
+    if self.alphav_min<0.00000000001: warnings.warn("gistMC.initPP WARNING: Minimum bulk rock compressibility of "+str(self.alphav_min)+" 1/Pa is very low.", UserWarning, stacklevel=2)
 
     return
   
@@ -724,9 +724,9 @@ class gistMC:
     injWellCount=pd.read_csv(self.injFile,usecols=['ID']).nunique()
     # This part is probably very slow
     injWellDays=pd.read_csv(self.injFile,usecols=['Days'])
-    injWellDayMin=injWellDays.min()
-    injWellDayMax=float(injWellDays.max())
-    injWellDDay=injWellDays[injWellDays>injWellDayMin].min()-injWellDayMin
+    injWellDayMin=injWellDays.min().iloc[0]
+    injWellDayMax=float(injWellDays.max().iloc[0])
+    injWellDDay=injWellDays[injWellDays>injWellDayMin].min().iloc[0]-injWellDayMin
     self.injDT=float(injWellDDay)
     self.injOT=float(injWellDayMin)
     self.injNT=1+int((injWellDayMax-injWellDayMin)/injWellDDay)
@@ -753,7 +753,7 @@ class gistMC:
     #####################################
     # Number of wells in injection file #
     #####################################
-    if injWellCount[0]<1: raise ValueError('gistMC.addWells ERROR: no wells in injection file')
+    if injWellCount.iloc[0]<1: raise ValueError('gistMC.addWells ERROR: no wells in injection file')
     ############################################
     # Number of time samples in injeciton file #
     ############################################
@@ -1449,6 +1449,9 @@ class gistMC:
     (wellIDs,nwC,dayVec,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,f)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None,epoch=self.epoch)
     if verbose>1: print('runPressureScenariosVectorized time axis information - nt:',nt,'; ot:',ot,'; dt:',self.injDT,' earthquake index: ',ieq)
     if verbose>1: print('runPressureScenariosVectorized: f:',f)
+    #
+    # 
+    #
     ######################################
     # Check array size: nwC x nt x nReal #
     # >10GB: Error, >2GB: Warning        # 
@@ -2848,7 +2851,7 @@ class gistMC:
       print('getPressureSensitivity: per-well pressures: ',sensitivityAllWellsDF.Pressures.min(),sensitivityAllWellsDF.Pressures.max())
       print('getPressureSensitivity: total pressures: ',sensitivityAllWellsDF.TotalPressure.min(),sensitivityAllWellsDF.TotalPressure.max())
     sensitivityDF=pd.DataFrame(columns=['EventID', 'EventLatitude', 'EventLongitude', 'ID', 'Name', 'API', 'Latitude', 'Longitude', 'NumWells', 'MinValDP','MeanValDP','MaxValDP','MinVal','MeanVal','MaxVal','Parameter'])
-    parameterList=['Density','Viscosity','Porosity','Interval Thickness','Vertical Compressibility','Fluid Compressibility','Permeability']
+    parameterList=['Density','Viscosity','Porosity','Interval Thickness','Bulk Rock Compressibility','Fluid Compressibility','Permeability']
     # Loop over rows and build a new column with the delta pressure
     wellIDs=sensitivityAllWellsDF['ID'].unique()
     minValSumDP=np.zeros([7,])
@@ -3222,7 +3225,7 @@ def calcPPVals(kMD,hFt,alphav,beta,phi,rho,g,nta):
   # Inputs: #######################################
   #   kMD:    permeability         (millidarcies) #
   #   hFt:    thickness                    (feet) #
-  #   alphav: vertical compressibility     (1/Pa) #
+  #   alphav: bulk rock compressibility     (1/Pa) #
   #   beta:   fluid compressibility        (1/Pa) #
   #   phi:    porosity                  (percent) #
   #   rho:    fluid density              (kg/m^3) #
@@ -3291,7 +3294,7 @@ def calcPPAnisoVals(kMDTensor,hM,alphav,beta,phi,rho,g,nta):
   # Inputs: #######################################
   #   kMD:    permeability     (2x2,millidarcies) #
   #   hM:     thickness                  (meters) #
-  #   alphav: vertical compressibility     (1/Pa) #
+  #   alphav: bulk rock compressibility    (1/Pa) #
   #   beta:   fluid compressibility        (1/Pa) #
   #   phi:    porosity                  (percent) #
   #   rho:    fluid density              (kg/m^3) #
@@ -4363,8 +4366,8 @@ def checkParameters(gist,verbose=0):
   if gist.nta_max<=gist.nta_min:       raise ValueError('checkParameters: maximum viscosity must be greater than minimum viscosity')
   if gist.rho_min<=0.:                 raise ValueError('checkParameters: minimum fluid denisty must be positive')
   if gist.rho_max<=gist.rho_min:       raise ValueError('checkParameters: maximum fluid denisty must be greater than minimum fluid denisty')
-  if gist.alphav_min<=0.:              raise ValueError('checkParameters: minimum vertical compressibility must be positive')
-  if gist.alphav_max<=gist.alphav_min: raise ValueError('checkParameters: maximum vertical compressibility must be greater than minimum vertical compressibility')
+  if gist.alphav_min<=0.:              raise ValueError('checkParameters: minimum bulk rock compressibility must be positive')
+  if gist.alphav_max<=gist.alphav_min: raise ValueError('checkParameters: maximum bulk rock compressibility must be greater than minimum bulk rock compressibility')
   if gist.beta_min<=0.:                raise ValueError('checkParameters: minimum fluid compressibility must be positive')
   if gist.beta_max<=gist.beta_min:     raise ValueError('checkParameters: maximum fluid compressibility must be greater than minimum fluid compressibility')
   if gist.h_min<0.:                    raise ValueError('checkParameters: minimum injection interval thickness must be positive')
@@ -4377,8 +4380,8 @@ def checkParameters(gist,verbose=0):
   if gist.rho_max>1500.:                        warnings.warn('checkParameters WARNING: a maximum fluid density of '+gist.rho_max+' kg/m3 is not realistic',UserWarning,stacklevel=2)
   if gist.nta_min<0.0002:                       warnings.warn('checkParameters WARNING: a minimum viscosity of '+gist.nta_min+' Pa.s is not realistic',UserWarning,stacklevel=2)
   if gist.nta_max>0.001:                        warnings.warn('checkParameters WARNING: a maximum viscosity of '+gist.nta_max+' Pa.s is not realistic',UserWarning,stacklevel=2)
-  if gist.alphav_min<0.00000000001:             warnings.warn('checkParameters WARNING: a minimum vertical compressibility of '+gist.alphav_min+' 1/Pa is less than mercury',UserWarning,stacklevel=2)
-  if gist.alphav_max>0.000001:                  warnings.warn('checkParameters WARNING: a maximum vertical compressibility of '+gist.alphav_max+' 1/Pa is greater than clay',UserWarning,stacklevel=2)
+  if gist.alphav_min<0.00000000001:             warnings.warn('checkParameters WARNING: a minimum bulk rock compressibility of '+gist.alphav_min+' 1/Pa is less than mercury',UserWarning,stacklevel=2)
+  if gist.alphav_max>0.000001:                  warnings.warn('checkParameters WARNING: a maximum bulk rock compressibility of '+gist.alphav_max+' 1/Pa is greater than clay',UserWarning,stacklevel=2)
   if gist.beta_min<0.0000000003:                warnings.warn('checkParameters WARNING: a minimum fluid compressibilty of '+gist.beta_min+' 1/Pa is not realistic',UserWarning,stacklevel=2)
   if gist.beta_max>0.0000000006:                warnings.warn('checkParameters WARNING: a maximum fluid compressibility of '+gist.beta_max+' 1/Pa is not realistic',UserWarning,stacklevel=2)
   if gist.h_max>10000.:                         warnings.warn('checkParameters WARNING: a maximum injection interval thickness of '+gist.h_max+' ft is not realistic',UserWarning,stacklevel=2)
