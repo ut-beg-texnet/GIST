@@ -4067,8 +4067,14 @@ def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,i
   # Loop over wells of interest:
   for iw in range(len(wellIDs)):
     wellID=wellIDs[iw]
-    wellName=wellsDF[wellsDF['ID']==wellID]['WellName'].iloc[0]
-    wellInfo=wellsDF[wellsDF['ID']==wellID]
+    wellRows=wellsDF[wellsDF['ID']==wellID]
+    if wellRows.empty:
+      if verbose>0: print("prepPressureAndDisposalTimeSeriesPlots WARNING: wellID not found in wellsDF:",wellID)
+      wellName=str(wellID)
+      wellInfo=wellRows
+    else:
+      wellName=wellRows['WellName'].iloc[0]
+      wellInfo=wellRows
     if verbose>0: print("prepPressureAndDisposalTimeSeriesPlots",wellName,' ID: ',wellID)
     # isolate disposal from this well
     oneWellInjDF=injDF[injDF['ID']==wellID]

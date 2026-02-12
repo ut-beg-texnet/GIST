@@ -14,3 +14,5 @@
 
 /src/data/disposal_inj_b3_format.csv
 /src/data/disposal_well_b3_format.csv
+
+/src/injection/credentials.py
