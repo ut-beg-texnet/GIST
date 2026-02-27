@@ -7,6 +7,10 @@
 /src/__pycache__
 /.idea
 
+# any .venv directories
+**/venv/
+
+
 **/__pycache__/
 
 /src/data/disposal_inj.csv
@@ -16,3 +20,17 @@
 /src/data/disposal_well_b3_format.csv
 
 /src/injection/credentials.py
+
+# ignore the Input_Files/Earthquake_Catalog.csv file
+/src/Input_Files/Earthquake_Catalog.csv
+
+# log files
+*.log
+
+# csv files
+*.csv
+src/injection/test_updater/
+src/injection/injection_updater_V4.log
+
+# ignore the credentials.py file
+credentials.py
