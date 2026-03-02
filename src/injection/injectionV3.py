@@ -170,7 +170,7 @@ class injTX:
           #############################################
           # Append to the dataframe in the dictionary #
           #############################################
-          self.timeSeriesDict[str(well)]=self.timeSeriesDict[str(well)].append(wellWinDF)
+          self.timeSeriesDict[str(well)]=pd.concat([self.timeSeriesDict[str(well)], wellWinDF], ignore_index=True)
           if verbose>1: print(' injectionV3.injTX.addMonthly: ',self.timeSeriesDict[str(well)].shape[0],' rows total for well ',well)
         # end if
       chunk=chunk+1
@@ -392,7 +392,7 @@ class injNM:
           #############################################
           # Append to the dataframe in the dictionary #
           #############################################
-          self.timeSeriesDict[str(well)]=self.timeSeriesDict[str(well)].append(wellWinDF)
+          self.timeSeriesDict[str(well)]=pd.concat([self.timeSeriesDict[str(well)], wellWinDF], ignore_index=True)
           if verbose>1: print(' injectionV3.injNM.addMonthly: ',self.timeSeriesDict[str(well)].shape[0],' rows total for well ',well)
         # end if
       chunk=chunk+1
@@ -451,7 +451,7 @@ class injNM:
           #############################################
           # Append to the dataframe in the dictionary #
           #############################################
-          self.timeSeriesDict[str(well)]=self.timeSeriesDict[str(well)].append(wellWinDF)
+          self.timeSeriesDict[str(well)]=pd.concat([self.timeSeriesDict[str(well)], wellWinDF], ignore_index=True)
           if verbose>1: print(' injectionV3.injNM.addMonthly: ',self.timeSeriesDict[str(well)].shape[0],' rows total for well ',well)
         # end if
       chunk=chunk+1
@@ -724,17 +724,17 @@ def filterBPDs(wellDF,thresh,keepModeled,verbose=0):
     # Check if a spike #
     ####################
     if (np.isnan(wellDF['BPD'].to_list()[0])):
-      nanDF=nanDF.append(well)
+      nanDF=pd.concat([nanDF, wellDF], ignore_index=True)
       nNan=1
     elif (wellDF['BPD'].to_list()[0]>thresh):
-      spikeDF=spikeDF.append(well)
+      spikeDF=pd.concat([spikeDF, wellDF], ignore_index=True)
       nSpike=1
     ##################
     # Check if a NaN #
     # If valid append to output data frame #
     ########################################
     else:
-      keepDF=keepDF.append(wellDF)
+      keepDF=pd.concat([keepDF, wellDF], ignore_index=True)
       nKeep=1
   else:
     #############################
@@ -770,7 +770,7 @@ def filterBPDs(wellDF,thresh,keepModeled,verbose=0):
       ############################################
       # If all values are good append everything #
       ############################################
-      keepDF=keepDF.append(wellDF)
+      keepDF=pd.concat([keepDF, wellDF], ignore_index=True)
     else:
       #########################################
       # Else split into different data frames #
