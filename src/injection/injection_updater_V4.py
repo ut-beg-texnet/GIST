@@ -19,6 +19,7 @@ Usage:
 
 import argparse
 import logging
+import shutil
 import sys
 from datetime import datetime, timedelta
 from io import StringIO
@@ -333,7 +334,30 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Enable verbose DEBUG logging and injectionV3 internal output.",
     )
+    parser.add_argument(
+        "--backup-dir",
+        type=Path,
+        help="Directory where existing CSV files will be backed up before updating.",
+    )
     return parser.parse_args()
+
+
+def backup_files(files: list[Path], backup_dir: Path) -> None:
+    """
+    Copy a list of files to the backup directory.
+    Overwrites existing files in the backup directory.
+    """
+    if not backup_dir.exists():
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("Created backup directory: %s", backup_dir)
+
+    for f in files:
+        if f.exists():
+            dest = backup_dir / f.name
+            shutil.copy2(f, dest)
+            logger.info("Backed up %s to %s", f.name, dest)
+        else:
+            logger.debug("File %s does not exist, skipping backup.", f.name)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -341,7 +365,7 @@ def parse_args() -> argparse.Namespace:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    """Orchestrate the weekly data fetch, merge, dedup, and GIST regeneration."""
+    """Orchestrate the weekly data fetch, merge, dedup, and generate CSVs."""
     args = parse_args()
     setup_logging(args.debug)
 
@@ -351,7 +375,7 @@ def main() -> None:
 
     # ── Validate target directory ────────────────────────────────────────────
     if not args.target_dir.exists():
-        logger.error("Target directory does not exist: %s", args.target_dir)
+        logger.error("Target directory for CSV filesdoes not exist: %s", args.target_dir)
         sys.exit(1)
 
     dev = args.dev
@@ -372,16 +396,24 @@ def main() -> None:
         "well_b3": well_b3,   "inj_b3": inj_b3,
     })
 
-    # ── Date range: last 30 days ─────────────────────────────────────────────
+    # ── Step 0: Backup existing files ────────────────────────────────────────
+    if args.backup_dir:
+        files_to_backup = [
+            well_raw, inj_raw, well_b3, inj_b3,
+            shallow_well, shallow_inj, deep_well, deep_inj
+        ]
+        backup_files(files_to_backup, args.backup_dir)
+
+    # ── Date range: from 2016 to now ─────────────────────────────────────────────
     now = datetime.now()
-    start = now - timedelta(days=30)
+    start = datetime(2016, 1, 1)
     logger.info("Fetching injection data from %s to %s", start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"))
 
     # ── Authenticate ─────────────────────────────────────────────────────────
     auth_url = "https://injection.texnet.beg.utexas.edu/api/Users/Authenticate"
     token = authenticate(credentials.USERNAME, credentials.PASSWORD, auth_url)
     if not token:
-        logger.error("Cannot proceed without a valid API token. Exiting.")
+        logger.error("Authentication failed: Cannot proceed without a valid API token. Exiting.")
         sys.exit(1)
 
     # ── Step 1: Fetch & update well list ─────────────────────────────────────
@@ -408,8 +440,8 @@ def main() -> None:
     payload = {
         "BeginMonth": start.month,
         "BeginYear":  start.year,
-        "EndMonth":   now.month,
-        "EndYear":    now.year,
+        "EndMonth":   (now.month % 12) + 1,
+        "EndYear":    now.year if now.month < 12 else now.year + 1,
         "Format":     "excel",
         "IncludeWellIds": True,
         "WellIds":    id_array.tolist(),
