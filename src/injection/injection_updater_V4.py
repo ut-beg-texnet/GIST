@@ -464,7 +464,11 @@ def main() -> None:
 
     # ── Step 5: Run GIST pipeline (Shallow + Deep) ───────────────────────────
     verbose = 1 if args.debug else 0
-    end_date_str = now.strftime("%m-%d-%Y")
+    
+    # Use 'now' for the API fetch, but 'now + 7 days' for the GIST interpolation
+    # This allows users to run GIST for dates during the upcoming week.
+    gist_end_date = now + timedelta(days=7)
+    end_date_str = gist_end_date.strftime("%m-%d-%Y")
 
     run_gist_pipeline(
         b3_well_file=well_b3,
