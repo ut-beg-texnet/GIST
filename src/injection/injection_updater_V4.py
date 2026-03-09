@@ -492,6 +492,15 @@ def main() -> None:
         verbose=verbose,
     )
 
+    # ── Step 6: Cleanup Intermediate Files ──────────────────────────────────
+    # Only remove these if we are NOT in debug mode, to keep the data folder clean
+    if not args.debug:
+        logger.info("Cleaning up intermediate B3 format files...")
+        for temp_file in [well_b3, inj_b3]:
+            if temp_file.exists():
+                temp_file.unlink()
+                logger.debug("Deleted: %s", temp_file)
+
     logger.info("injection_updater_V4 completed successfully.")
     logger.info("=" * 60)
 
