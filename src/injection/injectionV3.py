@@ -236,7 +236,7 @@ class injTX:
           #print('Current Well' + self.timeSeriesDict[str(well)])
           #self.timeSeriesDict[str(well)]=self.timeSeriesDict[str(well)].append(wellWinDF)
           key = str(well)
-          if key in self.timeSeriesDict:
+          if key in self.timeSeriesDict and not self.timeSeriesDict[key].empty:
               self.timeSeriesDict[key] = pd.concat([self.timeSeriesDict[key], wellWinDF], ignore_index=True)
           else:
               self.timeSeriesDict[key] = wellWinDF.copy()
@@ -815,20 +815,7 @@ def getDays(inDF,epoch):
   #    outDF - Dataframe with added Days column #
   ###############################################
   outDF=inDF.copy()
-  dayList=[]
-  ##################
-  # Loop over rows #
-  ##################
-  for index,row in inDF.iterrows():
-    #######################
-    # Access Dates column #
-    #######################
-    date=pd.to_datetime(row['Date'])
-    try:
-      dayList.append((date-epoch).days)
-    except:
-      print('getDays error ',date,epoch)
-  outDF['Days']=dayList
+  outDF['Days'] = (pd.to_datetime(outDF['Date']) - epoch).dt.days
   return outDF
 
 def regularize(wellDF,endDay,interval=1,verbose=0):
@@ -909,18 +896,8 @@ def writeDictDF(dictDF,OutFile,verbose=0):
   # Output a dictionary where each entry is a dataframe #
   #######################################################
   if verbose>0: print (' injectionV3.writeDictDF: ',OutFile)
-  f=0
-  for well in dictDF:
-    if dictDF[well].shape[0]>0:
-      if f==0:
-        ####################################
-        # For first entry, create the file #
-        ####################################
-        dictDF[well].to_csv(OutFile,index=False)
-      else:
-        #################################
-        # For subequent entries, append #
-        #################################
-        dictDF[well].to_csv(OutFile,index=False,mode='a',header=False)
-      f=f+1
+  
+  all_dfs = [df for df in dictDF.values() if df.shape[0] > 0]
+  if all_dfs:
+    pd.concat(all_dfs, ignore_index=True).to_csv(OutFile, index=False)
   return
