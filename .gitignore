@@ -7,6 +7,9 @@
 /src/__pycache__
 /.idea
 
+# cursor directory
+.cursor/
+
 # any .venv directories
 **/venv/
 
