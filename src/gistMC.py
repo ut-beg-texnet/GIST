@@ -340,7 +340,7 @@ class gistMC:
     if not isinstance(self.phi_min, float): raise ValueError("gistMC.initPP ERROR: Minimum porosity "+str(self.phi_min)+" is not a float.")
     if self.phi_max<self.phi_min: raise ValueError("gistMC.initPP ERROR: Maximum porosity "+str(self.phi_max)+"% < Minimum porosity "+str(self.phi_min)+"%")
     if self.phi_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum porosity must be positive, not "+str(self.phi_min)+"%")
-    if self.phi_max>=100.: raise ValueError("gistMC.initPP ERROR: Maximum porosity must be <= 100%, not "+str(self.phi_max)+"%")
+    if self.phi_max>100.: raise ValueError("gistMC.initPP ERROR: Maximum porosity must be <= 100%, not "+str(self.phi_max)+"%")
     ##############
     #  Warnings  #
     ##############

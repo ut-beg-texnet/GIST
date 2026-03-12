@@ -12,7 +12,7 @@
 
 # any .venv directories
 **/venv/
-
+gist_venv/
 
 **/__pycache__/
 
