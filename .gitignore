@@ -7,14 +7,15 @@
 /src/__pycache__
 /.idea
 
+# any __pycache__ directories
+**/__pycache__/
+
 # cursor directory
 .cursor/
 
 # any .venv directories
 **/venv/
 gist_venv/
-
-**/__pycache__/
 
 /src/data/disposal_inj.csv
 /src/data/disposal_well.csv
@@ -37,3 +38,10 @@ src/injection/injection_updater_V4.log
 
 # ignore the credentials.py file
 credentials.py
+
+# specific injection data
+RRC_data/
+rrc_transformed/
+
+# .pyc files
+*.pyc
