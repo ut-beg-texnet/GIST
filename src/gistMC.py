@@ -4010,13 +4010,9 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
   nt=deltaPP.shape[2]
   nw=deltaPP.shape[0]
   if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - sizes: ',nReal,nt,nw)
-  PPQuantilesDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
-  PPSpaghettiDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
   #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
-  # Calculate order ofdeltaPP for each value to get percentiles
-  #deltaPPArgSort=np.argsort(deltaPP,axis=1)
+  # Calculate order of deltaPP for each value to get percentiles
   if verbose>1: print('getPerWellPressureTimeSeriesQuantiles - after argsort: ',nReal,nt,nw)
-  deltaPPSorted=np.zeros([nReal,nt])
   deltaPPOrder=np.zeros([nReal,nt])
   deltaPPPercentile=np.zeros([nReal,nt])
   ptiles_list=list(range(0,nReal))
@@ -4024,21 +4020,26 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
   indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
   quantiles=[ptiles[i] for i in indices]
   if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - quantiles: ',quantiles)
+  # Precompute column indices for vectorized advanced indexing
+  it_idx = np.arange(nt)[np.newaxis, :]   # shape [1, nt]
+  iR_idx = np.arange(nReal)[:, np.newaxis] # shape [nReal, 1]
+  quantiles_list = []
+  spaghetti_list = []
   for iw in range(nw):
     deltaPPArgSort=np.argsort(deltaPP[iw,:,:].reshape([nReal,nt]),axis=0)
     if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - well: ',iw,' of ',nw)
-    for it in range(nt):
-      for iR in range(nReal):
-        deltaPPSorted[deltaPPArgSort[iR,it],it]=deltaPP[iw,iR,it]
-        deltaPPPercentile[deltaPPArgSort[iR,it],it]=round(100.*iR/(nReal-1),1)
-        deltaPPOrder[deltaPPArgSort[iR,it],it]=iR
+    # Vectorized: assign rank of each realization at each time step
+    deltaPPOrder[deltaPPArgSort, it_idx] = iR_idx
+    deltaPPPercentile = np.round(100. * deltaPPOrder / (nReal - 1), decimals=1)
     # Now just extract dataframe for this well
     if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - array sizes: ',deltaPP[iw,:,:].shape,deltaPPPercentile[:,:].shape,deltaPPOrder[:,:].shape),np.tile(dayVec,nReal).shape,np.arange(nReal).repeat(nt).shape,np.repeat(wellIDs[iw],nReal*nt)
     d={'DeltaPressure':deltaPP[iw,:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Order':deltaPPOrder[:,:].flatten(),'Percentile':deltaPPPercentile[:,:].flatten(),'WellID':np.repeat(wellIDs[iw],nReal*nt), 'Diffusivity':diffPPVec.repeat(nt)}
     wellPPDF=pd.DataFrame(d)
     winWellPPDF=wellPPDF[wellPPDF['Percentile'].isin(quantiles)]
-    PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
-    PPSpaghettiDF=pd.concat([PPSpaghettiDF,wellPPDF[['DeltaPressure','Days','Realization','WellID','Diffusivity']]],ignore_index=True)
+    quantiles_list.append(winWellPPDF)
+    spaghetti_list.append(wellPPDF[['DeltaPressure','Days','Realization','WellID','Diffusivity']])
+  PPQuantilesDF = pd.concat(quantiles_list, ignore_index=True) if quantiles_list else pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
+  PPSpaghettiDF = pd.concat(spaghetti_list, ignore_index=True) if spaghetti_list else pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
   PPQuantilesDF['Date']=epoch+pd.to_timedelta(PPQuantilesDF['Days'],unit='d')
   PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
   return PPQuantilesDF,PPSpaghettiDF
@@ -4109,13 +4110,11 @@ def prepTotalPressureTimeSeriesQuantilesPlot(deltaPP,dayVec,nQuantiles=11,epoch=
   #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
   # Calculate order of totalDeltaPP for each value to get percentiles
   totalDeltaPPArgSort=np.argsort(totalDeltaPP,axis=0)
-  totalDeltaPPSorted=np.zeros(totalDeltaPP.shape)
   totalDeltaPPOrder=np.zeros(totalDeltaPP.shape)
-  totalDeltaPPPercentile=np.zeros(totalDeltaPP.shape)
-  for it in range(nt):
-    for iR in range(nReal):
-      totalDeltaPPSorted[totalDeltaPPArgSort[iR,it],it]=totalDeltaPP[iR,it]
-      totalDeltaPPOrder[totalDeltaPPArgSort[iR,it],it]=iR
+  # Vectorized: assign rank of each realization at each time step using advanced indexing
+  it_idx = np.arange(nt)[np.newaxis, :]   # shape [1, nt]
+  iR_idx = np.arange(nReal)[:, np.newaxis] # shape [nReal, 1]
+  totalDeltaPPOrder[totalDeltaPPArgSort, it_idx] = iR_idx
   totalDeltaPPPercentile=np.round(100.*totalDeltaPPOrder/(nReal-1),decimals=1)
   #td={'DeltaPressure':totalDeltaPP[:,:].flatten(), 'Days':np.repeat(dayVec,nReal),'Date':np.repeat(dateVec,nReal), 'Realization':np.tile(np.arange(nReal),nt),'Percentile':totalDeltaPPPercentile[:,:].flatten()}
   #td={'DeltaPressure':np.ravel(totalDeltaPP[:,:],order='F'), 'Days':np.tile(dayVec,nReal),'Date':np.tile(dateVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Percentile':np.ravel(totalDeltaPPPercentile[:,:],order='F')}
