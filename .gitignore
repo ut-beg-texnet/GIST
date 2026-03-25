@@ -7,6 +7,9 @@
 /src/__pycache__
 /.idea
 
+# markdown files
+*.md
+
 # any __pycache__ directories
 **/__pycache__/
 
@@ -42,6 +45,7 @@ credentials.py
 # specific injection data
 RRC_data/
 rrc_transformed/
+test_data/
 
 # .pyc files
 *.pyc

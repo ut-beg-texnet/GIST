@@ -152,8 +152,12 @@ def fetch_wells(client: Socrata) -> Optional[pd.DataFrame]:
     Returns a DataFrame, or None on failure.
     """
     try:
-        logger.info("Fetching all wells from dataset %s …", WELLS_DATASET_ID)
-        records = client.get_all(WELLS_DATASET_ID, limit=PAGE_SIZE)
+        where_clause = "uic_type_injection = 1 OR uic_type_injection = 2"
+        logger.info(
+            "Fetching wells from dataset %s where %s …",
+            WELLS_DATASET_ID, where_clause
+        )
+        records = client.get_all(WELLS_DATASET_ID, where=where_clause, limit=PAGE_SIZE)
         df = pd.DataFrame.from_records(records)
         logger.info("Fetched %d well records.", len(df))
         return df
