@@ -89,7 +89,7 @@ else:
     wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
     injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
 
-smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF = runGistCore(input, wellcsv, injectioncsv)
+smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
 
 if disaggregationDF.empty:
     helper.addMessageWithStepIndex(3, "No Wells Found.", 2)
@@ -123,6 +123,7 @@ else:
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "orderedWellListWithFutureRates", orderedWellListWithFutureRates)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellPPQuantilesDF_updated", allPerWellPPQuantilesDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellPPSpaghettiDF_updated", allPerWellPPSpaghettiDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellDisposalDF_updated", allPerWellDisposalDF)
 
     helper.setSuccessForStepIndex(2, True)
     helper.setSuccessForStepIndex(3, True)
