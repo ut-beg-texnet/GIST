@@ -55,7 +55,7 @@ class injTX:
     ############################################
     # Read Injection Well file - list of wells #
     ############################################
-    TempWellDF=pd.read_csv(InjectionWellFile,usecols=keepColumns,low_memory=False,index_col=False)
+    TempWellDF=pd.read_csv(InjectionWellFile,usecols=lambda x: x in keepColumns,low_memory=False,index_col=False,dtype={'InjectionWellId':str,'APINumber':str,'UICNumber':str})
     if verbose>0: print(' injectionV3.injTX: Injection Well loaded with ',TempWellDF.shape[0],' wells')
 
     ########################
@@ -104,6 +104,7 @@ class injTX:
     # Store list of wells in object #
     #################################
     self.wellList=self.wellDF['InjectionWellId'].tolist()
+    self.wellSet=set(self.wellList)
     ##########################################
     # Set columns for time series dictionary #
     ##########################################
@@ -130,7 +131,7 @@ class injTX:
     #########################################################################################
     # Read Monthly well file - can be too large for memory so read in chunks #
     ##########################################################################
-    iterCSV=pd.read_csv(MonthlyWellFile,low_memory=False,iterator=True,chunksize=chunkSize)
+    iterCSV=pd.read_csv(MonthlyWellFile,low_memory=False,iterator=True,chunksize=chunkSize,dtype={'InjectionWellId':str})
     if verbose>0: print(' injectionV3.injTX.addMonthly: ',len(self.wellList),' wells')
     ######################################################
     # Initialize chunk number and count of filtered rows #
@@ -142,37 +143,20 @@ class injTX:
     # Iterate over file #
     #####################
     for CSVchunk in iterCSV:
-      #####################################################
-      # Get list of unique InjectionWellIds in this chunk #
-      #####################################################
-      chunkWellList=set(CSVchunk['InjectionWellId'].tolist())
-      ################################################################################################
-      # Loop over chunkWellList, if well is in self.wellList then append rows to self.timeSeriesDict #
-      ################################################################################################
-      if verbose>0: print(' injectionV3.injTX.addMonthly: ',len(chunkWellList),' wells in chunk ',chunk,' of file')
-      for well in chunkWellList:
-        ################################
-        # Check if well is in our list #
-        ################################
-        if well in self.wellList:
-          wList=wList+[well] # Append a list to a list
-          ###########################################
-          # Select rows for the well from the chunk #
-          ###########################################
-          wellDF=CSVchunk[CSVchunk['InjectionWellId']==well]
-          rowCount=rowCount+wellDF.shape[0]
-          if verbose>1: print(' injectionV3.injTX.addMonthly: ',wellDF.shape[0],' rows found for well ',well)
-          ##################################################################
-          # Select the columns and change their names to timeSeriesColumns #
-          ##################################################################
-          wellWinDF=wellDF[['InjectionWellId','StartOfMonthDate','InjectedLiquidBPD']]
-          wellWinDF.columns=self.timeSeriesColumns
-          #############################################
-          # Append to the dataframe in the dictionary #
-          #############################################
-          self.timeSeriesDict[str(well)]=pd.concat([self.timeSeriesDict[str(well)], wellWinDF], ignore_index=True)
-          if verbose>1: print(' injectionV3.injTX.addMonthly: ',self.timeSeriesDict[str(well)].shape[0],' rows total for well ',well)
-        # end if
+      ##########################################################################
+      # Filter chunk to only wells of interest in one vectorized isin() pass, #
+      # then groupby to process each matching well without an inner loop       #
+      ##########################################################################
+      chunkFiltered=CSVchunk[CSVchunk['InjectionWellId'].isin(self.wellSet)]
+      if verbose>0: print(' injectionV3.injTX.addMonthly: ',chunkFiltered['InjectionWellId'].nunique(),' wells in chunk ',chunk,' of file')
+      for well_id, group in chunkFiltered.groupby('InjectionWellId', sort=False):
+        wList.append(well_id)
+        wellWinDF=group[['InjectionWellId','StartOfMonthDate','InjectedLiquidBPD']].copy()
+        wellWinDF.columns=self.timeSeriesColumns
+        rowCount=rowCount+wellWinDF.shape[0]
+        if verbose>1: print(' injectionV3.injTX.addMonthly: ',wellWinDF.shape[0],' rows found for well ',well_id)
+        self.timeSeriesDict[str(well_id)]=pd.concat([self.timeSeriesDict[str(well_id)], wellWinDF], ignore_index=True)
+        if verbose>1: print(' injectionV3.injTX.addMonthly: ',self.timeSeriesDict[str(well_id)].shape[0],' rows total for well ',well_id)
       chunk=chunk+1
     # end for
     injWellList=set(wList)
@@ -192,7 +176,7 @@ class injTX:
     #######################################################################################
     # Read Daily well file - can be too large for memory so read in chunks #
     ########################################################################
-    iterCSV=pd.read_csv(DailyWellFile,low_memory=False,iterator=True,chunksize=chunkSize)
+    iterCSV=pd.read_csv(DailyWellFile,low_memory=False,iterator=True,chunksize=chunkSize,dtype={'InjectionWellId':str})
     if verbose>0: print(' injectionV3.injTX.addDaily: ',len(self.wellList),' wells')
     ######################################################
     # Initialize chunk number and count of filtered rows #
@@ -204,44 +188,24 @@ class injTX:
     # Iterate over file #
     #####################
     for CSVchunk in iterCSV:
-      #####################################################
-      # Get list of unique InjectionWellIds in this chunk #
-      #####################################################
-      chunkWellList=set(CSVchunk['InjectionWellId'].tolist())
-      ################################################################################################
-      # Loop over chunkWellList, if well is in self.wellList then append rows to self.timeSeriesDict #
-      ################################################################################################
-      if verbose>0: print(' injectionV3.injTX.addDaily: ',len(chunkWellList),' wells in chunk ',chunk,' of file')
-      for well in chunkWellList:
-        ################################
-        # Check if well is in our list #
-        ################################
-        if well in self.wellList:
-          wList=wList+[well] # Append a list to a list
-          ###########################################
-          # Select rows for the well from the chunk #
-          ###########################################
-          wellDF=CSVchunk[CSVchunk['InjectionWellId']==well]
-          rowCount=rowCount+wellDF.shape[0]
-          if verbose>1: print(' injectionV3.injTX.addDaily: ',wellDF.shape[0],' rows found for well ',well)
-          ##################################################################
-          # Select the columns and change their names to timeSeriesColumns #
-          ##################################################################
-          wellWinDF=wellDF[['InjectionWellId','Date','InjectedLiquidBBL']]
-          wellWinDF.columns=self.timeSeriesColumns
-          #############################################
-          # Append to the dataframe in the dictionary #
-          #############################################
-          #print('=======================' + str(self.timeSeriesDict) + '=======================')
-          #print('Current Well' + self.timeSeriesDict[str(well)])
-          #self.timeSeriesDict[str(well)]=self.timeSeriesDict[str(well)].append(wellWinDF)
-          key = str(well)
-          if key in self.timeSeriesDict and not self.timeSeriesDict[key].empty:
-              self.timeSeriesDict[key] = pd.concat([self.timeSeriesDict[key], wellWinDF], ignore_index=True)
-          else:
-              self.timeSeriesDict[key] = wellWinDF.copy()
-          if verbose>1: print(' injectionV3.injTX.addDaily: ',self.timeSeriesDict[str(well)].shape[0],' rows total for well ',well)
-        # end if
+      ##########################################################################
+      # Filter chunk to only wells of interest in one vectorized isin() pass, #
+      # then groupby to process each matching well without an inner loop       #
+      ##########################################################################
+      chunkFiltered=CSVchunk[CSVchunk['InjectionWellId'].isin(self.wellSet)]
+      if verbose>0: print(' injectionV3.injTX.addDaily: ',chunkFiltered['InjectionWellId'].nunique(),' wells in chunk ',chunk,' of file')
+      for well_id, group in chunkFiltered.groupby('InjectionWellId', sort=False):
+        wList.append(well_id)
+        wellWinDF=group[['InjectionWellId','Date','InjectedLiquidBBL']].copy()
+        wellWinDF.columns=self.timeSeriesColumns
+        rowCount=rowCount+wellWinDF.shape[0]
+        if verbose>1: print(' injectionV3.injTX.addDaily: ',wellWinDF.shape[0],' rows found for well ',well_id)
+        key=str(well_id)
+        if key in self.timeSeriesDict and not self.timeSeriesDict[key].empty:
+          self.timeSeriesDict[key]=pd.concat([self.timeSeriesDict[key], wellWinDF], ignore_index=True)
+        else:
+          self.timeSeriesDict[key]=wellWinDF
+        if verbose>1: print(' injectionV3.injTX.addDaily: ',self.timeSeriesDict[key].shape[0],' rows total for well ',well_id)
       chunk=chunk+1
     # end for
     self.injWellList=set(wList)
@@ -266,14 +230,14 @@ class injNM:
     # deepShallow       - Assuming two disposal intervals: "Deep" or "Shallow" - used to filter B3 wells    #
     # depth             - Depth cutoff between Deep and Shallow wells for wells without a B3 classification #
     # OutFile           - Full path/name of windowed output well file (optional)                            #
-    #########################################################################################################
+    ##############################################    ###########################################################
     # List of columns that we want to keep from InjectionWell #
     ###########################################################
     keepColumns=['InjectionWellId','APINumber','UICNumber','Basin','SurfaceHoleLatitude','SurfaceHoleLongitude','WellName','CompletedWellDepthClassification','InjectionType','InjectionStatus','WellStatus','SpudDate','PermittedMaxLiquidBPD','PermittedIntervalBottomFt','PermittedIntervalTopFt']
     ############################################
     # Read Injection Well file - list of wells #
     ############################################
-    TempWellDF=pd.read_csv(InjectionWellFile,usecols=keepColumns,low_memory=False,index_col=False)
+    TempWellDF=pd.read_csv(InjectionWellFile,usecols=lambda x: x in keepColumns,low_memory=False,index_col=False,dtype={'InjectionWellId':str,'APINumber':str,'UICNumber':str})
     if verbose>0: print(' injectionV3.injNM: Injection Well loaded with ',TempWellDF.shape[0],' wells')
     ########################
     # Filtering operations #
@@ -328,6 +292,7 @@ class injNM:
     # Store list of wells in object #
     #################################
     self.wellList=self.wellDF['InjectionWellId'].tolist()
+    self.wellSet=set(self.wellList)
     ##########################################
     # Set columns for time series dictionary #
     ##########################################
@@ -352,8 +317,9 @@ class injNM:
     #########################################################################################
     # Read Monthly well file - can be too large for memory so read in chunks #
     ##########################################################################
-    iterCSV=pd.read_csv(MonthlyWellFile,low_memory=False,iterator=True,chunksize=chunkSize)
+    iterCSV=pd.read_csv(MonthlyWellFile,low_memory=False,iterator=True,chunksize=chunkSize,dtype={'InjectionWellId':str})
     if verbose>0: print(' injectionV3.injNM.addMonthly: ',len(self.wellList),' wells')
+
     ######################################################
     # Initialize chunk number and count of filtered rows #
     ######################################################
@@ -364,37 +330,20 @@ class injNM:
     # Iterate over file #
     #####################
     for CSVchunk in iterCSV:
-      #####################################################
-      # Get list of unique InjectionWellIds in this chunk #
-      #####################################################
-      chunkWellList=set(CSVchunk['InjectionWellId'].tolist())
-      ################################################################################################
-      # Loop over chunkWellList, if well is in self.wellList then append rows to self.timeSeriesDict #
-      ################################################################################################
-      if verbose>0: print(' injectionV3.injNM.addMonthly: ',len(chunkWellList),' wells in chunk ',chunk,' of file')
-      for well in chunkWellList:
-        ################################
-        # Check if well is in our list #
-        ################################
-        if well in self.wellList:
-          wList=wList+[well] # Append a list to a list
-          ###########################################
-          # Select rows for the well from the chunk #
-          ###########################################
-          wellDF=CSVchunk[CSVchunk['InjectionWellId']==well]
-          rowCount=rowCount+wellDF.shape[0]
-          if verbose>1: print(' injectionV3.injNM.addMonthly: ',wellDF.shape[0],' rows found for well ',well)
-          ##################################################################
-          # Select the columns and change their names to timeSeriesColumns #
-          ##################################################################
-          wellWinDF=wellDF[['InjectionWellId','StartOfMonthDate','InjectedLiquidBPD']]
-          wellWinDF.columns=self.timeSeriesColumns
-          #############################################
-          # Append to the dataframe in the dictionary #
-          #############################################
-          self.timeSeriesDict[str(well)]=pd.concat([self.timeSeriesDict[str(well)], wellWinDF], ignore_index=True)
-          if verbose>1: print(' injectionV3.injNM.addMonthly: ',self.timeSeriesDict[str(well)].shape[0],' rows total for well ',well)
-        # end if
+      ##########################################################################
+      # Filter chunk to only wells of interest in one vectorized isin() pass, #
+      # then groupby to process each matching well without an inner loop       #
+      ##########################################################################
+      chunkFiltered=CSVchunk[CSVchunk['InjectionWellId'].isin(self.wellSet)]
+      if verbose>0: print(' injectionV3.injNM.addMonthly: ',chunkFiltered['InjectionWellId'].nunique(),' wells in chunk ',chunk,' of file')
+      for well_id, group in chunkFiltered.groupby('InjectionWellId', sort=False):
+        wList.append(well_id)
+        wellWinDF=group[['InjectionWellId','StartOfMonthDate','InjectedLiquidBPD']].copy()
+        wellWinDF.columns=self.timeSeriesColumns
+        rowCount=rowCount+wellWinDF.shape[0]
+        if verbose>1: print(' injectionV3.injNM.addMonthly: ',wellWinDF.shape[0],' rows found for well ',well_id)
+        self.timeSeriesDict[str(well_id)]=pd.concat([self.timeSeriesDict[str(well_id)], wellWinDF], ignore_index=True)
+        if verbose>1: print(' injectionV3.injNM.addMonthly: ',self.timeSeriesDict[str(well_id)].shape[0],' rows total for well ',well_id)
       chunk=chunk+1
     # end for
     wellList=set(wList)
@@ -414,7 +363,7 @@ class injNM:
     #######################################################################################
     # Read Daily well file - can be too large for memory so read in chunks #
     ########################################################################
-    iterCSV=pd.read_csv(DailyWellFile,low_memory=False,iterator=True,chunksize=chunkSize)
+    iterCSV=pd.read_csv(DailyWellFile,low_memory=False,iterator=True,chunksize=chunkSize,dtype={'InjectionWellId':str})
     if verbose>0: print(' injectionV3.injNM.addDaily: ',len(self.wellList),' wells')
     chunk=0
     rowCount=0
@@ -423,41 +372,24 @@ class injNM:
     # Iterate over file #
     #####################
     for CSVchunk in iterCSV:
-      #####################################################
-      # Get list of unique InjectionWellIds in this chunk #
-      #####################################################
-      chunkWellList=set(CSVchunk['InjectionWellId'].tolist())
-      ################################################################################################
-      # Loop over chunkWellList, if well is in self.wellList then append rows to self.timeSeriesDict #
-      ################################################################################################
-      if verbose>0: print(' injectionV3.injNM.addDaily: ',len(chunkWellList),' wells in chunk ',chunk,' of file')
-      for well in chunkWellList:
-        ################################
-        # Check if well is in our list #
-        ################################
-        if well in self.wellList:
-          wList=wList+[well] # Append a list to a list
-          ###########################################
-          # Select rows for the well from the chunk #
-          ###########################################
-          wellDF=CSVchunk[CSVchunk['InjectionWellId']==well]
-          rowCount=rowCount+wellDF.shape[0]
-          if verbose>1: print(' injectionV3.injNM.addMonthly: ',wellDF.shape[0],' rows found for well ',well)
-          ##################################################################
-          # Select the columns and change their names to timeSeriesColumns #
-          ##################################################################
-          wellWinDF=wellDF[['InjectionWellId','Date','InjectedLiquidBBL']]
-          wellWinDF.columns=self.timeSeriesColumns
-          #############################################
-          # Append to the dataframe in the dictionary #
-          #############################################
-          self.timeSeriesDict[str(well)]=pd.concat([self.timeSeriesDict[str(well)], wellWinDF], ignore_index=True)
-          if verbose>1: print(' injectionV3.injNM.addMonthly: ',self.timeSeriesDict[str(well)].shape[0],' rows total for well ',well)
-        # end if
+      ##########################################################################
+      # Filter chunk to only wells of interest in one vectorized isin() pass, #
+      # then groupby to process each matching well without an inner loop       #
+      ##########################################################################
+      chunkFiltered=CSVchunk[CSVchunk['InjectionWellId'].isin(self.wellSet)]
+      if verbose>0: print(' injectionV3.injNM.addDaily: ',chunkFiltered['InjectionWellId'].nunique(),' wells in chunk ',chunk,' of file')
+      for well_id, group in chunkFiltered.groupby('InjectionWellId', sort=False):
+        wList.append(well_id)
+        wellWinDF=group[['InjectionWellId','Date','InjectedLiquidBBL']].copy()
+        wellWinDF.columns=self.timeSeriesColumns
+        rowCount=rowCount+wellWinDF.shape[0]
+        if verbose>1: print(' injectionV3.injNM.addDaily: ',wellWinDF.shape[0],' rows found for well ',well_id)
+        self.timeSeriesDict[str(well_id)]=pd.concat([self.timeSeriesDict[str(well_id)], wellWinDF], ignore_index=True)
+        if verbose>1: print(' injectionV3.injNM.addDaily: ',self.timeSeriesDict[str(well_id)].shape[0],' rows total for well ',well_id)
       chunk=chunk+1
     # end for
     self.injWellList=set(wList)
-    if verbose>0: print(' injectionV3.injNM.addDaily: ',len(self.injWellList),' wells added from file with ',rowCount,' monthly injections')
+    if verbose>0: print(' injectionV3.injNM.addDaily: ',len(self.injWellList),' wells added from file with ',rowCount,' daily injections')
     ##############################################################
     # if output file is specified, write out self.timeSeriesDict #
     ##############################################################

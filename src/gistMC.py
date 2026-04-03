@@ -497,28 +497,18 @@ class gistMC:
       # If we match - nu_u Unc goes away #
       ####################################
       if verbose>0: print(" Monte Carlo poroelastic - matched diffusivities")
-      for i in range(len(self.lamdaVec)):
-        # I don't think that we need this loop - just operate on the vectors #
-        #############################
-        # Get new Lame's parameters #
-        #############################
-        lamda,lamda_u = matchPE2PP(self.muVec[i],self.nuVec[i],self.alphaVec[i],self.CVec[i])
-        nu_u=lamda_u/(2.*(lamda_u+self.muVec[i]))
-        self.lamdaVec[i]=lamda
-        self.lamda_uVec[i]=lamda_u
-        #######################################
-        # Recompute undrained Poisson's ratio #
-        #######################################
-        self.nu_uVec[i]=nu_u
-        ###########################################
-        # Recompute Skempton's coefficient vector #
-        ###########################################
-        self.BVec[i]=3.*(self.nu_uVec[i]-self.nuVec[i])/(self.alphaVec[i]*(1.+self.nu_uVec[i])*(1.-2.*self.nuVec[i]))
-        ############################################
-        # Recompute poroelastic diffusivity vector #
-        # This should be the same as the PP one    #
-        ############################################
-        self.diffPEVec[i]=(self.kapM2Vec[i])*(self.lamda_uVec[i]-self.lamdaVec[i])*(self.lamdaVec[i]+2.*self.muVec[i])/(self.ntaVec[i]*self.alphaVec[i]*self.alphaVec[i]*(self.lamda_uVec[i]+2.*self.muVec[i]))
+      # Optimization: Vectorized matched diffusivity calculation
+      # Instead of looping over realizations, apply matchPE2PP to the full vectors
+      self.lamdaVec, self.lamda_uVec = matchPE2PP(self.muVec, self.nuVec, self.alphaVec, self.CVec)
+      self.nu_uVec = self.lamda_uVec / (2. * (self.lamda_uVec + self.muVec))
+      
+      # Recompute Skempton's coefficient vector
+      self.BVec = 3. * (self.nu_uVec - self.nuVec) / (self.alphaVec * (1. + self.nu_uVec) * (1. - 2. * self.nuVec))
+      
+      # Recompute poroelastic diffusivity vector
+      self.diffPEVec = (self.kapM2Vec) * (self.lamda_uVec - self.lamdaVec) * (self.lamdaVec + 2. * self.muVec) / \
+                       (self.ntaVec * self.alphaVec * self.alphaVec * (self.lamda_uVec + 2. * self.muVec))
+      
       if verbose>0:
         print(" Monte Carlo poroelastic (matched) - B     min/max:",np.amin(self.BVec),np.amax(self.BVec))
         print(" Monte Carlo poroelastic (matched) -diffPE min/max:",np.amin(self.diffPEVec),np.amax(self.diffPEVec))
@@ -1186,18 +1176,25 @@ class gistMC:
     #############################################################
     # Shelly suggests looking at SPARKF for reading through this #
     #############################################################
-    injDF=pd.DataFrame()
-    injExcludedDF=pd.DataFrame()
+    inj_chunks = []
+    inj_excluded_chunks = []
     for chunk in iter_csv:
       #############################################
       # Collect injection data for selected wells #
       # This concat is slow! #
       #############################################
-      injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
+      # Optimization: Collect chunks in a list and concat once after the loop
+      # injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
+      inj_chunks.append(chunk[chunk['ID'].isin(ids)])
       ###############################################
       # Collect injection data for unselected wells #
       ###############################################
-      injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
+      # injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
+      inj_excluded_chunks.append(chunk[chunk['ID'].isin(excludedIDs)])
+    
+    injDF = pd.concat(inj_chunks, ignore_index=True) if inj_chunks else pd.DataFrame(columns=['ID', 'BPD', 'Days'])
+    injExcludedDF = pd.concat(inj_excluded_chunks, ignore_index=True) if inj_excluded_chunks else pd.DataFrame(columns=['ID', 'BPD', 'Days'])
+    
     ############################################################
     # Do we need this? Peter commented it out - Bill had it in #
     ############################################################
@@ -1209,7 +1206,7 @@ class gistMC:
     ###################################
     # Throw error if numDataWells = 0 #
     ###################################
-    if numDataWells==0: raise ValueError('gistMC.findWellsVec ERROR: No rates for selected '+str(nw)+' wells are present in the injection file.')
+    if numDataWells==0: raise ValueError('gistMC.findWellsVec ERROR: No rates for selected '+str(self.nw)+' wells are present in the injection file.')
     #######################################
     # Throw warning if numDataWells ~= nw #
     #######################################
@@ -2983,6 +2980,7 @@ class gistMC:
     # Ordering of dataframes not  #
     # guaranteed!                 #
     ###############################
+    scenarios_list = []
     for iReal in range(nReal):
       scenarioDF=pd.DataFrame(columns=['EventID','EventLatitude','EventLongitude','ID','Name','API','Latitude','Longitude','NumWells','Pressures','TotalPressure','Percentages','LagInDays','Realization'])
       ######################################
@@ -3017,7 +3015,11 @@ class gistMC:
       #######################
       # Append to scenarios #
       #######################
-      allScenariosDF=pd.concat([allScenariosDF,scenarioDF],ignore_index=True)
+      # allScenariosDF=pd.concat([allScenariosDF,scenarioDF],ignore_index=True)
+      scenarios_list.append(scenarioDF)
+    
+    if scenarios_list:
+      allScenariosDF = pd.concat(scenarios_list, ignore_index=True)
     return allScenariosDF
 
 ############################################
@@ -3172,28 +3174,32 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,epoch=p
   ###################
   # Loop over wells #
   ###################
-  for iw in range(nwC):
-    # Check maximum and minimum indicies relative to array size
+  # Vectorized approach to fill bpdArray
+  # Filter injDF to only include wells in wellIDs
+  relevantInjDF = injDF[injDF['ID'].isin(wellIDs)].copy()
+  if not relevantInjDF.empty:
+    # Compute indices for all rows at once
+    relevantInjDF['it'] = ((relevantInjDF['Days'] - ot) / dt).round().astype(int)
     
-    ############################################################
-    # Make list of BPD and Days values that match this well ID #
-    ############################################################
-    bpds=injDF['BPD'][injDF['ID']==consideredWells['ID'][iw]].tolist()
-    days=injDF['Days'][injDF['ID']==consideredWells['ID'][iw]].tolist()
-    #############################################################
-    # Check if we have any injection for this well              #
-    # Should I put a warning here if we have no injection data? #
-    #############################################################
-    if len(days)>0:
-      for id in range(len(days)):
-        #################################################
-        # Get index of day value - this should be exact #
-        #################################################
-        it=int(round((days[id]-ot)/dt))
-        if verbose>0:
-          if it<itMin: itMin=it
-          if it>itMax: itMax=it
-        bpdArray[iw,it]=bpds[id]
+    # Filter out indices that are out of bounds for bpdArray
+    validMask = (relevantInjDF['it'] >= 0) & (relevantInjDF['it'] < nt + 1)
+    validInj = relevantInjDF[validMask]
+    
+    if not validInj.empty:
+      # Map well IDs to row indices in bpdArray
+      wellID_to_idx = {wid: i for i, wid in enumerate(wellIDs)}
+      row_indices = validInj['ID'].map(wellID_to_idx).values
+      col_indices = validInj['it'].values
+      
+      # Use numpy fancy indexing to fill the array
+      # Note: if there are multiple entries for the same (well, time), 
+      # this will use the last one. The original loop had the same behavior.
+      bpdArray[row_indices, col_indices] = validInj['BPD'].values
+      
+      if verbose > 0:
+        itMin = col_indices.min()
+        itMax = col_indices.max()
+  
   if verbose>0: print(' prepInj: min,max indicies ',itMin,itMax)
   ######################################################
   # Get index for time of earthquake if eqDay provided #
@@ -3951,9 +3957,12 @@ def prepDisaggregationPlot(smallPPDF,smallWellIDList,jitter=0.,verbose=0):
   """
   # Make new dataframe
   disaggregationPlotDF=pd.DataFrame(columns=['Pressures','WellNo','Order','Name','ID','Realization'])
-  nReal=max(smallPPDF['Realization'])+1
+  nReal=int(max(smallPPDF['Realization'])+1)
   if verbose>0: print(' prepDisaggregationPlot: ',len(smallWellIDList),' wells in disaggregation plot with ',nReal,' realizations')
   if verbose>1: print(' prepDisaggregationPlot well List:')
+  
+  # Optimization: Collect DataFrames in a list and concat once
+  well_dfs = []
   # Loop over smallWellList
   for iw in range(len(smallWellIDList)):
     # Calculate y value with or without jitter
@@ -3963,12 +3972,15 @@ def prepDisaggregationPlot(smallPPDF,smallWellIDList,jitter=0.,verbose=0):
     else:
       wellNo = np.zeros(nReal,)-iw
     # Get rows for this well
-    wellDF = smallPPDF[smallPPDF['ID']==smallWellIDList[iw]][['Realization','Pressures','Order','Name','ID']]
+    wellDF = smallPPDF[smallPPDF['ID']==smallWellIDList[iw]][['Realization','Pressures','Order','Name','ID']].copy()
     if verbose>0: print(' prepDisaggregationPlot: ',len(wellDF),' rows for ',smallWellIDList[iw])
     # create a new dataframe for this well
     wellDF['WellNo']=wellNo
-    # append to new dataframe
-    disaggregationPlotDF=pd.concat([disaggregationPlotDF,wellDF],ignore_index=True)
+    # append to list
+    well_dfs.append(wellDF)
+  
+  if well_dfs:
+    disaggregationPlotDF = pd.concat(well_dfs, ignore_index=True)
   return disaggregationPlotDF
 
 def getWinWells(summaryDF,wellsDF,injDF,verbose=0):

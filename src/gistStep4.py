@@ -91,6 +91,13 @@ else:
 
 smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
 
+# for testing, check the length of the allPerWellDisposalDF and its column names
+if allPerWellDisposalDF is not None:
+    print(f"allPerWellDisposalDF length: {len(allPerWellDisposalDF)}")
+    print(f"allPerWellDisposalDF column names: {allPerWellDisposalDF.columns.tolist()}")
+else:
+    print("allPerWellDisposalDF is None")
+
 if disaggregationDF.empty:
     helper.addMessageWithStepIndex(3, "No Wells Found.", 2)
     helper.setSuccessForStepIndex(3, False)
