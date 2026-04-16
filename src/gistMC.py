@@ -228,8 +228,8 @@ class gistMC:
              phi_min=5.,phi_max=20.,
              kMD_min=20.,kMD_max=250.,
              h_min=80.,h_max=200.,
-             alphav_min=1.08e-9,alphav_max=1.1e-9,
-             beta_min=3.5e-10,beta_max=3.7e-10):
+             cppMS_min=1.08e-9,cppMS_max=1.1e-9,
+             betaMS_min=2.,betaMS_max=3.):
     """
     #####################################
     # Initialize Pore Pressure modeling #
@@ -240,8 +240,8 @@ class gistMC:
     #       nta_min/max :  Fluid viscosity    (Pascal-seconds) #
     #       kMD_min/max :  Permeability         (millidarcies) #
     #         h_min/max :  Injection interval thickness (feet) #
-    #    alphav_min/max :  Bulk Rock compressibility    (1/Pa) #
-    #      beta_min/max :  Fluid compressibility        (1/Pa) #
+    #       cppMS_min/max :  Pore compressibility    (microsips) #
+    #      betaMS_min/max :  Fluid compressibility   (microsips) #
     ############################################################
     # Assumptions: ########
     #     Runs after init #
@@ -257,10 +257,10 @@ class gistMC:
     self.rho_max=rho0_max
     self.nta_min=nta_min
     self.nta_max=nta_max
-    self.alphav_min=alphav_min
-    self.alphav_max=alphav_max
-    self.beta_min=beta_min
-    self.beta_max=beta_max
+    self.cppMS_min=cppMS_min
+    self.cppMS_max=cppMS_max
+    self.betaMS_min=betaMS_min
+    self.betaMS_max=betaMS_max
     self.h_min=h_min
     self.h_max=h_max
     
@@ -271,8 +271,8 @@ class gistMC:
     self.ntaVec   =self.nta_min    + self.randomFloats[:,1]*(self.nta_max   -self.nta_min)
     self.phiVec   =self.phi_min    + self.randomFloats[:,2]*(self.phi_max   -self.phi_min)
     self.hVec     =self.h_min      + self.randomFloats[:,3]*(self.h_max     -self.h_min)
-    self.alphavVec=self.alphav_min + self.randomFloats[:,4]*(self.alphav_max-self.alphav_min)
-    self.betaVec  =self.beta_min   + self.randomFloats[:,5]*(self.beta_max  -self.beta_min)
+    self.cppMSVec =self.cppMS_min  + self.randomFloats[:,4]*(self.cppMS_max- self.cppMS_min)
+    self.betaMSVec  =self.betaMS_min + self.randomFloats[:,5]*(self.betaMS_max  -self.betaMS_min)
     # This is a linear distribution from the minimum to maximum
     self.kMDVec   =self.kMD_min    + self.randomFloats[:,6]*(self.kMD_max   -self.kMD_min)
     # I think that this is a logarithmic distribution from the minimum to maximum
@@ -281,7 +281,7 @@ class gistMC:
     ##############################################################
     # Convert vectors to SI units, generate intermediate vectors #
     ##############################################################
-    (phiFracVec,hMVec,kapM2Vec,SVec,KVec,TVec,diffPPVec,CVec)=calcPPVals(self.kMDVec,self.hVec,self.alphavVec,self.betaVec,self.phiVec,self.rhoVec,self.g,self.ntaVec)
+    (phiFracVec,hMVec,kapM2Vec,SVec,KVec,TVec,diffPPVec,CVec)=calcPPVals(self.kMDVec,self.hVec,self.cppMSVec,self.betaMSVec,self.phiVec,self.rhoVec,self.g,self.ntaVec)
     ############################
     # Store in class variables #
     ############################
@@ -340,11 +340,11 @@ class gistMC:
     if not isinstance(self.phi_min, float): raise ValueError("gistMC.initPP ERROR: Minimum porosity "+str(self.phi_min)+" is not a float.")
     if self.phi_max<self.phi_min: raise ValueError("gistMC.initPP ERROR: Maximum porosity "+str(self.phi_max)+"% < Minimum porosity "+str(self.phi_min)+"%")
     if self.phi_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum porosity must be positive, not "+str(self.phi_min)+"%")
-    if self.phi_max>=70.: raise ValueError("gistMC.initPP ERROR: Maximum porosity must be < 70%, not "+str(self.phi_max)+"%. We do not model flow in pumice or aerogel.")
+    if self.phi_max>=70.: raise ValueError("gistMC.initPP ERROR: Maximum porosity must be < 70%, not "+str(self.phi_max)+"%. We do not model flow in pumice.")
     ##############
     #  Warnings  #
     ##############
-    if self.phi_max>50.: warnings.warn("gistMC.initPP WARNING: Maximum porosity of "+str(self.phi_max)+" % is unreasonably high.", UserWarning, stacklevel=2)
+    if self.phi_max>40.: warnings.warn("gistMC.initPP WARNING: Maximum porosity of "+str(self.phi_max)+" % is very high.", UserWarning, stacklevel=2)
     if self.phi_min<1.: warnings.warn("gistMC.initPP WARNING: Minimum porosity of "+str(self.phi_min)+" % is unreasonably low.", UserWarning, stacklevel=2)
 
     ###################################################
@@ -379,37 +379,37 @@ class gistMC:
     if self.kMD_max>2000.: warnings.warn("gistMC.initPP WARNING: Maximum permeability of "+str(self.kMD_max)+" millidarcies is very high.", UserWarning, stacklevel=2)
     if self.kMD_min<1.: warnings.warn("gistMC.initPP WARNING: Minimum permeability of "+str(self.kMD_min)+" millidarcies is very low.", UserWarning, stacklevel=2)
 
-    ################################################
-    # beta_min/max :  Fluid compressibility (1/Pa) #
-    ################################################
+    ###################################################
+    # beta_min/max :  Fluid compressibility microsips #
+    ###################################################
     #  Error checking  #
     ####################
-    if not isinstance(self.beta_max, float): raise ValueError("gistMC.initPP ERROR: Maximum fluid compressibility "+str(self.beta_max)+" is not a float.")
-    if not isinstance(self.beta_min, float): raise ValueError("gistMC.initPP ERROR: Minimum fluid compressibility "+str(self.beta_min)+" is not a float.")
-    if self.beta_max<self.beta_min: raise ValueError("gistMC.initPP ERROR: Maximum fluid compressibility "+str(self.beta_max)+" 1/Pa < Minimum fluid compressibility "+str(self.beta_min)+" 1/Pa")
-    if self.beta_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum fluid compressibility must be positive, not "+str(self.beta_min)+" 1/Pa")
-    if self.beta_max>=0.000001: raise ValueError("gistMC.initPP ERROR: Maximum fluid compressibility must be less than clay (0.000001 1/Pa), not "+str(self.beta_max)+" 1/Pa")
+    if not isinstance(self.betaMS_max, float): raise ValueError("gistMC.initPP ERROR: Maximum fluid compressibility "+str(self.betaMS_max)+" is not a float.")
+    if not isinstance(self.betaMS_min, float): raise ValueError("gistMC.initPP ERROR: Minimum fluid compressibility "+str(self.betaMS_min)+" is not a float.")
+    if self.betaMS_max<self.betaMS_min: raise ValueError("gistMC.initPP ERROR: Maximum fluid compressibility "+str(self.betaMS_max)+" microsips < Minimum fluid compressibility "+str(self.betaMS_min)+" microsips")
+    if self.betaMS_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum fluid compressibility must be positive, not "+str(self.betaMS_min)+" microsips")
+    if self.betaMS_max>=110.: raise ValueError("gistMC.initPP ERROR: Maximum fluid compressibility must be less than clay (110 microsips), not "+str(self.betaMS_max)+" microsips")
     ##############
     #  Warnings  #
     ##############
-    if self.beta_max>0.0000000006: warnings.warn("gistMC.initPP WARNING: Maximum fluid compressibility of "+str(self.beta_max)+" 1/Pa is very high.", UserWarning, stacklevel=2)
-    if self.beta_min<0.0000000003: warnings.warn("gistMC.initPP WARNING: Minimum fluid compressibility of "+str(self.beta_min)+" 1/Pa is very low.", UserWarning, stacklevel=2)
+    if self.betaMS_max>3.5: warnings.warn("gistMC.initPP WARNING: Maximum fluid compressibility of "+str(self.betaMS_max)+" microsips is very high.", UserWarning, stacklevel=2)
+    if self.betaMS_min<1.5: warnings.warn("gistMC.initPP WARNING: Minimum fluid compressibility of "+str(self.betaMS_min)+" microsips is very low.", UserWarning, stacklevel=2)
 
-    #####################################################
-    # alphav_min/max :  Bulk Rock compressibility (1/Pa) #
-    #####################################################
+    ###################################################
+    # cppMS_min/max :  Pore compressibility microsips #
+    ###################################################
     #  Error checking  #
     ####################
-    if not isinstance(self.alphav_max, float): raise ValueError("gistMC.initPP ERROR: Maximum bulk rock compressibility "+str(self.alphav_max)+" is not a float.")
-    if not isinstance(self.alphav_min, float): raise ValueError("gistMC.initPP ERROR: Minimum bulk rock compressibility "+str(self.alphav_min)+" is not a float.")
-    if self.alphav_max<self.alphav_min: raise ValueError("gistMC.initPP ERROR: Maximum bulk rock compressibility "+str(self.alphav_max)+" 1/Pa < Minimum bulk rock compressibility "+str(self.alphav_min)+" 1/Pa")
-    if self.alphav_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum bulk rock compressibility must be positive, not "+str(self.alphav_min)+" 1/Pa")
-    if self.alphav_max>=0.000001: raise ValueError("gistMC.initPP ERROR: Maximum bulk rock compressibility must be less than clay (0.000001 1/Pa), not "+str(self.alphav_max)+" 1/Pa")
+    if not isinstance(self.cppMS_max, float): raise ValueError("gistMC.initPP ERROR: Maximum unloading pore compressibility "+str(self.cppMS_max)+" is not a float.")
+    if not isinstance(self.cppMS_min, float): raise ValueError("gistMC.initPP ERROR: Minimum unloading pore compressibility "+str(self.cppMS_min)+" is not a float.")
+    if self.cppMS_max<self.cppMS_min: raise ValueError("gistMC.initPP ERROR: Maximum unloading pore compressibility "+str(self.cppMS_max)+" microsips < Minimum unloading pore compressibility "+str(self.cppMS_min)+" microsips")
+    if self.cppMS_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum unloading pore compressibility must be positive, not "+str(self.microsips_min)+" microsips")
+    if self.cppMS_max>=110.: raise ValueError("gistMC.initPP ERROR: Maximum unloading pore compressibility must be less than clay (110. microsips), not "+str(self.cppMS_max)+" microsips")
     ##############
     #  Warnings  #
     ##############
-    if self.alphav_max>0.00000001: warnings.warn("gistMC.initPP WARNING: Maximum bulk rock compressibility of "+str(self.alphav_max)+" 1/Pa is very high.", UserWarning, stacklevel=2)
-    if self.alphav_min<0.00000000001: warnings.warn("gistMC.initPP WARNING: Minimum bulk rock compressibility of "+str(self.alphav_min)+" 1/Pa is very low.", UserWarning, stacklevel=2)
+    if self.cppMS_max>10.: warnings.warn("gistMC.initPP WARNING: Maximum unloading pore compressibility of "+str(self.cppMS_max)+" microsips is very high.", UserWarning, stacklevel=2)
+    if self.cppMS_min<0.01: warnings.warn("gistMC.initPP WARNING: Minimum unloading pore compressibility of "+str(self.cppMS_min)+" microsips is very low.", UserWarning, stacklevel=2)
 
     return
   
@@ -497,18 +497,28 @@ class gistMC:
       # If we match - nu_u Unc goes away #
       ####################################
       if verbose>0: print(" Monte Carlo poroelastic - matched diffusivities")
-      # Optimization: Vectorized matched diffusivity calculation
-      # Instead of looping over realizations, apply matchPE2PP to the full vectors
-      self.lamdaVec, self.lamda_uVec = matchPE2PP(self.muVec, self.nuVec, self.alphaVec, self.CVec)
-      self.nu_uVec = self.lamda_uVec / (2. * (self.lamda_uVec + self.muVec))
-      
-      # Recompute Skempton's coefficient vector
-      self.BVec = 3. * (self.nu_uVec - self.nuVec) / (self.alphaVec * (1. + self.nu_uVec) * (1. - 2. * self.nuVec))
-      
-      # Recompute poroelastic diffusivity vector
-      self.diffPEVec = (self.kapM2Vec) * (self.lamda_uVec - self.lamdaVec) * (self.lamdaVec + 2. * self.muVec) / \
-                       (self.ntaVec * self.alphaVec * self.alphaVec * (self.lamda_uVec + 2. * self.muVec))
-      
+      for i in range(len(self.lamdaVec)):
+        # I don't think that we need this loop - just operate on the vectors #
+        #############################
+        # Get new Lame's parameters #
+        #############################
+        lamda,lamda_u = matchPE2PP(self.muVec[i],self.nuVec[i],self.alphaVec[i],self.CVec[i])
+        nu_u=lamda_u/(2.*(lamda_u+self.muVec[i]))
+        self.lamdaVec[i]=lamda
+        self.lamda_uVec[i]=lamda_u
+        #######################################
+        # Recompute undrained Poisson's ratio #
+        #######################################
+        self.nu_uVec[i]=nu_u
+        ###########################################
+        # Recompute Skempton's coefficient vector #
+        ###########################################
+        self.BVec[i]=3.*(self.nu_uVec[i]-self.nuVec[i])/(self.alphaVec[i]*(1.+self.nu_uVec[i])*(1.-2.*self.nuVec[i]))
+        ############################################
+        # Recompute poroelastic diffusivity vector #
+        # This should be the same as the PP one    #
+        ############################################
+        self.diffPEVec[i]=(self.kapM2Vec[i])*(self.lamda_uVec[i]-self.lamdaVec[i])*(self.lamdaVec[i]+2.*self.muVec[i])/(self.ntaVec[i]*self.alphaVec[i]*self.alphaVec[i]*(self.lamda_uVec[i]+2.*self.muVec[i]))
       if verbose>0:
         print(" Monte Carlo poroelastic (matched) - B     min/max:",np.amin(self.BVec),np.amax(self.BVec))
         print(" Monte Carlo poroelastic (matched) -diffPE min/max:",np.amin(self.diffPEVec),np.amax(self.diffPEVec))
@@ -574,7 +584,7 @@ class gistMC:
     ATensor=np.array([[np.sin(azRad), -np.cos(azRad)],[np.cos(azRad),np.sin(azRad)]])
     # rotate permeability tensor to NE coordinates
     kMDRotate=np.matmul(ATensor.T,np.matmul(kMDTensor,ATensor))
-    (kapM2,K,TAniso,diffPP,TBar)=calcPPAnisoVals(kMDRotate,self.hM,self.alphav,self.beta,self.phi,self.rho,self.g,self.nta)
+    (kapM2,K,TAniso,diffPP,TBar)=calcPPAnisoVals(kMDRotate,self.hM,self.cppMS,self.betaMS,self.phi,self.rho,self.g,self.nta)
     self.kMDRotate=kMDRotate
     self.TAniso=TAniso
     self.kapAnisoM2=kapM2
@@ -609,7 +619,7 @@ class gistMC:
       ATensor=np.array([[np.sin(azRadVec[iReal]), -np.cos(azRadVec[iReal])],[np.cos(azRadVec[iReal]),np.sin(azRadVec[iReal])]])
       kMDOrig=np.array([[self.kMDSlowVec[iReal], self.kMDOffDiagVec[iReal]],[self.kMDOffDiagVec[iReal],self.kMDFastVec[iReal]]])
       self.kMDTensor[:,:,iReal]=np.matmul(ATensor.T,np.matmul(kMDOrig,ATensor))
-      (self.kapAnisoM2Vec[:,:,iReal],self.KAnisoVec[:,:,iReal],self.TAnisoVec[:,:,iReal],self.diffAnisoPPVec[:,:,iReal],self.TBarVec[iReal])=calcPPAnisoVals(self.kMDTensor[:,:,iReal],self.hMVec[iReal],self.alphavVec[iReal],self.betaVec[iReal],self.phiVec[iReal],self.rhoVec[iReal],self.g,self.ntaVec[iReal])
+      (self.kapAnisoM2Vec[:,:,iReal],self.KAnisoVec[:,:,iReal],self.TAnisoVec[:,:,iReal],self.diffAnisoPPVec[:,:,iReal],self.TBarVec[iReal])=calcPPAnisoVals(self.kMDTensor[:,:,iReal],self.hMVec[iReal],self.cppMSVec[iReal],self.betaMSVec[iReal],self.phiVec[iReal],self.rhoVec[iReal],self.g,self.ntaVec[iReal])
 
     self.runPPAniso=True
     return
@@ -641,8 +651,8 @@ class gistMC:
       d['phi']=self.phiVec
       d['kMD']=self.kMDVec
       d['h']=self.hVec
-      d['alphav']=self.alphavVec
-      d['beta']=self.betaVec
+      d['cppMS']=self.cppMSVec
+      d['betaMS']=self.betaMSVec
       d['kapM2']=self.kapM2Vec
       d['S']=self.SVec
       d['T']=self.TVec
@@ -1034,7 +1044,7 @@ class gistMC:
     injectionDuration=(pd.to_datetime(eq['Origin Date'])-pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)).dt
     injectionDays=injectionDuration.days
     # This is still returning NaNs and I don't know why
-    if verbose>1: print(' gistMC.findWellsVec injectionDays',pd.to_datetime(eq['Origin Date']),pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch))
+    #if verbose>1: print(' gistMC.findWellsVec injectionDays',pd.to_datetime(eq['Origin Date']),pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch))
     wellDurations=injectionDays/365.25
     wellDurationsMin=min(wellDurations)
     wellDurationsMax=max(wellDurations)
@@ -1093,7 +1103,7 @@ class gistMC:
     # Then subtract off the date of the earthquake to #
     # get a number of days relative to the earthquake #
     ###################################################
-    encompassingDays=daysSinceDate(pd.to_datetime(eq['Origin Date']),injWellDateAtEpicenter,verbose=1)
+    encompassingDays=daysSinceDate(pd.to_datetime(eq['Origin Date']),injWellDateAtEpicenter,verbose=verbose)
     if verbose>1: print(' gistMC.findWellsVec encompassingDays',min(encompassingDays),max(encompassingDays),np.count_nonzero(np.isnan(encompassingDays)),' nans')
     #############################################################
     # Compute encompassing diffusivity - the diffusivity needed #
@@ -1176,25 +1186,18 @@ class gistMC:
     #############################################################
     # Shelly suggests looking at SPARKF for reading through this #
     #############################################################
-    inj_chunks = []
-    inj_excluded_chunks = []
+    injDF=pd.DataFrame()
+    injExcludedDF=pd.DataFrame()
     for chunk in iter_csv:
       #############################################
       # Collect injection data for selected wells #
       # This concat is slow! #
       #############################################
-      # Optimization: Collect chunks in a list and concat once after the loop
-      # injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
-      inj_chunks.append(chunk[chunk['ID'].isin(ids)])
+      injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
       ###############################################
       # Collect injection data for unselected wells #
       ###############################################
-      # injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
-      inj_excluded_chunks.append(chunk[chunk['ID'].isin(excludedIDs)])
-    
-    injDF = pd.concat(inj_chunks, ignore_index=True) if inj_chunks else pd.DataFrame(columns=['ID', 'BPD', 'Days'])
-    injExcludedDF = pd.concat(inj_excluded_chunks, ignore_index=True) if inj_excluded_chunks else pd.DataFrame(columns=['ID', 'BPD', 'Days'])
-    
+      injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
     ############################################################
     # Do we need this? Peter commented it out - Bill had it in #
     ############################################################
@@ -1206,7 +1209,7 @@ class gistMC:
     ###################################
     # Throw error if numDataWells = 0 #
     ###################################
-    if numDataWells==0: raise ValueError('gistMC.findWellsVec ERROR: No rates for selected '+str(self.nw)+' wells are present in the injection file.')
+    if numDataWells==0: raise ValueError('gistMC.findWellsVec ERROR: No rates for selected '+str(nw)+' wells are present in the injection file.')
     #######################################
     # Throw warning if numDataWells ~= nw #
     #######################################
@@ -1446,9 +1449,6 @@ class gistMC:
     (wellIDs,nwC,dayVec,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,f)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None,epoch=self.epoch)
     if verbose>1: print('runPressureScenariosVectorized time axis information - nt:',nt,'; ot:',ot,'; dt:',self.injDT,' earthquake index: ',ieq)
     if verbose>1: print('runPressureScenariosVectorized: f:',f)
-    #
-    # 
-    #
     ######################################
     # Check array size: nwC x nt x nReal #
     # >10GB: Error, >2GB: Warning        # 
@@ -1535,11 +1535,17 @@ class gistMC:
     ######################################################
     # Check output for negative values and warn if found #
     ######################################################
-    if np.any(dPatEQ<0): print('gistMC.runPressureScenariosVectorized WARNING: negative pressure values found in dPatEQ')
+    if np.any(dPatEQ<0): warnings.warn('gistMC.runPressureScenariosVectorized WARNING: negative pressure values found in dPatEQ')
     ###########################################################
     # Sum over wells to get total Pressure at EQ time [nReal] #
     ###########################################################
     totalPressureAtEQ=np.sum(dPatEQ,axis=0,keepdims=True)
+    #############################################
+    # Sanity check on total pressure at EQ time #
+    #############################################
+    nZeroResults=np.sum(totalPressureAtEQ<0.1)
+    if nZeroResults>0: warnings.warn('gistMC.runPressureScenariosVectorized WARNING: '+str(nZeroResults)+' out of '+str(self.nReal)+' realizations have total pressures <0.1psi')
+    if nZeroResults==self.nReal: raise ValueError('gistMC.runPressureScenariosVectorized ERROR: all realizations have total pressures <0.1psi')
     #########################################################
     # Calculate percentages for each realization [nw,nReal] #
     #########################################################
@@ -2787,7 +2793,7 @@ class gistMC:
     ntaS=np.zeros([nS,1])
     phiS=np.zeros([nS,1])
     hS=np.zeros([nS,1])
-    alphavS=np.zeros([nS,1])
+    cppMSS=np.zeros([nS,1])
     betaS=np.zeros([nS,1])
     kMDS=np.zeros([nS,1])
 
@@ -2814,29 +2820,29 @@ class gistMC:
     hS[11,0]=self.h_max
     hS[12:,0]=0.5*(self.h_max+self.h_min)
 
-    alphavS[0:12,0]=0.5*(self.alphav_max+self.alphav_min)
-    alphavS[12,0]=self.alphav_min
-    alphavS[13,0]=0.5*(self.alphav_max+self.alphav_min)
-    alphavS[14,0]=self.alphav_max
-    alphavS[14:,0]=0.5*(self.alphav_max+self.alphav_min)
+    cppMSS[0:12,0]=0.5*(self.cppMS_max+self.cppMS_min)
+    cppMSS[12,0]=self.cppMS_min
+    cppMSS[13,0]=0.5*(self.cppMS_max+self.cppMS_min)
+    cppMSS[14,0]=self.cppMS_max
+    cppMSS[14:,0]=0.5*(self.cppMS_max+self.cppMS_min)
 
-    betaS[0:15,0]=0.5*(self.beta_max+self.beta_min)
-    betaS[15,0]=self.beta_min
-    betaS[16,0]=0.5*(self.beta_max+self.beta_min)
-    betaS[17,0]=self.beta_max
-    betaS[18:,0]=0.5*(self.beta_max+self.beta_min)
+    betaS[0:15,0]=0.5*(self.betaMS_max+self.betaMS_min)
+    betaS[15,0]=self.betaMS_min
+    betaS[16,0]=0.5*(self.betaMS_max+self.betaMS_min)
+    betaS[17,0]=self.betaMS_max
+    betaS[18:,0]=0.5*(self.betaMS_max+self.betaMS_min)
 
     kMDS[0:18,0]=0.5*(self.kMD_max+self.kMD_min)
     kMDS[18,0]=self.kMD_min
     kMDS[19,0]=0.5*(self.kMD_max+self.kMD_min)
     kMDS[20,0]=self.kMD_max
     # Now get S and T for the calculation
-    (phiFracS,hMS,kapM2S,SS,KS,TS,diffPPS,CS)=calcPPVals(kMDS,hS,alphavS,betaS,phiS,rhoS,self.g,ntaS)
+    (phiFracS,hMS,kapM2S,SS,KS,TS,diffPPS,CS)=calcPPVals(kMDS,hS,cppMSS,betaS,phiS,rhoS,self.g,ntaS)
     if verbose>1:
       print('getPressureSensitivity: ntaS min/max: ',min(ntaS.flatten()),max(ntaS.flatten()))
       print('getPressureSensitivity: phiS min/max: ',min(phiS.flatten()),max(phiS.flatten()))
       print('getPressureSensitivity: hMS min/max: ',min(hMS.flatten()),max(hMS.flatten()))
-      print('getPressureSensitivity: alphavS min/max: ',min(alphavS.flatten()),max(alphavS.flatten()))
+      print('getPressureSensitivity: cppMSS min/max: ',min(cppMSS.flatten()),max(cppMSS.flatten()))
       print('getPressureSensitivity: betaS min/max: ',min(betaS.flatten()),max(betaS.flatten()))
       print('getPressureSensitivity: kMDS min/max: ',min(kMDS.flatten()),max(kMDS.flatten()))
       print('getPressureSensitivity: SS: ',SS)
@@ -2855,9 +2861,9 @@ class gistMC:
     maxValSumDP=np.zeros([7,])
     meanValSumDP=np.zeros([7,])
     meanSumDP=np.zeros([7,])
-    minVal=[self.rho_min,self.nta_min,self.phi_min,self.h_min,self.alphav_min,self.beta_min,self.kMD_min]
-    maxVal=[self.rho_max,self.nta_max,self.phi_max,self.h_max,self.alphav_max,self.beta_max,self.kMD_max]
-    meanVal=[self.rho_max,self.nta_max,self.phi_max,self.h_max,self.alphav_max,self.beta_max,self.kMD_max]
+    minVal=[self.rho_min,self.nta_min,self.phi_min,self.h_min,self.cppMS_min,self.betaMS_min,self.kMD_min]
+    maxVal=[self.rho_max,self.nta_max,self.phi_max,self.h_max,self.cppMS_max,self.betaMS_max,self.kMD_max]
+    meanVal=[self.rho_max,self.nta_max,self.phi_max,self.h_max,self.cppMS_max,self.betaMS_max,self.kMD_max]
     for wellID in wellIDs:
       wellDF=pd.DataFrame(columns=['EventID', 'EventLatitude', 'EventLongitude', 'ID', 'Name', 'API', 'Latitude', 'Longitude', 'NumWells', 'MinValDP','MeanValDP','MaxValDP','MinVal','MeanVal','MaxVal','Parameter'])
       #wSDF=sensitivityDF.copy()
@@ -2978,7 +2984,8 @@ class gistMC:
     # Loop over realizations      #
     # for disaggregation to wells #
     # Ordering of dataframes not  #
-    # guaranteed!                 #
+    # guaranteed! Append to a list#
+    # instead of a Dataframe      #
     ###############################
     scenarios_list = []
     for iReal in range(nReal):
@@ -3012,12 +3019,11 @@ class gistMC:
       # Add realization number #
       ##########################
       scenarioDF['Realization']=iReal
-      #######################
-      # Append to scenarios #
-      #######################
-      # allScenariosDF=pd.concat([allScenariosDF,scenarioDF],ignore_index=True)
+      ###########################
+      # Append to scenario list #
+      ###########################
       scenarios_list.append(scenarioDF)
-    
+      #allScenariosDF=pd.concat([allScenariosDF,scenarioDF],ignore_index=True)
     if scenarios_list:
       allScenariosDF = pd.concat(scenarios_list, ignore_index=True)
     return allScenariosDF
@@ -3133,6 +3139,7 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,epoch=p
     if eqDay<dayLowerBound: raise ValueError(' gistMC.prepInj ERROR: eqDay is before 1950: '+str(epoch+pd.to_timedelta(eqDay,'D')))
     if eqDay>dayUpperBound: raise ValueError(' gistMC.prepInj ERROR: eqDay is after 2050: '+str(epoch+pd.to_timedelta(eqDay,'D')))
     if eqDay>maxT: raise ValueError(' gistMC.prepInj ERROR: eqDay '+str(epoch+pd.to_timedelta(eqDay,'D'))+' is after end of injection data: '+str(epoch+pd.to_timedelta(maxT,D)))
+    if eqDay<ot: raise ValueError(' gistMC.prepInj ERROR: eqDay is before injection start '+str(epoch+pd.to_timedelta(ot,'D')))
     maxT=max(int(round((eqDay-ot)/dt))*dt,max(injDF['Days']))+dt
     if verbose>1: print(' prepInj: eqDay of ',eqDay,' used ',maxT)
   else:
@@ -3174,32 +3181,28 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,epoch=p
   ###################
   # Loop over wells #
   ###################
-  # Vectorized approach to fill bpdArray
-  # Filter injDF to only include wells in wellIDs
-  relevantInjDF = injDF[injDF['ID'].isin(wellIDs)].copy()
-  if not relevantInjDF.empty:
-    # Compute indices for all rows at once
-    relevantInjDF['it'] = ((relevantInjDF['Days'] - ot) / dt).round().astype(int)
+  for iw in range(nwC):
+    # Check maximum and minimum indicies relative to array size
     
-    # Filter out indices that are out of bounds for bpdArray
-    validMask = (relevantInjDF['it'] >= 0) & (relevantInjDF['it'] < nt + 1)
-    validInj = relevantInjDF[validMask]
-    
-    if not validInj.empty:
-      # Map well IDs to row indices in bpdArray
-      wellID_to_idx = {wid: i for i, wid in enumerate(wellIDs)}
-      row_indices = validInj['ID'].map(wellID_to_idx).values
-      col_indices = validInj['it'].values
-      
-      # Use numpy fancy indexing to fill the array
-      # Note: if there are multiple entries for the same (well, time), 
-      # this will use the last one. The original loop had the same behavior.
-      bpdArray[row_indices, col_indices] = validInj['BPD'].values
-      
-      if verbose > 0:
-        itMin = col_indices.min()
-        itMax = col_indices.max()
-  
+    ############################################################
+    # Make list of BPD and Days values that match this well ID #
+    ############################################################
+    bpds=injDF['BPD'][injDF['ID']==consideredWells['ID'][iw]].tolist()
+    days=injDF['Days'][injDF['ID']==consideredWells['ID'][iw]].tolist()
+    #############################################################
+    # Check if we have any injection for this well              #
+    # Should I put a warning here if we have no injection data? #
+    #############################################################
+    if len(days)>0:
+      for id in range(len(days)):
+        #################################################
+        # Get index of day value - this should be exact #
+        #################################################
+        it=int(round((days[id]-ot)/dt))
+        if verbose>0:
+          if it<itMin: itMin=it
+          if it>itMax: itMax=it
+        bpdArray[iw,it]=bpds[id]
   if verbose>0: print(' prepInj: min,max indicies ',itMin,itMax)
   ######################################################
   # Get index for time of earthquake if eqDay provided #
@@ -3223,7 +3226,7 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,epoch=p
   else:
     return (wellIDs,nwC,dayArray,nt,ot,bpdArray,secArray,dx,dy,wellDistances)
 
-def calcPPVals(kMD,hFt,alphav,beta,phi,rho,g,nta):
+def calcPPVals(kMD,hFt,cppMS,betaMS,phi,rho,g,nta):
   """
   ############################################################
   # Convert inputs to SI units and generate other parameters #
@@ -3231,8 +3234,8 @@ def calcPPVals(kMD,hFt,alphav,beta,phi,rho,g,nta):
   # Inputs: #######################################
   #   kMD:    permeability         (millidarcies) #
   #   hFt:    thickness                    (feet) #
-  #   alphav: bulk rock compressibility     (1/Pa) #
-  #   beta:   fluid compressibility        (1/Pa) #
+  #   cppMS:  pore compressibility     (microsip) #
+  #   betaMS: fluid compressibility    (microsip) #
   #   phi:    porosity                  (percent) #
   #   rho:    fluid density              (kg/m^3) #
   #   g:      gravitational acceleartion  (m/s^2) #
@@ -3263,6 +3266,14 @@ def calcPPVals(kMD,hFt,alphav,beta,phi,rho,g,nta):
   # Percent to fraction #
   #######################
   phiFrac=phi*0.01
+  ##########################################
+  # Fluid compressibility microsip to 1/Pa #
+  ##########################################
+  beta=betaMS*1.45e-10
+  #########################################
+  # Pore compressibility microsip to 1/Pa #
+  #########################################
+  cpp=cppMS*1.45e-10
   ###########################
   # Intermediate parameters #
   #######################################
@@ -3271,11 +3282,20 @@ def calcPPVals(kMD,hFt,alphav,beta,phi,rho,g,nta):
   # Diffusivity (pore pressure) #
   # Equation 1.29, 3.1          #               
   ###############################
-  diffPP=kapM2/(nta*(alphav+(beta*phiFrac)))
+  # Old equation - used generic compressibility
+  #diffPP=kapM2/(nta*(alphav+(beta*phiFrac)))
+  ##############################################
+  # New equation - uses pore compressibility   #
+  # (Cpp in Zimmerman?) multiplied by porosity #
+  ##############################################
+  diffPP = kapM2/(nta * phiFrac *(cpp + beta))
   ##########################
   # Lumped compressibility #
   ##########################
-  C=alphav+phiFrac*beta
+  # old equation
+  #C=alphav+phiFrac*beta
+  # new equation 
+  C=phiFrac*(cpp+beta)
   ################
   # Storativity  #
   # Equation 1.4 #
@@ -3292,20 +3312,20 @@ def calcPPVals(kMD,hFt,alphav,beta,phi,rho,g,nta):
   T = K*hM
   return (phiFrac,hM,kapM2,S,K,T,diffPP,C)
 
-def calcPPAnisoVals(kMDTensor,hM,alphav,beta,phi,rho,g,nta):
+def calcPPAnisoVals(kMDTensor,hM,cppMS,betaMS,phi,rho,g,nta):
   """
   ##########################################################################
   # Convert tensor inputs to SI units and generate other tensor parameters #
   ##########################################################################
-  # Inputs: #######################################
-  #   kMD:    permeability     (2x2,millidarcies) #
-  #   hM:     thickness                  (meters) #
-  #   alphav: bulk rock compressibility    (1/Pa) #
-  #   beta:   fluid compressibility        (1/Pa) #
-  #   phi:    porosity                  (percent) #
-  #   rho:    fluid density              (kg/m^3) #
-  #   g:      gravitational acceleartion  (m/s^2) #
-  #   nta:    fluid viscosity    (Pascal seconds) #
+  # Inputs: ##############################################
+  #   kMD:    permeability            (2x2,millidarcies) #
+  #   hM:     thickness                         (meters) #
+  #   cppMS:  unloading pore compressibility (microsips) #
+  #   betaMS: fluid compressibility          (microsips) #
+  #   phi:    porosity                         (percent) #
+  #   rho:    fluid density                     (kg/m^3) #
+  #   g:      gravitational acceleartion         (m/s^2) #
+  #   nta:    fluid viscosity           (Pascal seconds) # should update to centipoise?
   #################################################
   # Outputs: ###################################
   #   kapM2:   permeability in       (2x2,m^2) #
@@ -3324,6 +3344,11 @@ def calcPPAnisoVals(kMDTensor,hM,alphav,beta,phi,rho,g,nta):
   # Percent to fraction #
   #######################
   phiFrac=phi*0.01
+  #
+  # compressibilities to 1/Pa
+  #
+  beta=betaMS * 1.45e-10 
+  cpp=cppMS*1.45e-10
   ###########################
   # Intermediate parameters #
   #######################################
@@ -3332,7 +3357,8 @@ def calcPPAnisoVals(kMDTensor,hM,alphav,beta,phi,rho,g,nta):
   # Diffusivity (pore pressure) #
   # Equation 1.29, 3.1          #               
   ###############################
-  diffPP=kapM2/(nta*(alphav+(beta*phiFrac)))
+  #diffPP=kapM2/(nta*(alphav+(beta*phiFrac)))
+  diffPP=kapM2/(nta*phiFrac*(cpp+beta))
   ####################################
   # Saturated hydraulic conductivity #
   ####################################
@@ -3465,7 +3491,7 @@ def datesFromTwoSeries(startDateSeries,dayOffsetSeries):
 
 def daysSinceDate(epoch,dateSeries,verbose=0):
   daySeries=(pd.to_datetime(dateSeries)-pd.Series(pd.to_datetime(epoch),index=range(len(dateSeries)))).dt.days
-  if verbose>0: print(dateSeries,daySeries)
+  if verbose>0: print("daysSinceDate: ",dateSeries,daySeries)
   return daySeries
 
 def logSpace(centerVal,logUncertainty,clip=None,verbose=0):
@@ -3956,11 +3982,10 @@ def prepDisaggregationPlot(smallPPDF,smallWellIDList,jitter=0.,verbose=0):
           columns: Pressure,WellNo,Order,Name
   """
   # Make new dataframe
-  disaggregationPlotDF=pd.DataFrame(columns=['Pressures','WellNo','Order','Name','ID','Realization'])
-  nReal=int(max(smallPPDF['Realization'])+1)
+  disaggregationPlotDF=pd.DataFrame(columns=[{'Pressures':'float64','WellNo':'int32','Order':'int32','Name':'string','ID':'int32','Realization':'int32'}])
+  nReal=max(smallPPDF['Realization'])+1
   if verbose>0: print(' prepDisaggregationPlot: ',len(smallWellIDList),' wells in disaggregation plot with ',nReal,' realizations')
   if verbose>1: print(' prepDisaggregationPlot well List:')
-  
   # Optimization: Collect DataFrames in a list and concat once
   well_dfs = []
   # Loop over smallWellList
@@ -3972,13 +3997,14 @@ def prepDisaggregationPlot(smallPPDF,smallWellIDList,jitter=0.,verbose=0):
     else:
       wellNo = np.zeros(nReal,)-iw
     # Get rows for this well
-    wellDF = smallPPDF[smallPPDF['ID']==smallWellIDList[iw]][['Realization','Pressures','Order','Name','ID']].copy()
+    wellDF = smallPPDF[smallPPDF['ID']==smallWellIDList[iw]][['Realization','Pressures','Order','Name','ID']]
     if verbose>0: print(' prepDisaggregationPlot: ',len(wellDF),' rows for ',smallWellIDList[iw])
     # create a new dataframe for this well
     wellDF['WellNo']=wellNo
     # append to list
     well_dfs.append(wellDF)
-  
+    # append to new dataframe
+    #disaggregationPlotDF=pd.concat([disaggregationPlotDF,wellDF],ignore_index=True)
   if well_dfs:
     disaggregationPlotDF = pd.concat(well_dfs, ignore_index=True)
   return disaggregationPlotDF
@@ -4022,9 +4048,13 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
   nt=deltaPP.shape[2]
   nw=deltaPP.shape[0]
   if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - sizes: ',nReal,nt,nw)
+  PPQuantilesDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
+  PPSpaghettiDF=pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
   #dateVec=[epoch+pd.Timedelta(dayv,unit='day') for dayv in dayVec]
-  # Calculate order of deltaPP for each value to get percentiles
+  # Calculate order ofdeltaPP for each value to get percentiles
+  #deltaPPArgSort=np.argsort(deltaPP,axis=1)
   if verbose>1: print('getPerWellPressureTimeSeriesQuantiles - after argsort: ',nReal,nt,nw)
+  #deltaPPSorted=np.zeros([nReal,nt])
   deltaPPOrder=np.zeros([nReal,nt])
   deltaPPPercentile=np.zeros([nReal,nt])
   ptiles_list=list(range(0,nReal))
@@ -4043,6 +4073,11 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
     # Vectorized: assign rank of each realization at each time step
     deltaPPOrder[deltaPPArgSort, it_idx] = iR_idx
     deltaPPPercentile = np.round(100. * deltaPPOrder / (nReal - 1), decimals=1)
+    #for it in range(nt):
+    #  for iR in range(nReal):
+    #    deltaPPSorted[deltaPPArgSort[iR,it],it]=deltaPP[iw,iR,it]
+    #    deltaPPPercentile[deltaPPArgSort[iR,it],it]=round(100.*iR/(nReal-1),1)
+    #    deltaPPOrder[deltaPPArgSort[iR,it],it]=iR
     # Now just extract dataframe for this well
     if verbose>0: print('getPerWellPressureTimeSeriesQuantiles - array sizes: ',deltaPP[iw,:,:].shape,deltaPPPercentile[:,:].shape,deltaPPOrder[:,:].shape),np.tile(dayVec,nReal).shape,np.arange(nReal).repeat(nt).shape,np.repeat(wellIDs[iw],nReal*nt)
     d={'DeltaPressure':deltaPP[iw,:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Order':deltaPPOrder[:,:].flatten(),'Percentile':deltaPPPercentile[:,:].flatten(),'WellID':np.repeat(wellIDs[iw],nReal*nt), 'Diffusivity':diffPPVec.repeat(nt)}
@@ -4052,6 +4087,8 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
     spaghetti_list.append(wellPPDF[['DeltaPressure','Days','Realization','WellID','Diffusivity']])
   PPQuantilesDF = pd.concat(quantiles_list, ignore_index=True) if quantiles_list else pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
   PPSpaghettiDF = pd.concat(spaghetti_list, ignore_index=True) if spaghetti_list else pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
+  #  PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
+  #  PPSpaghettiDF=pd.concat([PPSpaghettiDF,wellPPDF[['DeltaPressure','Days','Realization','WellID','Diffusivity']]],ignore_index=True)
   PPQuantilesDF['Date']=epoch+pd.to_timedelta(PPQuantilesDF['Days'],unit='d')
   PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
   return PPQuantilesDF,PPSpaghettiDF
@@ -4075,14 +4112,14 @@ def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,i
                                 WellInfo    - Name, ID, Distance, ...
   To-do: This is a memory hog and is the one thing that will OOM in a run with thousands of realizations.
   '''
-  # Initialize output dictionary
+    # Initialize output dictionary
   outPerWellDict={}
   # Loop over wells of interest:
   for iw in range(len(wellIDs)):
     wellID=wellIDs[iw]
     wellRows=wellsDF[wellsDF['ID']==wellID]
     if wellRows.empty:
-      if verbose>0: print("prepPressureAndDisposalTimeSeriesPlots WARNING: wellID not found in wellsDF:",wellID)
+      if verbose>0: warnings.warn("prepPressureAndDisposalTimeSeriesPlots WARNING: wellID not found in wellsDF:"+wellID)
       wellName=str(wellID)
       wellInfo=wellRows
     else:
@@ -4128,6 +4165,11 @@ def prepTotalPressureTimeSeriesQuantilesPlot(deltaPP,dayVec,nQuantiles=11,epoch=
   iR_idx = np.arange(nReal)[:, np.newaxis] # shape [nReal, 1]
   totalDeltaPPOrder[totalDeltaPPArgSort, it_idx] = iR_idx
   totalDeltaPPPercentile=np.round(100.*totalDeltaPPOrder/(nReal-1),decimals=1)
+  #for it in range(nt):
+  #  for iR in range(nReal):
+  #    totalDeltaPPSorted[totalDeltaPPArgSort[iR,it],it]=totalDeltaPP[iR,it]
+  #    totalDeltaPPOrder[totalDeltaPPArgSort[iR,it],it]=iR
+  #totalDeltaPPPercentile=np.round(100.*totalDeltaPPOrder/(nReal-1),decimals=1)
   #td={'DeltaPressure':totalDeltaPP[:,:].flatten(), 'Days':np.repeat(dayVec,nReal),'Date':np.repeat(dateVec,nReal), 'Realization':np.tile(np.arange(nReal),nt),'Percentile':totalDeltaPPPercentile[:,:].flatten()}
   #td={'DeltaPressure':np.ravel(totalDeltaPP[:,:],order='F'), 'Days':np.tile(dayVec,nReal),'Date':np.tile(dateVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Percentile':np.ravel(totalDeltaPPPercentile[:,:],order='F')}
   td={'DeltaPressure':totalDeltaPP[:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.repeat(np.arange(nReal),nt),'Percentile':totalDeltaPPPercentile[:,:].flatten(),'Ordering':totalDeltaPPOrder[:,:].flatten()}
@@ -4383,25 +4425,25 @@ def checkParameters(gist,verbose=0):
   if gist.nta_max<=gist.nta_min:       raise ValueError('checkParameters: maximum viscosity must be greater than minimum viscosity')
   if gist.rho_min<=0.:                 raise ValueError('checkParameters: minimum fluid denisty must be positive')
   if gist.rho_max<=gist.rho_min:       raise ValueError('checkParameters: maximum fluid denisty must be greater than minimum fluid denisty')
-  if gist.alphav_min<=0.:              raise ValueError('checkParameters: minimum bulk rock compressibility must be positive')
-  if gist.alphav_max<=gist.alphav_min: raise ValueError('checkParameters: maximum bulk rock compressibility must be greater than minimum bulk rock compressibility')
-  if gist.beta_min<=0.:                raise ValueError('checkParameters: minimum fluid compressibility must be positive')
-  if gist.beta_max<=gist.beta_min:     raise ValueError('checkParameters: maximum fluid compressibility must be greater than minimum fluid compressibility')
+  if gist.cppMS_min<=0.:               raise ValueError('checkParameters: minimum bulk rock compressibility must be positive')
+  if gist.cppMS_max<=gist.cppMS_min:   raise ValueError('checkParameters: maximum bulk rock compressibility must be greater than minimum bulk rock compressibility')
+  if gist.betaMS_min<=0.:              raise ValueError('checkParameters: minimum fluid compressibility must be positive')
+  if gist.betaMS_max<=gist.betaMS_min: raise ValueError('checkParameters: maximum fluid compressibility must be greater than minimum fluid compressibility')
   if gist.h_min<0.:                    raise ValueError('checkParameters: minimum injection interval thickness must be positive')
   if gist.h_max<=gist.h_min:           raise ValueError('checkParameters: maximum injection interval thickness must be greater than minimum injection interval thickness')
 
   # Throw warnings for crazy, but physical parameters #
-  if gist.kMD_max>15000.:                       warnings.warn('checkParameters WARNING: a maximum permeability of '+gist.kMD_max+' mD is not realistic for intact rock',UserWarning,stacklevel=2)
-  if gist.kMD_min<0.01:                         warnings.warn('checkParameters WARNING: a minimum permeability of '+gist.kMD_min+' mD will not give sensible results',UserWarning,stacklevel=2)
-  if gist.rho_min<900.:                         warnings.warn('checkParameters WARNING: a minimum fluid density of '+gist.rho_min+' kg/m3 is not realistic',UserWarning,stacklevel=2)
-  if gist.rho_max>1500.:                        warnings.warn('checkParameters WARNING: a maximum fluid density of '+gist.rho_max+' kg/m3 is not realistic',UserWarning,stacklevel=2)
-  if gist.nta_min<0.0002:                       warnings.warn('checkParameters WARNING: a minimum viscosity of '+gist.nta_min+' Pa.s is not realistic',UserWarning,stacklevel=2)
-  if gist.nta_max>0.001:                        warnings.warn('checkParameters WARNING: a maximum viscosity of '+gist.nta_max+' Pa.s is not realistic',UserWarning,stacklevel=2)
-  if gist.alphav_min<0.00000000001:             warnings.warn('checkParameters WARNING: a minimum bulk rock compressibility of '+gist.alphav_min+' 1/Pa is less than mercury',UserWarning,stacklevel=2)
-  if gist.alphav_max>0.000001:                  warnings.warn('checkParameters WARNING: a maximum bulk rock compressibility of '+gist.alphav_max+' 1/Pa is greater than clay',UserWarning,stacklevel=2)
-  if gist.beta_min<0.0000000003:                warnings.warn('checkParameters WARNING: a minimum fluid compressibilty of '+gist.beta_min+' 1/Pa is not realistic',UserWarning,stacklevel=2)
-  if gist.beta_max>0.0000000006:                warnings.warn('checkParameters WARNING: a maximum fluid compressibility of '+gist.beta_max+' 1/Pa is not realistic',UserWarning,stacklevel=2)
-  if gist.h_max>10000.:                         warnings.warn('checkParameters WARNING: a maximum injection interval thickness of '+gist.h_max+' ft is not realistic',UserWarning,stacklevel=2)
+  if gist.kMD_max>15000.:               warnings.warn('checkParameters WARNING: a maximum permeability of '+gist.kMD_max+' mD is not realistic for intact rock',UserWarning,stacklevel=2)
+  if gist.kMD_min<0.01:                 warnings.warn('checkParameters WARNING: a minimum permeability of '+gist.kMD_min+' mD will not give sensible results',UserWarning,stacklevel=2)
+  if gist.rho_min<900.:                 warnings.warn('checkParameters WARNING: a minimum fluid density of '+gist.rho_min+' kg/m3 is not realistic',UserWarning,stacklevel=2)
+  if gist.rho_max>1500.:                warnings.warn('checkParameters WARNING: a maximum fluid density of '+gist.rho_max+' kg/m3 is not realistic',UserWarning,stacklevel=2)
+  if gist.nta_min<0.0002:               warnings.warn('checkParameters WARNING: a minimum viscosity of '+gist.nta_min+' Pa.s is not realistic',UserWarning,stacklevel=2)
+  if gist.nta_max>0.002:                warnings.warn('checkParameters WARNING: a maximum viscosity of '+gist.nta_max+' Pa.s is not realistic',UserWarning,stacklevel=2)
+  if gist.cppMS_min<0.01:               warnings.warn('checkParameters WARNING: a minimum pore compressibility of '+gist.cppMS_min+' microsips is very low',UserWarning,stacklevel=2)
+  if gist.cppMS_max>110.:               warnings.warn('checkParameters WARNING: a maximum pore compressibility of '+gist.cppMS_max+' microsips is greater than clay',UserWarning,stacklevel=2)
+  if gist.betaMS_min<2.:                warnings.warn('checkParameters WARNING: a minimum fluid compressibilty of '+gist.betaMS_min+' microsips is not realistic',UserWarning,stacklevel=2)
+  if gist.betaMS_max>3.5:               warnings.warn('checkParameters WARNING: a maximum fluid compressibility of '+gist.betaMS_max+' microsips is not realistic',UserWarning,stacklevel=2)
+  if gist.h_max>10000.:                 warnings.warn('checkParameters WARNING: a maximum injection interval thickness of '+gist.h_max+' ft is not realistic',UserWarning,stacklevel=2)
   return
 
 def checkWellFile(wellFile,boundsDictionary=None,verbose=0):
