@@ -35,6 +35,7 @@ import urllib3
 import credentials
 import injectionV3 as inj3
 from injection_id_utils import normalize_uic_string, apply_uic_normalization
+from permian_subbasin import print_permian_basins_for_wells
 
 # Suppress SSL warnings (TexNet API uses self-signed cert)
 requests.packages.urllib3.disable_warnings(
@@ -281,6 +282,17 @@ def well_to_b3_format(input_path: Path, output_path: Path) -> None:
         if _n_null > 0:
             _bad_counts = _raw_permit[_null_mask.values].value_counts(dropna=False).head(10)
             logger.debug("  OriginalPermitDate value_counts (top 10): %s", _bad_counts.to_dict())
+
+    # Console-only Permian sub-basin (shapefile point-in-polygon); does not modify `df` before write
+    try:
+        print_permian_basins_for_wells(
+            df["InjectionWellId"],
+            df["SurfaceHoleLatitude"],
+            df["SurfaceHoleLongitude"],
+        )
+    except Exception as exc:
+        logger.warning("Permian sub-basin reporting skipped: %s", exc)
+
     df.to_csv(output_path, index=False)
     logger.info("B3 well file written: %d rows -> %s", len(df), output_path)
 

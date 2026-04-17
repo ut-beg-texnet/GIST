@@ -91,6 +91,11 @@ else:
 
 smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
 
+# Calculate cutoff for R-T Plot
+max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance'].max()
+rt_plot_cutoff = max_dist_max_diff * 3
+smallWellList_r_t_plot_updated = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
+
 # for testing, check the length of the allPerWellDisposalDF and its column names
 if allPerWellDisposalDF is not None:
     print(f"allPerWellDisposalDF length: {len(allPerWellDisposalDF)}")
@@ -124,6 +129,7 @@ else:
 
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF_updated", smallPPDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_updated", smallWellList)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_r_t_plot_updated", smallWellList_r_t_plot_updated)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "disaggregationDF_updated", disaggregationDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPQuantilesDF_updated", totalPPQuantilesDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPSpaghettiDF_updated", totalPPSpaghettiDF)

@@ -33,6 +33,7 @@ import math
 import gc
 import time
 import warnings
+
 #############################################
 # Contains:                                 #
 #   Classes:                                #
@@ -1519,8 +1520,21 @@ class gistMC:
     # the time series output at 'it'. This is really a      #
     # convolution of epp and dQdtArray on the last axis     #
     #########################################################
-    timeStepsSum1=np.sum(epp[:,:,-ieq:] * dQdtArray[:,:ieq].reshape((nwC,1,ieq)).repeat(nReal,1),axis=2)
-    timeStepsSum2=np.sum(epp[:,:,-(ieq+1):] * dQdtArray[:,:ieq+1].reshape((nwC,1,ieq+1)).repeat(nReal,1),axis=2)
+    if ieq <= 0:
+        raise ValueError(
+            "The earthquake date precedes all available injection data for the "
+            "selected wells. No pressure contribution can be computed."
+        )
+    timeStepsSum1 = np.sum(
+        epp[:, :, -ieq:]
+        * dQdtArray[:, :ieq].reshape((nwC, 1, ieq)).repeat(nReal, 1),
+        axis=2,
+    )
+    timeStepsSum2 = np.sum(
+        epp[:, :, -(ieq + 1) :]
+        * dQdtArray[:, : ieq + 1].reshape((nwC, 1, ieq + 1)).repeat(nReal, 1),
+        axis=2,
+    )
     ########################################################################
     # Multiply the sum of the time steps with gRhoOverT and convert to PSI #
     # dP is the change in pressure from the first time step [nw,nReal,nt]  #

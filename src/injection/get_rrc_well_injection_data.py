@@ -37,6 +37,7 @@ from sodapy import Socrata
 import credentials
 import injectionV3 as inj3
 from injection_id_utils import normalize_uic_string, apply_uic_normalization
+from permian_subbasin import print_permian_basins_for_wells
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +299,16 @@ def map_wells_to_b3(df: pd.DataFrame) -> pd.DataFrame:
     out["PermittedIntervalBottomFt"] = _to_numeric_safe(
         df.get("bot_inj_zone", pd.Series(dtype=float)), default=0.0
     ).astype(int)
+
+    # Console-only Permian sub-basin (shapefile point-in-polygon); does not modify `out`
+    try:
+        print_permian_basins_for_wells(
+            out["InjectionWellId"],
+            out["SurfaceHoleLatitude"],
+            out["SurfaceHoleLongitude"],
+        )
+    except Exception as exc:
+        logger.warning("Permian sub-basin reporting skipped: %s", exc)
 
     # Depth classification derived from bot_inj_zone vs the 7000 ft cutoff
     out["CompletedWellDepthClassification"] = out["PermittedIntervalBottomFt"].apply(
