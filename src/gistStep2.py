@@ -84,8 +84,8 @@ phi = helper.getParameterValueWithStepIndexAndParamName(1,"phi")
 nta = helper.getParameterValueWithStepIndexAndParamName(1,"nta")
 kMD = helper.getParameterValueWithStepIndexAndParamName(1,"kMD")
 h = helper.getParameterValueWithStepIndexAndParamName(1,"h")
-alphav = helper.getParameterValueWithStepIndexAndParamName(1,"alphav")
-beta = helper.getParameterValueWithStepIndexAndParamName(1,"beta")
+cppMS = helper.getParameterValueWithStepIndexAndParamName(1,"cppMS")
+betaMS = helper.getParameterValueWithStepIndexAndParamName(1,"betaMS")
 
 input = {
     "years_diff": years_diff,
@@ -101,10 +101,10 @@ input = {
         "kMD_max": float(kMD.get("max")),
         "h_min": float(h.get("min")),
         "h_max": float(h.get("max")),
-        "alphav_min": float(alphav.get("min")),
-        "alphav_max": float(alphav.get("max")),
-        "beta_min": float(beta.get("min")),
-        "beta_max": float(beta.get("max"))
+        "cppMS_min": float(cppMS.get("min")),
+        "cppMS_max": float(cppMS.get("max")),
+        "betaMS_min": float(betaMS.get("min")),
+        "betaMS_max": float(betaMS.get("max"))
     },
     "eq": formattedEarthquake
 }
@@ -116,7 +116,24 @@ else:
     wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
     injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
 
-smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
+try:
+    smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
+except ValueError as e:
+    helper.addMessageWithStepIndex(1, str(e), 2)
+    helper.setSuccessForStepIndex(1, False)
+    helper.writeResultsFile()
+    sys.exit(1)
+
+# Calculate cutoff for R-T Plot
+max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance'].max()
+
+rt_plot_cutoff = max_dist_max_diff * 3
+
+# Filter the dataset
+smallWellList_r_t_plot = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
+
+
+
 
 if disaggregationDF.empty:
     helper.addMessageWithStepIndex(1, "No Wells Found.", 2)
@@ -124,6 +141,7 @@ if disaggregationDF.empty:
 else:
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList_r_t_plot", smallWellList_r_t_plot)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "disaggregationDF", disaggregationDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPQuantilesDF", totalPPQuantilesDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPSpaghettiDF", totalPPSpaghettiDF)

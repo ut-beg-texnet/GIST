@@ -36,6 +36,8 @@ from sodapy import Socrata
 
 import credentials
 import injectionV3 as inj3
+from injection_id_utils import normalize_uic_string, apply_uic_normalization
+from permian_subbasin import print_permian_basins_for_wells
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +96,7 @@ def resolve_path(target_dir: Path, basename: str, dev: bool) -> Path:
 
     Example:
         resolve_path(Path('./src/data'), 'rrc_disposal_well.csv', dev=True)
-        → Path('./src/data/rrc_disposal_well_dev.csv')
+        -> Path('./src/data/rrc_disposal_well_dev.csv')
     """
     if dev:
         stem, ext = basename.rsplit(".", 1)
@@ -116,7 +118,7 @@ def backup_files(files: List[Path], backup_dir: Path) -> None:
         if f.exists():
             dest = backup_dir / f.name
             shutil.copy2(f, dest)
-            logger.info("Backed up %s → %s", f.name, dest)
+            logger.info("Backed up %s -> %s", f.name, dest)
         else:
             logger.debug("File %s does not exist, skipping backup.", f.name)
 
@@ -125,17 +127,17 @@ def backup_files(files: List[Path], backup_dir: Path) -> None:
 # Socrata client
 # ──────────────────────────────────────────────────────────────────────────────
 
-def build_socrata_client(username: str, password: str) -> Socrata:
+def build_socrata_client(username: str, password: str, app_token: str) -> Socrata:
     """
     Create an authenticated Socrata client for data.texas.gov.
     App token is None — username/password auth is sufficient for these datasets.
     """
     client = Socrata(
         SOCRATA_DOMAIN,
-        None,           # no app token; auth via username/password
+        app_token,      
         username=username,
         password=password,
-        timeout=120,
+        timeout=200,
     )
     logger.info("Socrata client created for domain: %s", SOCRATA_DOMAIN)
     return client
@@ -152,8 +154,12 @@ def fetch_wells(client: Socrata) -> Optional[pd.DataFrame]:
     Returns a DataFrame, or None on failure.
     """
     try:
-        logger.info("Fetching all wells from dataset %s …", WELLS_DATASET_ID)
-        records = client.get_all(WELLS_DATASET_ID, limit=PAGE_SIZE)
+        where_clause = "uic_type_injection = 1 OR uic_type_injection = 2"
+        logger.info(
+            "Fetching wells from dataset %s where %s …",
+            WELLS_DATASET_ID, where_clause
+        )
+        records = client.get_all(WELLS_DATASET_ID, where=where_clause, limit=PAGE_SIZE)
         df = pd.DataFrame.from_records(records)
         logger.info("Fetched %d well records.", len(df))
         return df
@@ -253,7 +259,7 @@ def map_wells_to_b3(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame()
 
     # Primary key and UIC number
-    out["InjectionWellId"] = df.get("uic_number", pd.Series(dtype=str)).astype(str)
+    out["InjectionWellId"] = df.get("uic_number", pd.Series(dtype=str)).astype(str).apply(normalize_uic_string)
     out["UICNumber"] = out["InjectionWellId"]
     out["APINumber"] = df.get("api_no", pd.Series(dtype=str)).astype(str).str.strip()
 
@@ -271,9 +277,17 @@ def map_wells_to_b3(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Permit / activation date from H1 form date
-    out["WellActivatedDate"] = _parse_date_to_b3(
-        df.get("h1_date", pd.Series(dtype=str))
+    _raw_h1 = df.get("h1_date", pd.Series(dtype=str))
+    out["WellActivatedDate"] = _parse_date_to_b3(_raw_h1)
+    _epoch_mask = out["WellActivatedDate"] == "01-01-1970"
+    _n_epoch = _epoch_mask.sum()
+    logger.debug(
+        "WellActivatedDate (h1_date): %d/%d wells have null/unparseable date → defaulted to 01-01-1970",
+        _n_epoch, len(out),
     )
+    if _n_epoch > 0:
+        _bad_counts = _raw_h1[_epoch_mask.values].value_counts(dropna=False).head(10)
+        logger.debug("  h1_date value_counts (top 10): %s", _bad_counts.to_dict())
 
     # No direct max BPD field available; default to 0
     out["PermittedMaxLiquidBPD"] = 0
@@ -285,6 +299,16 @@ def map_wells_to_b3(df: pd.DataFrame) -> pd.DataFrame:
     out["PermittedIntervalBottomFt"] = _to_numeric_safe(
         df.get("bot_inj_zone", pd.Series(dtype=float)), default=0.0
     ).astype(int)
+
+    # Console-only Permian sub-basin (shapefile point-in-polygon); does not modify `out`
+    try:
+        print_permian_basins_for_wells(
+            out["InjectionWellId"],
+            out["SurfaceHoleLatitude"],
+            out["SurfaceHoleLongitude"],
+        )
+    except Exception as exc:
+        logger.warning("Permian sub-basin reporting skipped: %s", exc)
 
     # Depth classification derived from bot_inj_zone vs the 7000 ft cutoff
     out["CompletedWellDepthClassification"] = out["PermittedIntervalBottomFt"].apply(
@@ -316,8 +340,18 @@ def map_injection_to_b3(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     out = pd.DataFrame()
-    out["InjectionWellId"] = df.get("uic_no", pd.Series(dtype=str)).astype(str)
-    out["Date"] = _parse_date_to_b3(df.get("formatted_date", pd.Series(dtype=str)))
+    out["InjectionWellId"] = df.get("uic_no", pd.Series(dtype=str)).astype(str).apply(normalize_uic_string)
+    _raw_fmt = df.get("formatted_date", pd.Series(dtype=str))
+    out["Date"] = _parse_date_to_b3(_raw_fmt)
+    _epoch_mask = out["Date"] == "01-01-1970"
+    _n_epoch = _epoch_mask.sum()
+    if _n_epoch > 0:
+        logger.debug(
+            "Injection Date (formatted_date): %d/%d records have null/unparseable date → defaulted to 01-01-1970",
+            _n_epoch, len(out),
+        )
+        _bad_counts = _raw_fmt[_epoch_mask.values].value_counts(dropna=False).head(10)
+        logger.debug("  formatted_date value_counts (top 10): %s", _bad_counts.to_dict())
     out["InjectedLiquidBBL"] = _to_numeric_safe(
         df.get("vol_liq", pd.Series(dtype=float)), default=0.0
     )
@@ -336,9 +370,18 @@ def update_csv(new_df: pd.DataFrame, path: Path, dedup_cols: List[str]) -> pd.Da
     Deduplicates on dedup_cols; the new value wins (kept last).
     Saves the merged result back to path and returns the DataFrame.
     """
+    # Ensure new_df is normalized
+    new_df = apply_uic_normalization(new_df, dedup_cols)
+
     if path.exists():
-        existing_df = pd.read_csv(path, low_memory=False)
+        # Force string dtype for key columns to avoid float/int inference on read
+        dtypes = {col: str for col in dedup_cols}
+        existing_df = pd.read_csv(path, low_memory=False, dtype=dtypes)
         logger.debug("Loaded %d existing rows from %s", len(existing_df), path)
+        
+        # Normalize existing data too, just in case
+        existing_df = apply_uic_normalization(existing_df, dedup_cols)
+        
         combined = pd.concat([existing_df, new_df], ignore_index=True)
     else:
         logger.info("No existing file at %s — creating new.", path)
@@ -348,7 +391,7 @@ def update_csv(new_df: pd.DataFrame, path: Path, dedup_cols: List[str]) -> pd.Da
     combined.drop_duplicates(subset=dedup_cols, keep="last", inplace=True)
     combined.to_csv(path, index=False)
     logger.info(
-        "CSV updated: %d rows (removed %d duplicates) → %s",
+        "CSV updated: %d rows (removed %d duplicates) -> %s",
         len(combined), before - len(combined), path,
     )
     return combined
@@ -359,8 +402,8 @@ def update_csv(new_df: pd.DataFrame, path: Path, dedup_cols: List[str]) -> pd.Da
 # ──────────────────────────────────────────────────────────────────────────────
 
 def reformat_well_id_column(path: Path) -> None:
-    """Rename 'InjectionWellId' → 'ID' in an already-written GIST well file (in place)."""
-    df = pd.read_csv(path, low_memory=False)
+    """Rename 'InjectionWellId' -> 'ID' in an already-written GIST well file (in place)."""
+    df = pd.read_csv(path, dtype={"InjectionWellId": str}, low_memory=False)
     df.rename(columns={"InjectionWellId": "ID"}, inplace=True)
     df.to_csv(path, index=False)
 
@@ -376,7 +419,7 @@ def run_gist_pipeline(
     verbose: int,
 ) -> None:
     """
-    Run the full injTX → inj → processRates → outputReg pipeline for one
+    Run the full injTX -> inj -> processRates -> outputReg pipeline for one
     depth class (Shallow or Deep).
 
     Parameters
@@ -406,7 +449,7 @@ def run_gist_pipeline(
 
     wells.outputReg(str(inj_file), verbose=verbose)
     logger.info(
-        "%s GIST files written: wells → %s | injection → %s",
+        "%s GIST files written: wells -> %s | injection -> %s",
         depth_label, well_file, inj_file,
     )
 
@@ -500,7 +543,7 @@ def main() -> None:
         backup_files(files_to_backup, args.backup_dir)
 
     # ── Build Socrata client ─────────────────────────────────────────────────
-    client = build_socrata_client(credentials.RRC_USERNAME, credentials.RRC_PASSWORD)
+    client = build_socrata_client(credentials.RRC_USERNAME, credentials.RRC_PASSWORD, credentials.RRC_APP_TOKEN)
 
     # ── Step 1: Fetch wells (full dataset) ───────────────────────────────────
     logger.info("Step 1: Fetching well locations…")
@@ -515,7 +558,7 @@ def main() -> None:
     valid_mask = lat.notna() & lon.notna() & (lat != 0) & (lon != 0)
     valid_well_df = raw_well_df[valid_mask].copy()
     logger.info(
-        "Well coordinate filter: %d total → %d with valid coordinates",
+        "Well coordinate filter: %d total -> %d with valid coordinates",
         len(raw_well_df), len(valid_well_df),
     )
 
@@ -530,17 +573,21 @@ def main() -> None:
     # ── Step 4: Fetch injection data (date-filtered) ─────────────────────────
     logger.info("Step 4: Fetching injection data (last %d days)…", args.days)
     raw_inj_df = fetch_injection(client, args.days)
-    if raw_inj_df is None or raw_inj_df.empty:
-        logger.error("No injection data returned. Exiting.")
+    if raw_inj_df is None:
+        logger.error("Failed to fetch injection data. Exiting.")
         sys.exit(1)
 
-    # ── Step 5: Map injection to B3 format ───────────────────────────────────
-    logger.info("Step 5: Mapping injection data to B3 format…")
-    b3_inj_df = map_injection_to_b3(raw_inj_df)
+    if raw_inj_df.empty:
+        logger.warning("No injection data returned for the last %d days. Proceeding with existing data.", args.days)
+        # We still want to proceed with the GIST pipeline using existing data
+    else:
+        # ── Step 5: Map injection to B3 format ───────────────────────────────────
+        logger.info("Step 5: Mapping injection data to B3 format…")
+        b3_inj_df = map_injection_to_b3(raw_inj_df)
 
-    # ── Step 6: Append + dedup injection CSV ────────────────────────────────
-    logger.info("Step 6: Updating injection CSV…")
-    update_csv(b3_inj_df, inj_raw, dedup_cols=["InjectionWellId", "Date"])
+        # ── Step 6: Append + dedup injection CSV ────────────────────────────────
+        logger.info("Step 6: Updating injection CSV…")
+        update_csv(b3_inj_df, inj_raw, dedup_cols=["InjectionWellId", "Date"])
 
     # ── Step 7: Write intermediate B3 CSVs for injectionV3 ──────────────────
     # Re-read the full (merged) raw CSVs to feed the GIST pipeline so that
@@ -550,8 +597,8 @@ def main() -> None:
     full_inj_df = pd.read_csv(inj_raw, low_memory=False)
     full_well_df.to_csv(well_b3, index=False)
     full_inj_df.to_csv(inj_b3, index=False)
-    logger.info("B3 well file: %d rows → %s", len(full_well_df), well_b3)
-    logger.info("B3 injection file: %d rows → %s", len(full_inj_df), inj_b3)
+    logger.info("B3 well file: %d rows -> %s", len(full_well_df), well_b3)
+    logger.info("B3 injection file: %d rows -> %s", len(full_inj_df), inj_b3)
 
     # ── Step 8: Run GIST pipeline (Shallow + Deep) ───────────────────────────
     verbose = 1 if args.debug else 0
@@ -598,3 +645,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

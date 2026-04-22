@@ -57,8 +57,8 @@ phi = helper.getParameterValueWithStepIndexAndParamName(3,"phi")
 nta = helper.getParameterValueWithStepIndexAndParamName(3,"nta")
 kMD = helper.getParameterValueWithStepIndexAndParamName(3,"kMD")
 h = helper.getParameterValueWithStepIndexAndParamName(3,"h")
-alphav = helper.getParameterValueWithStepIndexAndParamName(3,"alphav")
-beta = helper.getParameterValueWithStepIndexAndParamName(3,"beta")
+cppMS = helper.getParameterValueWithStepIndexAndParamName(3,"cppMS")
+betaMS = helper.getParameterValueWithStepIndexAndParamName(3,"betaMS")
 
 input = {
     "years_diff": years_diff,
@@ -74,10 +74,10 @@ input = {
         "kMD_max": float(kMD.get("max")),
         "h_min": float(h.get("min")),
         "h_max": float(h.get("max")),
-        "alphav_min": float(alphav.get("min")),
-        "alphav_max": float(alphav.get("max")),
-        "beta_min": float(beta.get("min")),
-        "beta_max": float(beta.get("max"))
+        "cppMS_min": float(cppMS.get("min")),
+        "cppMS_max": float(cppMS.get("max")),
+        "betaMS_min": float(betaMS.get("min")),
+        "betaMS_max": float(betaMS.get("max"))
     },
     "eq": formattedEarthquake
 }
@@ -89,7 +89,7 @@ else:
     wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
     injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
 
-smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF = runGistCore(input, wellcsv, injectioncsv)
+smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
 
 if disaggregationDF.empty:
     helper.addMessageWithStepIndex(4, "No Wells Found.", 2)
@@ -102,6 +102,7 @@ else:
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPSpaghettiDF_forecast", totalPPSpaghettiDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellPPQuantilesDF_forecast", allPerWellPPQuantilesDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellPPSpaghettiDF_forecast", allPerWellPPSpaghettiDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellDisposalDF_forecast", allPerWellDisposalDF)
 
     helper.setSuccessForStepIndex(4, True)
 

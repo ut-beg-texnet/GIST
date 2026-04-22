@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 from io import StringIO
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Optional, List, Union
 
 import numpy as np
 import pandas as pd
@@ -33,6 +34,8 @@ import urllib3
 
 import credentials
 import injectionV3 as inj3
+from injection_id_utils import normalize_uic_string, apply_uic_normalization
+from permian_subbasin import print_permian_basins_for_wells
 
 # Suppress SSL warnings (TexNet API uses self-signed cert)
 requests.packages.urllib3.disable_warnings(
@@ -81,7 +84,7 @@ def resolve_path(target_dir: Path, basename: str, dev: bool) -> Path:
 
     Example:
         resolve_path(Path('./src/data'), 'disposal_well.csv', dev=True)
-        → Path('./src/data/disposal_well_dev.csv')
+        -> Path('./src/data/disposal_well_dev.csv')
     """
     if dev:
         stem, ext = basename.rsplit(".", 1)
@@ -93,7 +96,7 @@ def resolve_path(target_dir: Path, basename: str, dev: bool) -> Path:
 # API helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def authenticate(username: str, password: str, auth_url: str) -> str | None:
+def authenticate(username: str, password: str, auth_url: str) -> Optional[str]:
     """
     Authenticate with the TexNet API and return a bearer token.
     Returns None and logs an error on failure.
@@ -120,7 +123,7 @@ def fetch_data(
     data=None,
     json_payload=None,
     params=None,
-) -> str | None:
+) -> Optional[str]:
     """
     Fetch CSV text from the TexNet API endpoint.
     Returns the raw response text, or None on failure.
@@ -158,13 +161,21 @@ def fetch_data(
 def update_well_csv(api_text: str, path: Path) -> pd.DataFrame:
     """
     Merge newly fetched well data with the existing CSV (if present).
-    Deduplicates on 'Id'; the API value wins on conflict (kept last).
+    Deduplicates on 'Uicnumber'; the API value wins on conflict (kept last).
     Saves the merged result back to path and returns the DataFrame.
     """
-    new_df = pd.read_csv(StringIO(api_text), low_memory=False)
+    new_df = pd.read_csv(
+        StringIO(api_text),
+        dtype={"Uicnumber": str, "Apinumber": str, "Id": int},
+        low_memory=False,
+    )
 
     if path.exists():
-        existing_df = pd.read_csv(path, low_memory=False)
+        existing_df = pd.read_csv(
+            path,
+            dtype={"Uicnumber": str, "Apinumber": str, "Id": int},
+            low_memory=False,
+        )
         logger.debug("Loaded %d existing well rows from %s", len(existing_df), path)
         combined = pd.concat([existing_df, new_df], ignore_index=True)
     else:
@@ -172,22 +183,35 @@ def update_well_csv(api_text: str, path: Path) -> pd.DataFrame:
         combined = new_df
 
     # Keep last occurrence so the fresh API value wins
-    combined.drop_duplicates(subset=["Id"], keep="last", inplace=True)
+    combined = apply_uic_normalization(combined, ["Uicnumber"])
+    combined.drop_duplicates(subset=["Uicnumber"], keep="last", inplace=True)
     combined.to_csv(path, index=False)
-    logger.info("Well CSV updated: %d wells → %s", len(combined), path)
+    logger.info("Well CSV updated: %d wells -> %s", len(combined), path)
     return combined
 
 
 def update_inj_csv(api_text: str, path: Path) -> None:
     """
     Merge newly fetched injection data with the existing CSV (if present).
-    Deduplicates on ('Id', 'Date of Injection'); API value wins.
+    Deduplicates on ('Uicnumber', 'Date of Injection'); API value wins.
     Saves the merged result back to path.
     """
-    new_df = pd.read_csv(StringIO(api_text), low_memory=False)
+    new_df = pd.read_csv(
+        StringIO(api_text),
+        dtype={"UIC Number": str, "Id": int},
+        low_memory=False,
+    )
+    # The TexNet API returns 'UIC Number' in the export, but we want to use 'Uicnumber'
+    # for consistency with the well list and internal mapping.
+    if "UIC Number" in new_df.columns:
+        new_df.rename(columns={"UIC Number": "Uicnumber"}, inplace=True)
 
     if path.exists():
-        existing_df = pd.read_csv(path, low_memory=False)
+        existing_df = pd.read_csv(
+            path,
+            dtype={"Uicnumber": str, "Id": int},
+            low_memory=False,
+        )
         logger.debug("Loaded %d existing injection rows from %s", len(existing_df), path)
         combined = pd.concat([existing_df, new_df], ignore_index=True)
     else:
@@ -195,11 +219,12 @@ def update_inj_csv(api_text: str, path: Path) -> None:
         combined = new_df
 
     before = len(combined)
+    combined = apply_uic_normalization(combined, ["Uicnumber"])
     combined.drop_duplicates(
-        subset=["Id", "Date of Injection"], keep="last", inplace=True
+        subset=["Uicnumber", "Date of Injection"], keep="last", inplace=True
     )
     logger.info(
-        "Injection CSV updated: %d rows (removed %d duplicates) → %s",
+        "Injection CSV updated: %d rows (removed %d duplicates) -> %s",
         len(combined), before - len(combined), path,
     )
     combined.to_csv(path, index=False)
@@ -210,9 +235,8 @@ def update_inj_csv(api_text: str, path: Path) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 WELL_HEADER_MAP = {
-    "Id": "InjectionWellId",
+    "Uicnumber": "InjectionWellId",
     "Apinumber": "APINumber",
-    "Uicnumber": "UICNumber",
     "SurfaceLatitude": "SurfaceHoleLatitude",
     "SurfaceLongitude": "SurfaceHoleLongitude",
     "OriginalPermitDate": "WellActivatedDate",
@@ -223,7 +247,7 @@ WELL_HEADER_MAP = {
 }
 
 INJ_HEADER_MAP = {
-    "Id": "InjectionWellId",
+    "Uicnumber": "InjectionWellId",
     "Date of Injection": "Date",
     "Volume Injected (BBLs)": "InjectedLiquidBBL",
 }
@@ -237,25 +261,59 @@ def well_to_b3_format(input_path: Path, output_path: Path) -> None:
     Transform raw well CSV to B3 format.
     Combines LeaseName + WellNumber into WellName, renames columns.
     """
-    df = pd.read_csv(input_path, low_memory=False)
+    df = pd.read_csv(
+        input_path,
+        dtype={"Uicnumber": str, "Apinumber": str, "Id": int},
+        low_memory=False,
+    )
     df["WellName"] = df["LeaseName"].astype(str) + " " + df["WellNumber"].astype(str)
     df.drop(columns=["LeaseName", "WellNumber"], inplace=True)
+    _raw_permit = df.get("OriginalPermitDate", pd.Series(dtype=str))
     df.rename(columns=WELL_HEADER_MAP, inplace=True)
+    df["InjectionWellId"] = df["InjectionWellId"].apply(normalize_uic_string)
+    df["UICNumber"] = df["InjectionWellId"]
+    if "WellActivatedDate" in df.columns:
+        _null_mask = df["WellActivatedDate"].isna()
+        _n_null = _null_mask.sum()
+        logger.debug(
+            "WellActivatedDate (OriginalPermitDate): %d/%d wells have null date",
+            _n_null, len(df),
+        )
+        if _n_null > 0:
+            _bad_counts = _raw_permit[_null_mask.values].value_counts(dropna=False).head(10)
+            logger.debug("  OriginalPermitDate value_counts (top 10): %s", _bad_counts.to_dict())
+
+    # Console-only Permian sub-basin (shapefile point-in-polygon); does not modify `df` before write
+    try:
+        print_permian_basins_for_wells(
+            df["InjectionWellId"],
+            df["SurfaceHoleLatitude"],
+            df["SurfaceHoleLongitude"],
+        )
+    except Exception as exc:
+        logger.warning("Permian sub-basin reporting skipped: %s", exc)
+
     df.to_csv(output_path, index=False)
-    logger.info("B3 well file written: %d rows → %s", len(df), output_path)
+    logger.info("B3 well file written: %d rows -> %s", len(df), output_path)
 
 
 def inj_to_b3_format(input_path: Path, output_path: Path) -> None:
     """Transform raw injection CSV to B3 format (column rename only)."""
-    df = pd.read_csv(input_path, low_memory=False)
+    df = pd.read_csv(
+        input_path,
+        dtype={"Uicnumber": str, "Id": int},
+        low_memory=False,
+    )
     df.rename(columns=INJ_HEADER_MAP, inplace=True)
+    df["InjectionWellId"] = df["InjectionWellId"].apply(normalize_uic_string)
     df.to_csv(output_path, index=False)
-    logger.info("B3 injection file written: %d rows → %s", len(df), output_path)
+    logger.info("B3 injection file written: %d rows -> %s", len(df), output_path)
 
 
 def reformat_well_id_column(path: Path) -> None:
-    """Rename 'InjectionWellId' → 'ID' in an already-written GIST well file (in place)."""
-    df = pd.read_csv(path, low_memory=False)
+    """Rename 'InjectionWellId' -> 'ID' in an already-written GIST well file (in place)."""
+    df = pd.read_csv(path, dtype={"InjectionWellId": str}, low_memory=False)
+    df["InjectionWellId"] = df["InjectionWellId"].apply(normalize_uic_string)
     df.rename(columns=GIST_WELL_MAP, inplace=True)
     df.to_csv(path, index=False)
 
@@ -275,7 +333,7 @@ def run_gist_pipeline(
     verbose: int,
 ) -> None:
     """
-    Run the full injTX → inj → processRates → outputReg pipeline for one
+    Run the full injTX -> inj -> processRates -> outputReg pipeline for one
     depth class (Shallow or Deep).
 
     Parameters
@@ -304,7 +362,7 @@ def run_gist_pipeline(
     logger.debug("%s: processRates complete", depth_label)
 
     wells.outputReg(str(inj_file), verbose=verbose)
-    logger.info("%s GIST files written: wells → %s | injection → %s", depth_label, well_file, inj_file)
+    logger.info("%s GIST files written: wells -> %s | injection -> %s", depth_label, well_file, inj_file)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -342,7 +400,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def backup_files(files: list[Path], backup_dir: Path) -> None:
+def backup_files(files: List[Path], backup_dir: Path) -> None:
     """
     Copy a list of files to the backup directory.
     Overwrites existing files in the backup directory.
@@ -425,12 +483,16 @@ def main() -> None:
         sys.exit(1)
 
     # Filter out wells with invalid coordinates before merging
-    raw_well_df = pd.read_csv(StringIO(well_text), low_memory=False)
+    raw_well_df = pd.read_csv(
+        StringIO(well_text),
+        dtype={"Uicnumber": str, "Apinumber": str, "Id": int},
+        low_memory=False,
+    )
     valid_wells = raw_well_df[
         (raw_well_df["SurfaceLatitude"] != 0) & (raw_well_df["SurfaceLongitude"] != 0)
     ]
     logger.info(
-        "Well filter: %d total → %d with valid coordinates",
+        "Well filter: %d total -> %d with valid coordinates",
         len(raw_well_df), len(valid_wells),
     )
     well_df = update_well_csv(valid_wells.to_csv(index=False), well_raw)

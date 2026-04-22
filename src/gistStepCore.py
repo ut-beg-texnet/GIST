@@ -54,19 +54,12 @@ def runGistCore(input, wellcsv, injectioncsv):
 
     # if scenarioDF is empty then we need to abort
     if scenarioDF.empty:
-        return smallPPDF, smallWellList, scenarioDF, [], [], [] ,[], []
+        return smallPPDF, smallWellList, scenarioDF, [], [], [] ,[], [], pd.DataFrame()
 
-    dPCutoff=0.5
-    filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
-    if len(orderedWellList) > 20:
-        dPCutoff=1
-        filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
-        if len(orderedWellList) > 20:
-            dPCutoff=5
-            filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
-            if len(orderedWellList) > 20:
-                dPCutoff=10
-                filteredDF,orderedWellList = summarizePPResults(scenarioDF,currentWellsDF,dPCutoff,nOrder=nWells)
+    for dPCutoff in [0.5, 1, 5, 10]:
+        filteredDF, orderedWellList = summarizePPResults(scenarioDF, currentWellsDF, dPCutoff, nOrder=nWells)
+        if len(orderedWellList) <= 20:
+            break
   
     disaggregationDF = prepDisaggregationPlot(filteredDF,orderedWellList,jitter=0.1)
 
