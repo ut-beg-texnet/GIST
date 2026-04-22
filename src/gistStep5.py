@@ -57,8 +57,8 @@ phi = helper.getParameterValueWithStepIndexAndParamName(3,"phi")
 nta = helper.getParameterValueWithStepIndexAndParamName(3,"nta")
 kMD = helper.getParameterValueWithStepIndexAndParamName(3,"kMD")
 h = helper.getParameterValueWithStepIndexAndParamName(3,"h")
-alphav = helper.getParameterValueWithStepIndexAndParamName(3,"alphav")
-beta = helper.getParameterValueWithStepIndexAndParamName(3,"beta")
+cppMS = helper.getParameterValueWithStepIndexAndParamName(3,"cppMS")
+betaMS = helper.getParameterValueWithStepIndexAndParamName(3,"betaMS")
 
 input = {
     "years_diff": years_diff,
@@ -74,10 +74,10 @@ input = {
         "kMD_max": float(kMD.get("max")),
         "h_min": float(h.get("min")),
         "h_max": float(h.get("max")),
-        "alphav_min": float(alphav.get("min")),
-        "alphav_max": float(alphav.get("max")),
-        "beta_min": float(beta.get("min")),
-        "beta_max": float(beta.get("max"))
+        "cppMS_min": float(cppMS.get("min")),
+        "cppMS_max": float(cppMS.get("max")),
+        "betaMS_min": float(betaMS.get("min")),
+        "betaMS_max": float(betaMS.get("max"))
     },
     "eq": formattedEarthquake
 }

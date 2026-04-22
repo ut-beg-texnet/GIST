@@ -52,3 +52,4 @@ test_data/
 
 /src/injection/inspect_shapefiles.py
 /src/injection/basement_permian/
+/src/data/texnet_injection_data.csv

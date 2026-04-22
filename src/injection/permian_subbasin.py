@@ -170,8 +170,8 @@ def print_permian_basins_for_wells(
     if not injection_well_ids.index.equals(lat.index):
         raise ValueError("injection_well_ids must align with lat/lon index")
 
-    for wid, basin in zip(injection_well_ids.astype(str), labels):
-        print(f"{wid}\t{basin}")
+    #for wid, basin in zip(injection_well_ids.astype(str), labels):
+    #    print(f"{wid}\t{basin}")
 
     if log_summary:
         vc = labels.value_counts()
