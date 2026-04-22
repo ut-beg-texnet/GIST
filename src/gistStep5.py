@@ -97,6 +97,13 @@ if disaggregationDF.empty:
 else:
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF_forecast", smallPPDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_forecast", smallWellList)
+
+    # Calculate cutoff for R-T Plot
+    max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance'].max()
+    rt_plot_cutoff = max_dist_max_diff * 3
+    smallWellList_r_t_plot_forecast = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_r_t_plot_forecast", smallWellList_r_t_plot_forecast)
+
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF_forecast", disaggregationDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF_forecast", totalPPQuantilesDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPSpaghettiDF_forecast", totalPPSpaghettiDF)
