@@ -50,6 +50,8 @@ if eventType == 'Earthquake':
         "EventID": Earthquake.get("EventID")
     }
 
+
+
 if eventType == 'Scenario':
 
     scenarioLoc = helper.getParameterValueWithStepIndexAndParamName(0,"scenarioLoc")
@@ -131,6 +133,7 @@ rt_plot_cutoff = max_dist_max_diff * 3
 
 # Filter the dataset
 smallWellList_r_t_plot = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
+smallWellList_r_t_plot = smallWellList_r_t_plot.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
 
 
 

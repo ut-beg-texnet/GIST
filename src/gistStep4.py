@@ -95,6 +95,7 @@ smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF,
 max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance'].max()
 rt_plot_cutoff = max_dist_max_diff * 3
 smallWellList_r_t_plot_updated = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
+smallWellList_r_t_plot_updated = smallWellList_r_t_plot_updated.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
 
 # for testing, check the length of the allPerWellDisposalDF and its column names
 if allPerWellDisposalDF is not None:
@@ -120,10 +121,13 @@ else:
         right_on='ID',
         how='right'
     )
+    # Fill missing permit max with 0 before capping. RRC wells from injection_updater_v5
+    # already use 0; TexNet wells retain permit values where present.
+    permitted_rate = orderedWellList['PermittedMaxLiquidBPD'].fillna(0)
     orderedWellList['Proposed Future Rate (BPD)'] = np.where(
-    orderedWellList['PermittedMaxLiquidBPD'] < 10000,
-    orderedWellList['PermittedMaxLiquidBPD'],  # Use PermittedMaxLiquidBPD if it's less
-    10000  # Otherwise, use 10000
+        permitted_rate < 10000,
+        permitted_rate,  # Use permit max if it is below the standard cap
+        10000
     )
     orderedWellListWithFutureRates = orderedWellList.drop(orderedWellList.index[-1])
 

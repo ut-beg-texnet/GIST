@@ -69,6 +69,9 @@ SOCRATA_PAGE_SIZE   = 10_000
 # Feet threshold separating Shallow from Deep wells
 DEPTH_CUTOFF_FT = 7000.0
 
+# Cap detailed debug samples so bad upstream data does not flood the log.
+DEBUG_PARSE_SAMPLE_LIMIT = 12
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging
 # ──────────────────────────────────────────────────────────────────────────────
@@ -137,28 +140,258 @@ def backup_files(files: List[Path], backup_dir: Path) -> None:
             logger.debug("Skipping backup for missing file: %s", f)
 
 
-def _to_numeric_safe(series: pd.Series, default=0) -> pd.Series:
-    """Coerce a series to numeric, filling errors/NaN with `default`."""
-    return pd.to_numeric(series, errors="coerce").fillna(default)
+def _coerce_to_series(values, index=None) -> pd.Series:
+    """Return values as a Series while preserving the caller's index when possible."""
+    if isinstance(values, pd.Series):
+        return values.copy()
+    if index is None:
+        return pd.Series(values)
+    return pd.Series(values, index=index)
 
 
-def _parse_date_to_b3(series: pd.Series) -> pd.Series:
+def _build_record_labels(df: pd.DataFrame, candidate_cols: List[str]) -> pd.Series:
     """
-    Parse ISO-8601 / floating_timestamp strings to 'MM-DD-YYYY' (B3 format).
-    Unparseable values default to '01-01-1970'.
-    """
-    def _convert(val):
-        if pd.isnull(val) or str(val).strip() == "":
-            return "01-01-1970"
-        try:
-            dt = pd.to_datetime(val, errors="coerce")
-            if pd.isnull(dt):
-                return "01-01-1970"
-            return dt.strftime("%m-%d-%Y")
-        except Exception:
-            return "01-01-1970"
+    Build a compact per-row label so debug logs can point back to the source row.
 
-    return series.apply(_convert)
+    The first non-empty candidate column wins; if none are present, a row index
+    label is used instead.
+    """
+    labels = pd.Series("", index=df.index, dtype="object")
+    for col in candidate_cols:
+        if col not in df.columns:
+            continue
+        values = df[col].fillna("").astype(str).str.strip()
+        valid = values.ne("") & values.str.lower().ne("nan")
+        fill_mask = labels.eq("") & valid
+        labels.loc[fill_mask] = f"{col}=" + values.loc[fill_mask]
+    fallback = pd.Series([f"row#{idx}" for idx in df.index], index=df.index, dtype="object")
+    return labels.mask(labels.eq(""), fallback)
+
+
+def _format_debug_value(value) -> str:
+    """Render a compact debug-safe representation of a raw value."""
+    if pd.isna(value):
+        return "<NA>"
+    text = str(value).strip()
+    if text == "":
+        return '""'
+    return repr(text)
+
+
+def _log_masked_samples(
+    *,
+    context: str,
+    field_name: str,
+    row_labels: Optional[pd.Series],
+    raw_series: pd.Series,
+    mask: pd.Series,
+    issue_label: str,
+    default_value=None,
+) -> None:
+    """
+    Emit a capped DEBUG log with sample rows for a parsing/defaulting issue.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+
+    mask = _coerce_to_series(mask, index=raw_series.index).fillna(False).astype(bool)
+    count = int(mask.sum())
+    if count == 0:
+        return
+    total = len(mask)
+    pct = (100.0 * count / total) if total else 0.0
+
+    labels = (
+        _coerce_to_series(row_labels, index=raw_series.index)
+        if row_labels is not None
+        else pd.Series([f"row#{idx}" for idx in raw_series.index], index=raw_series.index, dtype="object")
+    )
+    samples_df = pd.DataFrame(
+        {
+            "label": labels,
+            "raw": raw_series.astype("object"),
+        },
+        index=raw_series.index,
+    )[mask].head(DEBUG_PARSE_SAMPLE_LIMIT)
+
+    sample_text = "; ".join(
+        f"{row.label} raw={_format_debug_value(row.raw)}"
+        for row in samples_df.itertuples()
+    )
+    default_suffix = f" -> defaulted to {default_value!r}" if default_value is not None else ""
+    logger.debug(
+        "%s: field '%s' had %d/%d %s value(s) (%.1f%%)%s. Sample rows: %s",
+        context,
+        field_name,
+        count,
+        total,
+        issue_label,
+        pct,
+        default_suffix,
+        sample_text,
+    )
+
+
+def _log_missing_required_columns(df: pd.DataFrame, required_cols: List[str], context: str) -> None:
+    """
+    Raise a clear error when a required upstream column is absent.
+    """
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        available = ", ".join(sorted(df.columns.tolist())[:25])
+        raise ValueError(
+            f"{context} missing required columns: {missing}. "
+            f"Available columns sample: {available}"
+        )
+
+
+def _to_numeric_safe(
+    series: pd.Series,
+    default=0,
+    *,
+    field_name: str = "unknown",
+    context: str = "dataset",
+    row_labels: Optional[pd.Series] = None,
+) -> pd.Series:
+    """
+    Coerce a series to numeric, logging invalid or missing values in DEBUG mode.
+    """
+    raw = _coerce_to_series(series)
+    stripped = raw.astype("object").astype(str).str.strip()
+    missing_mask = raw.isna() | stripped.eq("") | stripped.str.lower().eq("nan")
+    parsed = pd.to_numeric(raw, errors="coerce")
+    invalid_mask = parsed.isna() & ~missing_mask
+
+    _log_masked_samples(
+        context=context,
+        field_name=field_name,
+        row_labels=row_labels,
+        raw_series=raw,
+        mask=invalid_mask,
+        issue_label="invalid numeric",
+        default_value=default,
+    )
+    _log_masked_samples(
+        context=context,
+        field_name=field_name,
+        row_labels=row_labels,
+        raw_series=raw,
+        mask=missing_mask,
+        issue_label="missing/blank",
+        default_value=default,
+    )
+    return parsed.fillna(default)
+
+
+def _parse_date_to_b3(
+    series: pd.Series,
+    *,
+    field_name: str = "unknown",
+    context: str = "dataset",
+    row_labels: Optional[pd.Series] = None,
+    default_date: str = "01-01-1970",
+) -> pd.Series:
+    """
+    Parse date-like values to 'MM-DD-YYYY', logging rows that defaulted.
+    """
+    raw = _coerce_to_series(series)
+    stripped = raw.astype("object").astype(str).str.strip()
+    missing_mask = raw.isna() | stripped.eq("") | stripped.str.lower().eq("nan")
+    parsed = pd.to_datetime(raw, errors="coerce")
+    invalid_mask = parsed.isna() & ~missing_mask
+
+    _log_masked_samples(
+        context=context,
+        field_name=field_name,
+        row_labels=row_labels,
+        raw_series=raw,
+        mask=invalid_mask,
+        issue_label="invalid date",
+        default_value=default_date,
+    )
+    _log_masked_samples(
+        context=context,
+        field_name=field_name,
+        row_labels=row_labels,
+        raw_series=raw,
+        mask=missing_mask,
+        issue_label="missing/blank",
+        default_value=default_date,
+    )
+
+    formatted = parsed.dt.strftime("%m-%d-%Y")
+    return formatted.fillna(default_date)
+
+
+def _normalize_uic_series(
+    series: pd.Series,
+    *,
+    field_name: str,
+    context: str,
+    row_labels: Optional[pd.Series] = None,
+) -> pd.Series:
+    """
+    Normalize UIC-like identifiers and log rows that collapse to blank IDs.
+    """
+    raw = _coerce_to_series(series)
+    normalized = raw.apply(normalize_uic_string)
+    blank_mask = normalized.eq("")
+    _log_masked_samples(
+        context=context,
+        field_name=field_name,
+        row_labels=row_labels,
+        raw_series=raw,
+        mask=blank_mask,
+        issue_label="missing/blank identifier",
+    )
+    return normalized
+
+
+def _filter_critical_columns(
+    df: pd.DataFrame,
+    columns: List[str],
+    context: str,
+    row_labels: pd.Series,
+    is_date: bool = False,
+) -> pd.DataFrame:
+    """
+    Filter out rows with missing or invalid values in critical columns.
+    Returns the filtered DataFrame.
+    """
+    drop_mask = pd.Series(False, index=df.index)
+    for col in columns:
+        if col not in df.columns:
+            continue
+        raw = df[col]
+        if is_date:
+            parsed = pd.to_datetime(raw, errors="coerce")
+            bad = parsed.isna()
+        else:
+            parsed = pd.to_numeric(raw, errors="coerce")
+            bad = parsed.isna() | (parsed == 0)
+
+        _log_masked_samples(
+            context=context,
+            field_name=col,
+            row_labels=row_labels,
+            raw_series=raw,
+            mask=bad,
+            issue_label="excluded (missing/invalid)",
+        )
+        drop_mask |= bad
+
+    before = len(df)
+    df = df[~drop_mask].copy()
+    if before > len(df):
+        logger.info(
+            "%s: excluded %d/%d rows (%.1f%%) due to missing/invalid critical fields in %s.",
+            context,
+            before - len(df),
+            before,
+            100.0 * (before - len(df)) / before,
+            columns,
+        )
+    return df
 
 
 def update_csv(new_df: pd.DataFrame, path: Path, dedup_cols: List[str]) -> pd.DataFrame:
@@ -190,7 +423,11 @@ def update_csv(new_df: pd.DataFrame, path: Path, dedup_cols: List[str]) -> pd.Da
 def reformat_well_id_column(path: Path) -> None:
     """Rename 'InjectionWellId' → 'ID' in a GIST well file (in place)."""
     df = pd.read_csv(path, dtype={"InjectionWellId": str}, low_memory=False)
-    df["InjectionWellId"] = df["InjectionWellId"].apply(normalize_uic_string)
+    df["InjectionWellId"] = _normalize_uic_series(
+        df["InjectionWellId"],
+        field_name="InjectionWellId",
+        context=f"GIST well file {path.name}",
+    )
     df.rename(columns={"InjectionWellId": "ID"}, inplace=True)
     df.to_csv(path, index=False)
 
@@ -340,11 +577,85 @@ def texnet_well_to_b3(input_path: Path, output_path: Path) -> None:
         dtype={"Uicnumber": str, "Apinumber": str, "Id": int},
         low_memory=False,
     )
+    _log_missing_required_columns(
+        df,
+        [
+            "Uicnumber",
+            "Apinumber",
+            "SurfaceLatitude",
+            "SurfaceLongitude",
+            "OriginalPermitDate",
+            "TotalBpdmax",
+            "InjectionBottomInterval",
+            "InjectionTopInterval",
+            "WellClassification",
+            "LeaseName",
+            "WellNumber",
+        ],
+        "TexNet well CSV",
+    )
+    row_labels = _build_record_labels(df, ["Uicnumber", "Apinumber", "Id"])
+
+    # Exclude wells with missing coordinates or depth intervals
+    df = _filter_critical_columns(
+        df,
+        ["SurfaceLatitude", "SurfaceLongitude", "InjectionTopInterval", "InjectionBottomInterval"],
+        "TexNet wells",
+        row_labels,
+    )
+    row_labels = row_labels.loc[df.index]
+
     df["WellName"] = df["LeaseName"].astype(str) + " " + df["WellNumber"].astype(str)
     df.drop(columns=["LeaseName", "WellNumber"], errors="ignore", inplace=True)
     df.rename(columns=_TEXNET_WELL_B3_MAP, inplace=True)
-    df["InjectionWellId"] = df["InjectionWellId"].apply(normalize_uic_string)
+    df["InjectionWellId"] = _normalize_uic_series(
+        df["InjectionWellId"],
+        field_name="Uicnumber",
+        context="TexNet wells",
+        row_labels=row_labels,
+    )
     df["UICNumber"] = df["InjectionWellId"]
+    df["SurfaceHoleLatitude"] = _to_numeric_safe(
+        df["SurfaceHoleLatitude"],
+        default=0.0,
+        field_name="SurfaceLatitude",
+        context="TexNet wells",
+        row_labels=row_labels,
+    )
+    df["SurfaceHoleLongitude"] = _to_numeric_safe(
+        df["SurfaceHoleLongitude"],
+        default=0.0,
+        field_name="SurfaceLongitude",
+        context="TexNet wells",
+        row_labels=row_labels,
+    )
+    df["WellActivatedDate"] = _parse_date_to_b3(
+        df["WellActivatedDate"],
+        field_name="OriginalPermitDate",
+        context="TexNet wells",
+        row_labels=row_labels,
+    )
+    df["PermittedMaxLiquidBPD"] = _to_numeric_safe(
+        df["PermittedMaxLiquidBPD"],
+        default=0.0,
+        field_name="TotalBpdmax",
+        context="TexNet wells",
+        row_labels=row_labels,
+    )
+    df["PermittedIntervalTopFt"] = _to_numeric_safe(
+        df["PermittedIntervalTopFt"],
+        default=0.0,
+        field_name="InjectionTopInterval",
+        context="TexNet wells",
+        row_labels=row_labels,
+    )
+    df["PermittedIntervalBottomFt"] = _to_numeric_safe(
+        df["PermittedIntervalBottomFt"],
+        default=0.0,
+        field_name="InjectionBottomInterval",
+        context="TexNet wells",
+        row_labels=row_labels,
+    )
 
     try:
         print_permian_basins_for_wells(
@@ -361,14 +672,62 @@ def texnet_well_to_b3(input_path: Path, output_path: Path) -> None:
 
 def texnet_inj_to_b3(input_path: Path, output_path: Path) -> None:
     """
-    Transform raw TexNet injection CSV to B3 format (column rename only).
-    TexNet data is already daily (one row per well per day), so no division
-    is applied to InjectedLiquidBBL.
+    Transform raw TexNet injection CSV to B3 format.
+
+    Steps:
+      1. Rename columns via _TEXNET_INJ_B3_MAP.
+      2. Normalize UIC well IDs.
+      3. Reformat Date to MM-DD-YYYY (same as RRC path) so both sources are
+         consistent in the B3 injection files.
+      4. Write only the three required B3 columns to keep the file compact.
+
+    TexNet data is already daily (one row per well per day), so no rate
+    conversion is applied to InjectedLiquidBBL.
     """
     df = pd.read_csv(input_path, dtype={"Uicnumber": str, "Id": int}, low_memory=False)
+    _log_missing_required_columns(
+        df,
+        ["Uicnumber", "Date of Injection", "Volume Injected (BBLs)"],
+        "TexNet injection CSV",
+    )
+    row_labels = _build_record_labels(df, ["Uicnumber", "Id"])
+
+    # Exclude records with missing volume
+    df = _filter_critical_columns(
+        df,
+        ["Volume Injected (BBLs)"],
+        "TexNet injection",
+        row_labels,
+    )
+    row_labels = row_labels.loc[df.index]
+
     df.rename(columns=_TEXNET_INJ_B3_MAP, inplace=True)
-    df["InjectionWellId"] = df["InjectionWellId"].apply(normalize_uic_string)
-    df.to_csv(output_path, index=False)
+    df["InjectionWellId"] = _normalize_uic_series(
+        df["InjectionWellId"],
+        field_name="Uicnumber",
+        context="TexNet injection",
+        row_labels=row_labels,
+    )
+
+    # Standardize to MM-DD-YYYY so TexNet and RRC injection files share the
+    # same date format (TexNet raw dates arrive as YYYY-MM-DD ISO strings).
+    df["Date"] = _parse_date_to_b3(
+        df["Date"],
+        field_name="Date of Injection",
+        context="TexNet injection",
+        row_labels=row_labels,
+    )
+    df["InjectedLiquidBBL"] = _to_numeric_safe(
+        df["InjectedLiquidBBL"],
+        default=0.0,
+        field_name="Volume Injected (BBLs)",
+        context="TexNet injection",
+        row_labels=row_labels,
+    )
+
+    # Keep only the three B3 columns; the raw file carries 50+ extra columns
+    # (pressure, operator, lat/lon, etc.) that are never used downstream.
+    df[["InjectionWellId", "Date", "InjectedLiquidBBL"]].to_csv(output_path, index=False)
     logger.info("TexNet B3 injection file written: %d rows -> %s", len(df), output_path)
 
 
@@ -460,11 +819,33 @@ def rrc_map_wells_to_b3(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         logger.warning("RRC wells DataFrame missing expected columns: %s", missing)
 
+    row_labels = _build_record_labels(df, ["uic_number", "api_no", "lease_name"])
+
+    # Exclude wells with missing coordinates
+    df = _filter_critical_columns(
+        df,
+        ["latitude_nad83", "longitude_nad83"],
+        "RRC wells",
+        row_labels,
+    )
+    row_labels = row_labels.loc[df.index]
+
+    # Exclude wells with missing h1_date
+    df = _filter_critical_columns(
+        df,
+        ["h1_date"],
+        "RRC wells",
+        row_labels,
+        is_date=True,
+    )
+    row_labels = row_labels.loc[df.index]
+
     out = pd.DataFrame()
-    out["InjectionWellId"] = (
-        df.get("uic_number", pd.Series(dtype=str))
-        .astype(str)
-        .apply(normalize_uic_string)
+    out["InjectionWellId"] = _normalize_uic_series(
+        df.get("uic_number", pd.Series(dtype=str)).astype(str),
+        field_name="uic_number",
+        context="RRC wells",
+        row_labels=row_labels,
     )
     out["UICNumber"] = out["InjectionWellId"]
     out["APINumber"] = (
@@ -477,20 +858,41 @@ def rrc_map_wells_to_b3(df: pd.DataFrame) -> pd.DataFrame:
     out["WellName"] = (lease + " " + well_no).str.strip()
 
     out["SurfaceHoleLatitude"] = _to_numeric_safe(
-        df.get("latitude_nad83", pd.Series(dtype=float)), default=0.0
+        df.get("latitude_nad83", pd.Series(dtype=float)),
+        default=0.0,
+        field_name="latitude_nad83",
+        context="RRC wells",
+        row_labels=row_labels,
     )
     out["SurfaceHoleLongitude"] = _to_numeric_safe(
-        df.get("longitude_nad83", pd.Series(dtype=float)), default=0.0
+        df.get("longitude_nad83", pd.Series(dtype=float)),
+        default=0.0,
+        field_name="longitude_nad83",
+        context="RRC wells",
+        row_labels=row_labels,
     )
     out["WellActivatedDate"] = _parse_date_to_b3(
-        df.get("h1_date", pd.Series(dtype=str))
+        df.get("h1_date", pd.Series(dtype=str)),
+        field_name="h1_date",
+        context="RRC wells",
+        row_labels=row_labels,
     )
-    out["PermittedMaxLiquidBPD"] = 0  # Not available in this dataset
+    # RRC dataset does not include a permitted max injection rate column.
+    # TODO: If the RRC open-data portal ever exposes a max-rate field, map it here.
+    out["PermittedMaxLiquidBPD"] = 0.0
     out["PermittedIntervalTopFt"] = _to_numeric_safe(
-        df.get("top_inj_zone", pd.Series(dtype=float)), default=0.0
+        df.get("top_inj_zone", pd.Series(dtype=float)),
+        default=0.0,
+        field_name="top_inj_zone",
+        context="RRC wells",
+        row_labels=row_labels,
     ).astype(int)
     out["PermittedIntervalBottomFt"] = _to_numeric_safe(
-        df.get("bot_inj_zone", pd.Series(dtype=float)), default=0.0
+        df.get("bot_inj_zone", pd.Series(dtype=float)),
+        default=0.0,
+        field_name="bot_inj_zone",
+        context="RRC wells",
+        row_labels=row_labels,
     ).astype(int)
     out["CompletedWellDepthClassification"] = out["PermittedIntervalBottomFt"].apply(
         lambda d: "Deep" if d >= DEPTH_CUTOFF_FT else "Shallow"
@@ -530,15 +932,28 @@ def rrc_map_injection_to_b3(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         logger.warning("RRC injection DataFrame missing expected columns: %s", missing)
 
+    row_labels = _build_record_labels(df, ["uic_no", "well_no", "api_no"])
     out = pd.DataFrame()
-    out["InjectionWellId"] = (
-        df.get("uic_no", pd.Series(dtype=str))
-        .astype(str)
-        .apply(normalize_uic_string)
+    out["InjectionWellId"] = _normalize_uic_series(
+        df.get("uic_no", pd.Series(dtype=str)).astype(str),
+        field_name="uic_no",
+        context="RRC injection",
+        row_labels=row_labels,
     )
-    out["Date"] = _parse_date_to_b3(df.get("formatted_date", pd.Series(dtype=str)))
+    out["Date"] = _parse_date_to_b3(
+        df.get("formatted_date", pd.Series(dtype=str)),
+        field_name="formatted_date",
+        context="RRC injection",
+        row_labels=row_labels,
+    )
 
-    monthly_vol = _to_numeric_safe(df.get("vol_liq", pd.Series(dtype=float)), default=0.0)
+    monthly_vol = _to_numeric_safe(
+        df.get("vol_liq", pd.Series(dtype=float)),
+        default=0.0,
+        field_name="vol_liq",
+        context="RRC injection",
+        row_labels=row_labels,
+    )
 
     # Vectorized: parse the B3 date strings we just produced, then use
     # dt.days_in_month.  Unparseable originals became "01-01-1970" (January,
@@ -748,12 +1163,44 @@ def run_texnet_section(
         dtype={"Uicnumber": str, "Apinumber": str, "Id": int},
         low_memory=False,
     )
+    _log_missing_required_columns(
+        raw_well_df,
+        ["Uicnumber", "Apinumber", "Id", "SurfaceLatitude", "SurfaceLongitude"],
+        "TexNet wells API response",
+    )
+    texnet_labels = _build_record_labels(raw_well_df, ["Uicnumber", "Apinumber", "Id"])
+    texnet_lat = _to_numeric_safe(
+        raw_well_df["SurfaceLatitude"],
+        default=0.0,
+        field_name="SurfaceLatitude",
+        context="TexNet wells API response",
+        row_labels=texnet_labels,
+    )
+    texnet_lon = _to_numeric_safe(
+        raw_well_df["SurfaceLongitude"],
+        default=0.0,
+        field_name="SurfaceLongitude",
+        context="TexNet wells API response",
+        row_labels=texnet_labels,
+    )
+    invalid_coord_mask = texnet_lat.eq(0) | texnet_lon.eq(0)
+    _log_masked_samples(
+        context="TexNet wells API response",
+        field_name="SurfaceLatitude/SurfaceLongitude",
+        row_labels=texnet_labels,
+        raw_series=raw_well_df["SurfaceLatitude"].astype(str) + ", " + raw_well_df["SurfaceLongitude"].astype(str),
+        mask=invalid_coord_mask,
+        issue_label="rejected zero/invalid coordinate",
+    )
     valid_wells = raw_well_df[
-        (raw_well_df["SurfaceLatitude"] != 0) & (raw_well_df["SurfaceLongitude"] != 0)
-    ]
+        texnet_lat.ne(0) & texnet_lon.ne(0)
+    ].copy()
+    valid_wells["SurfaceLatitude"] = texnet_lat.loc[valid_wells.index]
+    valid_wells["SurfaceLongitude"] = texnet_lon.loc[valid_wells.index]
     logger.info(
-        "TexNet well filter: %d total → %d with valid coordinates",
-        len(raw_well_df), len(valid_wells),
+        "TexNet well filter: %d total fetched → %d with valid coordinates",
+        len(raw_well_df),
+        len(valid_wells),
     )
     well_df = texnet_update_well_csv(valid_wells.to_csv(index=False), tx_well_raw)
 
@@ -840,14 +1287,39 @@ def run_rrc_section(
     if raw_rrc_wells is None or raw_rrc_wells.empty:
         raise RuntimeError("No RRC well data returned.")
 
-    lat = pd.to_numeric(raw_rrc_wells.get("latitude_nad83"), errors="coerce")
-    lon = pd.to_numeric(raw_rrc_wells.get("longitude_nad83"), errors="coerce")
+    rrc_labels = _build_record_labels(raw_rrc_wells, ["uic_number", "api_no", "lease_name"])
+    lat = _to_numeric_safe(
+        raw_rrc_wells.get("latitude_nad83"),
+        default=0.0,
+        field_name="latitude_nad83",
+        context="RRC wells API response",
+        row_labels=rrc_labels,
+    )
+    lon = _to_numeric_safe(
+        raw_rrc_wells.get("longitude_nad83"),
+        default=0.0,
+        field_name="longitude_nad83",
+        context="RRC wells API response",
+        row_labels=rrc_labels,
+    )
+    invalid_rrc_coord_mask = lat.eq(0) | lon.eq(0)
+    _log_masked_samples(
+        context="RRC wells API response",
+        field_name="latitude_nad83/longitude_nad83",
+        row_labels=rrc_labels,
+        raw_series=raw_rrc_wells.get("latitude_nad83", pd.Series(index=raw_rrc_wells.index, dtype="object")).astype(str)
+        + ", "
+        + raw_rrc_wells.get("longitude_nad83", pd.Series(index=raw_rrc_wells.index, dtype="object")).astype(str),
+        mask=invalid_rrc_coord_mask,
+        issue_label="rejected zero/invalid coordinate",
+    )
     valid_rrc_wells = raw_rrc_wells[
-        lat.notna() & lon.notna() & (lat != 0) & (lon != 0)
+        lat.ne(0) & lon.ne(0)
     ].copy()
     logger.info(
-        "RRC well filter: %d total → %d with valid coordinates",
-        len(raw_rrc_wells), len(valid_rrc_wells),
+        "RRC well filter: %d total fetched → %d with valid coordinates",
+        len(raw_rrc_wells),
+        len(valid_rrc_wells),
     )
 
     logger.info("RRC Step 2: Mapping well data to B3 format…")
