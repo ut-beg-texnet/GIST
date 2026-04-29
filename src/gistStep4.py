@@ -121,9 +121,9 @@ else:
         right_on='ID',
         how='right'
     )
-    # Fill missing permit max with 0 before capping. RRC wells from injection_updater_v5
-    # already use 0; TexNet wells retain permit values where present.
-    permitted_rate = orderedWellList['PermittedMaxLiquidBPD'].fillna(0)
+    # Normalize so exported CSV / portal validation never receives null in this column.
+    orderedWellList["PermittedMaxLiquidBPD"] = orderedWellList["PermittedMaxLiquidBPD"].fillna(0.0)
+    permitted_rate = orderedWellList["PermittedMaxLiquidBPD"]
     orderedWellList['Proposed Future Rate (BPD)'] = np.where(
         permitted_rate < 10000,
         permitted_rate,  # Use permit max if it is below the standard cap
