@@ -1,15 +1,11 @@
 import urllib3
 import requests
-import json
-import numpy as np
 from pandas import Timestamp
 import pandas as pd
-import matplotlib.colors as mcolors
 # from pandas import DataFrame
 import sys
 import os
 import time
-import pathlib
 
 from datetime import datetime
 from math import ceil
@@ -17,6 +13,14 @@ from math import ceil
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
+from gist_graphs import (
+    save_pressure_ranges_graph_artifact,
+    save_rt_plot_graph_artifact,
+    save_time_series_quantiles_graph_artifact,
+    save_time_series_quantiles_per_well_graph_artifact,
+    save_time_series_spaghetti_graph_artifact,
+    save_time_series_spaghetti_per_well_graph_artifact,
+)
 
 
 scratchPath = sys.argv[1]
@@ -49,6 +53,8 @@ if eventType == 'Earthquake':
         "Origin Date": formatted_date,
         "EventID": Earthquake.get("EventID")
     }
+
+
 
 if eventType == 'Scenario':
 
@@ -131,6 +137,7 @@ rt_plot_cutoff = max_dist_max_diff * 3
 
 # Filter the dataset
 smallWellList_r_t_plot = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
+smallWellList_r_t_plot = smallWellList_r_t_plot.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
 
 
 
@@ -146,13 +153,52 @@ else:
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPQuantilesDF", totalPPQuantilesDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "totalPPSpaghettiDF", totalPPSpaghettiDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "allPerWellPPQuantilesDF", allPerWellPPQuantilesDF)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "allPerWellPPSpaghettiDF", allPerWellPPSpaghettiDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "allPerWellPPSpaghettiDF", allPerWellPPSpaghettiDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "allPerWellDisposalDF", allPerWellDisposalDF)
 
     GISTWells = pd.read_csv(wellcsv)
     GISTInjection = pd.read_csv(injectioncsv)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTWells-corrections", GISTWells)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTInjection-corrections", GISTInjection)
+    save_rt_plot_graph_artifact(
+        helper,
+        smallPPDF,
+        smallWellList_r_t_plot,
+        artifact_key="gist-analysis-r-t-plot",
+        display_order=10,
+    )
+    save_pressure_ranges_graph_artifact(
+        helper,
+        disaggregationDF,
+        artifact_key="gist-analysis-pressure-ranges",
+        display_order=20,
+    )
+    save_time_series_quantiles_graph_artifact(
+        helper,
+        totalPPQuantilesDF,
+        artifact_key="gist-analysis-time-series-quantiles",
+        display_order=30,
+    )
+    save_time_series_spaghetti_graph_artifact(
+        helper,
+        totalPPSpaghettiDF,
+        artifact_key="gist-analysis-time-series-spaghetti",
+        display_order=40,
+    )
+    save_time_series_quantiles_per_well_graph_artifact(
+        helper,
+        allPerWellPPQuantilesDF,
+        allPerWellDisposalDF,
+        artifact_key="gist-analysis-time-series-quantiles-per-well",
+        display_order=50,
+    )
+    save_time_series_spaghetti_per_well_graph_artifact(
+        helper,
+        allPerWellPPSpaghettiDF,
+        allPerWellDisposalDF,
+        artifact_key="gist-analysis-time-series-spaghetti-per-well",
+        display_order=60,
+    )
 
     #Since step 0 doesnt have business logic set its sucess to true.
     helper.setSuccessForStepIndex(0, True)

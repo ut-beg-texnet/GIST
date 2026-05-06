@@ -17,6 +17,33 @@ from math import ceil
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
+from gist_graphs import (
+    save_pressure_ranges_graph_artifact,
+    save_rt_plot_graph_artifact,
+    save_time_series_quantiles_graph_artifact,
+    save_time_series_quantiles_per_well_graph_artifact,
+    save_time_series_spaghetti_graph_artifact,
+    save_time_series_spaghetti_per_well_graph_artifact,
+)
+
+
+def get_corrected_gist_data_paths(helper, well_type):
+    wellcsv = helper.getDatasetFilePathWithStepIndexAndParamName(2, "GISTWells")
+    injectioncsv = helper.getDatasetFilePathWithStepIndexAndParamName(2, "GISTInjection")
+
+    if wellcsv is not None and injectioncsv is not None:
+        return wellcsv, injectioncsv
+
+    if well_type == 'Shallow':
+        return (
+            'C:/texnetwebtools/tools/GIST/src/data/gist_well_shallow.csv',
+            'C:/texnetwebtools/tools/GIST/src/data/gist_injection_shallow.csv',
+        )
+
+    return (
+        'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv',
+        'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv',
+    )
 
 
 scratchPath = sys.argv[1]
@@ -82,12 +109,7 @@ input = {
     "eq": formattedEarthquake
 }
 
-if wellType == 'Shallow':
-    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_shallow.csv'
-    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_shallow.csv'
-else:
-    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
-    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
+wellcsv, injectioncsv = get_corrected_gist_data_paths(helper, wellType)
 
 smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
 
@@ -95,6 +117,7 @@ smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF,
 max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance'].max()
 rt_plot_cutoff = max_dist_max_diff * 3
 smallWellList_r_t_plot_updated = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
+smallWellList_r_t_plot_updated = smallWellList_r_t_plot_updated.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
 
 # for testing, check the length of the allPerWellDisposalDF and its column names
 if allPerWellDisposalDF is not None:
@@ -107,10 +130,6 @@ if disaggregationDF.empty:
     helper.addMessageWithStepIndex(3, "No Wells Found.", 2)
     helper.setSuccessForStepIndex(3, False)
 else:
-    if wellType == 'Shallow':
-        wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_shallow.csv'
-    else:
-        wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
     # orderedWellList with proposed Future Rate initalize at 10000
     originalWellDF = pd.read_csv(wellcsv)
     orderedWellList = pd.DataFrame(orderedWellList, columns=['ID'])
@@ -118,25 +137,69 @@ else:
         originalWellDF[['ID', 'WellName', 'PermittedMaxLiquidBPD']],
         left_on='ID',
         right_on='ID',
-        how='right'
+        how='left'
     )
+    # Normalize so exported CSV / portal validation never receives null in this column.
+    orderedWellList["PermittedMaxLiquidBPD"] = orderedWellList["PermittedMaxLiquidBPD"].fillna(0.0)
+    permitted_rate = orderedWellList["PermittedMaxLiquidBPD"]
     orderedWellList['Proposed Future Rate (BPD)'] = np.where(
-    orderedWellList['PermittedMaxLiquidBPD'] < 10000,
-    orderedWellList['PermittedMaxLiquidBPD'],  # Use PermittedMaxLiquidBPD if it's less
-    10000  # Otherwise, use 10000
+        permitted_rate < 10000,
+        permitted_rate,  # Use permit max if it is below the standard cap
+        10000
     )
     orderedWellListWithFutureRates = orderedWellList.drop(orderedWellList.index[-1])
 
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF_updated", smallPPDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_updated", smallWellList)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_r_t_plot_updated", smallWellList_r_t_plot_updated)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "disaggregationDF_updated", disaggregationDF)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPQuantilesDF_updated", totalPPQuantilesDF)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPSpaghettiDF_updated", totalPPSpaghettiDF)
+    # D3 graph datasets temporarily disabled for matplotlib-only portal performance testing.
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_r_t_plot_updated", smallWellList_r_t_plot_updated)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "disaggregationDF_updated", disaggregationDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPQuantilesDF_updated", totalPPQuantilesDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "totalPPSpaghettiDF_updated", totalPPSpaghettiDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "orderedWellListWithFutureRates", orderedWellListWithFutureRates)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellPPQuantilesDF_updated", allPerWellPPQuantilesDF)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellPPSpaghettiDF_updated", allPerWellPPSpaghettiDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellPPQuantilesDF_updated", allPerWellPPQuantilesDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellPPSpaghettiDF_updated", allPerWellPPSpaghettiDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellDisposalDF_updated", allPerWellDisposalDF)
+
+    save_rt_plot_graph_artifact(
+        helper,
+        smallPPDF,
+        smallWellList_r_t_plot_updated,
+        artifact_key="gist-updated-r-t-plot",
+        display_order=10,
+    )
+    save_pressure_ranges_graph_artifact(
+        helper,
+        disaggregationDF,
+        artifact_key="gist-updated-pressure-ranges",
+        display_order=20,
+    )
+    save_time_series_quantiles_graph_artifact(
+        helper,
+        totalPPQuantilesDF,
+        artifact_key="gist-updated-time-series-quantiles",
+        display_order=30,
+    )
+    save_time_series_spaghetti_graph_artifact(
+        helper,
+        totalPPSpaghettiDF,
+        artifact_key="gist-updated-time-series-spaghetti",
+        display_order=40,
+    )
+    save_time_series_quantiles_per_well_graph_artifact(
+        helper,
+        allPerWellPPQuantilesDF,
+        allPerWellDisposalDF,
+        artifact_key="gist-updated-time-series-quantiles-per-well",
+        display_order=50,
+    )
+    save_time_series_spaghetti_per_well_graph_artifact(
+        helper,
+        allPerWellPPSpaghettiDF,
+        allPerWellDisposalDF,
+        artifact_key="gist-updated-time-series-spaghetti-per-well",
+        display_order=60,
+    )
 
     helper.setSuccessForStepIndex(2, True)
     helper.setSuccessForStepIndex(3, True)

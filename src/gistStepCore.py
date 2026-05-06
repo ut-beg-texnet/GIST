@@ -19,7 +19,6 @@ from gistMC import summarizePPResults
 from gistMC import prepTotalPressureTimeSeriesQuantilesPlot
 from gistMC import prepTotalPressureTimeSeriesSpaghettiPlot
 from gistMC import getPerWellPressureTimeSeriesSpaghettiAndQuantiles
-from gistMC import prepPressureAndDisposalTimeSeriesPlots
 
 def runGistCore(input, wellcsv, injectioncsv):
     # Initialize gistMC class
@@ -79,45 +78,56 @@ def runGistCore(input, wellcsv, injectioncsv):
 
     allPerWellPPQuantilesDF,allPerWellPPSpaghettiDF = getPerWellPressureTimeSeriesSpaghettiAndQuantiles(dPTimeSeriesR,dayVecR,gistMC_instance.diffPPVec,wellIDsR,nQuantiles=11,epoch=pd.to_datetime('01-01-1970'))
 
-    wellPressureDict = prepPressureAndDisposalTimeSeriesPlots(
-        allPerWellPPQuantilesDF,
-        allPerWellPPSpaghettiDF,
-        winWellsDF,
-        winInjDF,
-        orderedWellList,
-        verbose=0
-    )
+    # Preserve the existing "last duplicate well name wins" behavior from
+    # prepPressureAndDisposalTimeSeriesPlots without repeatedly slicing
+    # and copying the full spaghetti dataframe one well at a time.
+    selected_wells = []
+    seen_subgraphs = set()
+    winWellsIndexedDF = winWellsDF.set_index('ID', drop=False)
+    for wellID in reversed(orderedWellList):
+        if wellID not in winWellsIndexedDF.index:
+            continue
+        wellRow = winWellsIndexedDF.loc[wellID]
+        if isinstance(wellRow, pd.DataFrame):
+            wellRow = wellRow.iloc[0]
+        wellName = str(wellRow.get('WellName', wellID))
+        if wellName in seen_subgraphs:
+            continue
+        seen_subgraphs.add(wellName)
+        selected_wells.append({"WellID": wellID, "subgraph": wellName})
+    selected_wells.reverse()
 
-    # Build per-well dataframes with a subgraph key from the dict keys.
-    perWellQuantiles = []
-    perWellSpaghetti = []
-    perWellDisposal = []
-    for wellKey, wellDict in wellPressureDict.items():
-        quantilesDF = wellDict.get('PPQuantiles')
-        if isinstance(quantilesDF, pd.DataFrame) and not quantilesDF.empty:
-            quantilesDF = quantilesDF.copy()
-            quantilesDF['subgraph'] = wellKey
-            perWellQuantiles.append(quantilesDF)
+    if selected_wells:
+        selectedWellsDF = pd.DataFrame(selected_wells)
+        injectionStartDF = (
+            winInjDF.loc[winInjDF['Date'].notnull(), ['ID', 'Date']]
+            .groupby('ID', as_index=False)['Date']
+            .min()
+            .rename(columns={'ID': 'WellID', 'Date': 'InjectionStartDate'})
+        )
+        selectedWellsDF = selectedWellsDF.merge(injectionStartDF, on='WellID', how='left')
 
-        spaghettiDF = wellDict.get('Spaghetti')
-        if isinstance(spaghettiDF, pd.DataFrame) and not spaghettiDF.empty:
-            spaghettiDF = spaghettiDF.copy()
-            spaghettiDF['subgraph'] = wellKey
-            perWellSpaghetti.append(spaghettiDF)
+        allPerWellPPQuantilesDF = allPerWellPPQuantilesDF.merge(selectedWellsDF, on='WellID', how='inner')
+        allPerWellPPQuantilesDF = allPerWellPPQuantilesDF[
+            allPerWellPPQuantilesDF['InjectionStartDate'].isna()
+            | (allPerWellPPQuantilesDF['Date'] > allPerWellPPQuantilesDF['InjectionStartDate'])
+        ].drop(columns=['InjectionStartDate'])
 
-        disposalDF = wellDict.get('Disposal')
-        if isinstance(disposalDF, pd.DataFrame) and not disposalDF.empty:
-            disposalDF = disposalDF.copy()
-            disposalDF['subgraph'] = wellKey
-            perWellDisposal.append(disposalDF)
+        allPerWellPPSpaghettiDF = allPerWellPPSpaghettiDF.merge(selectedWellsDF, on='WellID', how='inner')
+        allPerWellPPSpaghettiDF = allPerWellPPSpaghettiDF[
+            allPerWellPPSpaghettiDF['InjectionStartDate'].isna()
+            | (allPerWellPPSpaghettiDF['Date'] > allPerWellPPSpaghettiDF['InjectionStartDate'])
+        ].drop(columns=['InjectionStartDate'])
 
-    if len(perWellQuantiles) > 0:
-        allPerWellPPQuantilesDF = pd.concat(perWellQuantiles, ignore_index=True)
-    if len(perWellSpaghetti) > 0:
-        allPerWellPPSpaghettiDF = pd.concat(perWellSpaghetti, ignore_index=True)
-    if len(perWellDisposal) > 0:
-        allPerWellDisposalDF = pd.concat(perWellDisposal, ignore_index=True)
+        allPerWellDisposalDF = winInjDF.merge(
+            selectedWellsDF[['WellID', 'subgraph']],
+            left_on='ID',
+            right_on='WellID',
+            how='inner',
+        ).drop(columns=['WellID'])
     else:
+        allPerWellPPQuantilesDF = pd.DataFrame(columns=['DeltaPressure', 'Days', 'Realization', 'Order', 'WellID', 'Percentile', 'Date', 'subgraph'])
+        allPerWellPPSpaghettiDF = pd.DataFrame(columns=['DeltaPressure', 'Days', 'Realization', 'WellID', 'Diffusivity', 'Date', 'subgraph'])
         allPerWellDisposalDF = pd.DataFrame(columns=['ID', 'Days', 'BPD', 'Date', 'subgraph'])
     
     allPerWellPPQuantilesDF['timestamp'] = pd.to_datetime(allPerWellPPQuantilesDF['Date'], format='%m/%d/%Y').view('int64') // 10**6

@@ -17,6 +17,14 @@ from math import ceil
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
+from gist_graphs import (
+    save_pressure_ranges_graph_artifact,
+    save_rt_plot_graph_artifact,
+    save_time_series_quantiles_graph_artifact,
+    save_time_series_quantiles_per_well_graph_artifact,
+    save_time_series_spaghetti_graph_artifact,
+    save_time_series_spaghetti_per_well_graph_artifact,
+)
 
 
 scratchPath = sys.argv[1]
@@ -102,14 +110,56 @@ else:
     max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance'].max()
     rt_plot_cutoff = max_dist_max_diff * 3
     smallWellList_r_t_plot_forecast = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_r_t_plot_forecast", smallWellList_r_t_plot_forecast)
+    smallWellList_r_t_plot_forecast = smallWellList_r_t_plot_forecast.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
+    # D3 graph datasets temporarily disabled for matplotlib-only portal performance testing.
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_r_t_plot_forecast", smallWellList_r_t_plot_forecast)
 
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF_forecast", disaggregationDF)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF_forecast", totalPPQuantilesDF)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPSpaghettiDF_forecast", totalPPSpaghettiDF)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellPPQuantilesDF_forecast", allPerWellPPQuantilesDF)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellPPSpaghettiDF_forecast", allPerWellPPSpaghettiDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF_forecast", disaggregationDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPQuantilesDF_forecast", totalPPQuantilesDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPSpaghettiDF_forecast", totalPPSpaghettiDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellPPQuantilesDF_forecast", allPerWellPPQuantilesDF)
+    # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellPPSpaghettiDF_forecast", allPerWellPPSpaghettiDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellDisposalDF_forecast", allPerWellDisposalDF)
+
+    save_rt_plot_graph_artifact(
+        helper,
+        smallPPDF,
+        smallWellList_r_t_plot_forecast,
+        artifact_key="gist-forecast-r-t-plot",
+        display_order=10,
+    )
+    save_pressure_ranges_graph_artifact(
+        helper,
+        disaggregationDF,
+        artifact_key="gist-forecast-pressure-ranges",
+        display_order=20,
+    )
+    save_time_series_quantiles_graph_artifact(
+        helper,
+        totalPPQuantilesDF,
+        artifact_key="gist-forecast-time-series-quantiles",
+        display_order=30,
+    )
+    save_time_series_spaghetti_graph_artifact(
+        helper,
+        totalPPSpaghettiDF,
+        artifact_key="gist-forecast-time-series-spaghetti",
+        display_order=40,
+    )
+    save_time_series_quantiles_per_well_graph_artifact(
+        helper,
+        allPerWellPPQuantilesDF,
+        allPerWellDisposalDF,
+        artifact_key="gist-forecast-time-series-quantiles-per-well",
+        display_order=50,
+    )
+    save_time_series_spaghetti_per_well_graph_artifact(
+        helper,
+        allPerWellPPSpaghettiDF,
+        allPerWellDisposalDF,
+        artifact_key="gist-forecast-time-series-spaghetti-per-well",
+        display_order=60,
+    )
 
     helper.setSuccessForStepIndex(4, True)
 
