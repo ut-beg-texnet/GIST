@@ -1,6 +1,7 @@
 from ast import Dict
 from email import message
 import json
+import mimetypes
 
 import os
 
@@ -108,7 +109,7 @@ class TexNetWebToolLaunchHelper(object):
         paramVal = self.getParameterValueWithStepIndexAndParamName(stepIndex, paramName)
         
         if paramVal != None:
-            ret = self._origArgsData["DatasetPaths"][paramVal]
+            ret = self._origArgsData["DatasetPaths"][str(paramVal)]
  
         return ret
         
@@ -158,6 +159,41 @@ class TexNetWebToolLaunchHelper(object):
         df.to_csv(path, index=False)
         
         self.setParamValueWithStepIndexAndParamName(stepIndex, paramName, path)
+
+    def saveGraphArtifact(self, key, title, renderer, path, contentType=None, caption=None, displayOrder=0, preferredHeight=None):
+        """Registers a tool-generated graph artifact for portal rendering."""
+        if path is None or str(path).strip() == "":
+            raise ValueError("Graph artifact path is required.")
+
+        fullPath = os.path.abspath(path)
+        scratchRoot = os.path.abspath(self._scratchPath)
+
+        if not fullPath.startswith(scratchRoot + os.sep):
+            raise ValueError("Graph artifact path must be inside the scratch directory.")
+
+        if not os.path.exists(fullPath):
+            raise FileNotFoundError("Graph artifact file was not found: " + fullPath)
+
+        relativePath = os.path.relpath(fullPath, scratchRoot)
+
+        if contentType is None:
+            contentType = mimetypes.guess_type(fullPath)[0] or "application/octet-stream"
+
+        artifact = {
+            "key": key,
+            "title": title,
+            "caption": caption,
+            "renderer": renderer,
+            "path": relativePath,
+            "contentType": contentType,
+            "displayOrder": displayOrder,
+            "preferredHeight": preferredHeight
+        }
+
+        if "GraphArtifacts" not in self._origArgsData or self._origArgsData["GraphArtifacts"] is None:
+            self._origArgsData["GraphArtifacts"] = []
+
+        self._origArgsData["GraphArtifacts"].append(artifact)
     
     def getScratchDataPathValue(self, paramValue):
         
