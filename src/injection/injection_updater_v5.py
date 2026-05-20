@@ -19,14 +19,15 @@ Data sources:
   RRC injection:     https://data.texas.gov/resource/qq2j-f2zm  (RRC-UIC H10 Injection Monitoring)
 
 Usage:
+    python injection_updater_v5.py --target-dir ./src/data
     python injection_updater_v5.py --target-dir ./src/data --days 90
-    python injection_updater_v5.py --target-dir ./src/data --days 90 --dev
-    python injection_updater_v5.py --target-dir ./src/data --days 90 --dev --debug
+    python injection_updater_v5.py --target-dir ./src/data --dev --debug
     python injection_updater_v5.py --target-dir ./src/data --texnet-only
     python injection_updater_v5.py --target-dir ./src/data --rrc-only
 """
 
 import argparse
+import calendar
 import concurrent.futures
 import json
 import time
@@ -99,6 +100,18 @@ DEBUG_PARSE_SAMPLE_LIMIT = 12
 # Number of well IDs to include in each TexNet injection export request.
 # Keeping this small avoids server-side timeouts (the API has a ~30 s limit).
 TEXNET_INJ_CHUNK_SIZE = 200
+
+
+def add_one_calendar_month(dt: datetime) -> datetime:
+    """Advance ``dt`` by one calendar month (day clamped to the target month's length)."""
+    month = dt.month + 1
+    year = dt.year
+    if month > 12:
+        month = 1
+        year += 1
+    max_day = calendar.monthrange(year, month)[1]
+    return dt.replace(year=year, month=month, day=min(dt.day, max_day))
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -797,19 +810,31 @@ def rrc_fetch_wells(client: Socrata) -> Optional[pd.DataFrame]:
         return None
 
 
-def rrc_fetch_injection(client: Socrata, days: int) -> Optional[pd.DataFrame]:
+def rrc_fetch_injection(client: Socrata, days: Optional[int] = None) -> Optional[pd.DataFrame]:
     """
-    Fetch RRC H10 injection monitoring records (qq2j-f2zm) for the last
-    `days` days via a $where date filter. Returns a DataFrame or None.
+    Fetch RRC H10 injection monitoring records (qq2j-f2zm).
+
+    When ``days`` is None, fetches the entire published dataset (no SoQL date
+    filter). When ``days`` is set, fetches only rows with
+    ``formatted_date >= now - days``. Returns a DataFrame or None on failure.
     """
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
-    where = f"formatted_date >= '{cutoff}'"
     try:
-        logger.info(
-            "Fetching RRC injection from %s where %s …",
-            RRC_INJ_DATASET, where,
-        )
-        records = client.get_all(RRC_INJ_DATASET, where=where, limit=SOCRATA_PAGE_SIZE)
+        if days is None:
+            logger.info(
+                "Fetching all RRC injection records from %s (no date filter) …",
+                RRC_INJ_DATASET,
+            )
+            records = client.get_all(RRC_INJ_DATASET, limit=SOCRATA_PAGE_SIZE)
+        else:
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+            where = f"formatted_date >= '{cutoff}'"
+            logger.info(
+                "Fetching RRC injection from %s where %s …",
+                RRC_INJ_DATASET, where,
+            )
+            records = client.get_all(
+                RRC_INJ_DATASET, where=where, limit=SOCRATA_PAGE_SIZE
+            )
         df = pd.DataFrame.from_records(records)
         logger.info("Fetched %d RRC injection records.", len(df))
         return df
@@ -1124,8 +1149,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--days",
         type=int,
-        default=1826,
-        help="Number of days to look back when fetching RRC injection data (default: 1826 ≈ 5 years).",
+        default=None,
+        help=(
+            "Optional look-back window (days) for RRC injection only. "
+            "When omitted, the full qq2j-f2zm dataset is fetched."
+        ),
     )
     parser.add_argument(
         "--dev",
@@ -1363,7 +1391,7 @@ def run_texnet_section(
 def run_rrc_section(
     tdir: Path,
     dev: bool,
-    days: int,
+    days: Optional[int],
     end_date_str: str,
     verbose: int,
 ) -> None:
@@ -1438,17 +1466,25 @@ def run_rrc_section(
         update_csv(b3_rrc_well_df, rrc_well_raw, dedup_cols=["InjectionWellId"])
 
     # ── Best-effort injection fetch ──────────────────────────────────────────
-    logger.info("RRC Step 3: Fetching injection data (last %d days)…", days)
+    if days is None:
+        logger.info("RRC Step 3: Fetching injection data (full dataset)…")
+    else:
+        logger.info("RRC Step 3: Fetching injection data (last %d days)…", days)
     raw_rrc_inj = rrc_fetch_injection(client, days)
     if raw_rrc_inj is None:
         logger.warning(
             "Failed to fetch RRC injection data — will use existing raw CSV if available."
         )
     elif raw_rrc_inj.empty:
-        logger.warning(
-            "No RRC injection data for the last %d days — proceeding with existing CSV.",
-            days,
-        )
+        if days is None:
+            logger.warning(
+                "No RRC injection data returned — proceeding with existing CSV."
+            )
+        else:
+            logger.warning(
+                "No RRC injection data for the last %d days — proceeding with existing CSV.",
+                days,
+            )
     else:
         logger.info("RRC Step 4: Mapping injection data to B3 format (monthly→daily)…")
         b3_rrc_inj_df = rrc_map_injection_to_b3(raw_rrc_inj)
@@ -1525,12 +1561,15 @@ def main() -> None:
 
     now          = datetime.now()
     start        = datetime(2016, 1, 1)
-    end_date_str = (now + timedelta(days=7)).strftime("%m-%d-%Y")
+    end_date_str = add_one_calendar_month(now).strftime("%m-%d-%Y")
     verbose      = 1 if args.debug else 0
 
+    rrc_inj_mode = (
+        f"last {args.days} days" if args.days is not None else "full dataset (qq2j-f2zm)"
+    )
     logger.info(
-        "TexNet date range: %s → %s | RRC lookback: %d days",
-        start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"), args.days,
+        "TexNet date range: %s → %s | RRC injection: %s",
+        start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"), rrc_inj_mode,
     )
 
     # ════════════════════════════════════════════════════════════════════════
