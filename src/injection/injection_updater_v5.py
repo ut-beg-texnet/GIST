@@ -22,10 +22,14 @@ Usage:
     python injection_updater_v5.py --target-dir ./src/data --days 90
     python injection_updater_v5.py --target-dir ./src/data --days 90 --dev
     python injection_updater_v5.py --target-dir ./src/data --days 90 --dev --debug
+    python injection_updater_v5.py --target-dir ./src/data --texnet-only
+    python injection_updater_v5.py --target-dir ./src/data --rrc-only
 """
 
 import argparse
 import concurrent.futures
+import json
+import time
 import logging
 import shutil
 import sys
@@ -44,6 +48,26 @@ import credentials
 import injectionV3 as inj3
 from injection_id_utils import normalize_uic_string, apply_uic_normalization
 from permian_subbasin import print_permian_basins_for_wells
+
+print("SCRIPT STARTING...")
+
+# #region agent log
+def log_debug(message, data=None, hypothesisId=None):
+    try:
+        payload = {
+            "sessionId": "55ae8f",
+            "timestamp": int(datetime.now().timestamp() * 1000),
+            "location": "injection_updater_v5.py",
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesisId
+        }
+        log_file_path = r"c:\texnetwebtools\tools\debug-55ae8f.log"
+        with open(log_file_path, "a") as f:
+            f.write(json.dumps(payload) + "\n")
+    except Exception as e:
+        logging.getLogger(__name__).error(f"DEBUG LOG FAILED: {e}")
+# #endregion
 
 # Suppress SSL warnings (TexNet API uses a self-signed certificate)
 requests.packages.urllib3.disable_warnings(
@@ -71,6 +95,10 @@ DEPTH_CUTOFF_FT = 7000.0
 
 # Cap detailed debug samples so bad upstream data does not flood the log.
 DEBUG_PARSE_SAMPLE_LIMIT = 12
+
+# Number of well IDs to include in each TexNet injection export request.
+# Keeping this small avoids server-side timeouts (the API has a ~30 s limit).
+TEXNET_INJ_CHUNK_SIZE = 200
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -458,24 +486,28 @@ def texnet_authenticate(username: str, password: str) -> Optional[str]:
 
 def texnet_fetch(api_url: str, token: str, method: str = "GET",
                  json_payload=None, params=None) -> Optional[str]:
-    """
-    Fetch CSV text from a TexNet API endpoint.
-    Returns raw response text or None on failure.
-    """
     try:
         headers = {"Authorization": f"Bearer {token}"}
-        if method.upper() == "POST" and json_payload is not None:
-            headers["Content-Type"] = "application/json"
+        # REMOVE headers["Content-Type"] = "application/json" - requests handles it
+        
+        log_debug(f"TexNet API Request: {api_url}", 
+                  {"method": method, "payload": json_payload, "params": params, "headers": headers}, 
+                  hypothesisId="A,B,C,D,F")
 
         if method.upper() == "GET":
-            resp = requests.get(api_url, headers=headers, params=params, verify=False)
+            resp = requests.get(api_url, headers=headers, params=params, verify=False, timeout=120)
         else:
             resp = requests.post(api_url, headers=headers, json=json_payload,
-                                 params=params, verify=False)
+                                 params=params, verify=False, timeout=120)
+        
+        if resp.status_code != 200:
+            log_debug(f"TexNet API Error: {resp.status_code}", 
+                      {"text": resp.text[:1000], "headers": dict(resp.headers), "url": resp.url}, 
+                      hypothesisId="A,B,C,D,F")
+
         resp.raise_for_status()
-        logger.debug("TexNet: fetched %d bytes from %s", len(resp.content), api_url)
         return resp.text
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         logger.error("TexNet API request to %s failed: %s", api_url, e)
         return None
 
@@ -1113,7 +1145,24 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Copy existing CSVs here before updating (optional).",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--texnet-only",
+        action="store_true",
+        default=False,
+        help="Fetch/process only TexNet data, then merge with existing RRC GIST files on disk.",
+    )
+    parser.add_argument(
+        "--rrc-only",
+        action="store_true",
+        default=False,
+        help="Fetch/process only RRC data, then merge with existing TexNet GIST files on disk.",
+    )
+    args = parser.parse_args()
+
+    if args.texnet_only and args.rrc_only:
+        parser.error("--texnet-only and --rrc-only are mutually exclusive.")
+
+    return args
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1132,7 +1181,11 @@ def run_texnet_section(
     """
     Fetch TexNet wells + injection, transform to B3 format, and run the GIST
     pipeline (Shallow + Deep). Writes all texnet_* and texnet_gist_* CSVs.
-    Raises RuntimeError on any unrecoverable failure so the caller can react.
+
+    API failures are treated as warnings: if the raw CSV files already exist on
+    disk the pipeline will run on the previously-fetched data so the script can
+    still produce usable output.  A RuntimeError is only raised when both the
+    API is unavailable AND there are no existing raw files to fall back on.
     """
     logger.info("-" * 40)
     logger.info("Section 1 (TexNet): starting")
@@ -1147,86 +1200,142 @@ def run_texnet_section(
     tx_deep_well    = rp("texnet_gist_well_deep.csv")
     tx_deep_inj     = rp("texnet_gist_injection_deep.csv")
 
-    # Step 1: Authenticate
+    # ── Best-effort API fetch ────────────────────────────────────────────────
+    fetch_ok = False
+
     token = texnet_authenticate(credentials.USERNAME, credentials.PASSWORD)
     if not token:
-        raise RuntimeError("TexNet authentication failed.")
+        logger.warning("TexNet authentication failed — will use existing raw CSVs if available.")
+    else:
+        # Step 1: Fetch + update well list
+        logger.info("TexNet Step 1: Fetching well list…")
+        well_text = texnet_fetch(TEXNET_WELL_URL, token)
+        if not well_text:
+            logger.warning("Failed to fetch TexNet well data — will use existing raw CSVs if available.")
+        else:
+            raw_well_df = pd.read_csv(
+                StringIO(well_text),
+                dtype={"Uicnumber": str, "Apinumber": str, "Id": int},
+                low_memory=False,
+            )
+            _log_missing_required_columns(
+                raw_well_df,
+                ["Uicnumber", "Apinumber", "Id", "SurfaceLatitude", "SurfaceLongitude"],
+                "TexNet wells API response",
+            )
+            texnet_labels = _build_record_labels(raw_well_df, ["Uicnumber", "Apinumber", "Id"])
+            texnet_lat = _to_numeric_safe(
+                raw_well_df["SurfaceLatitude"],
+                default=0.0,
+                field_name="SurfaceLatitude",
+                context="TexNet wells API response",
+                row_labels=texnet_labels,
+            )
+            texnet_lon = _to_numeric_safe(
+                raw_well_df["SurfaceLongitude"],
+                default=0.0,
+                field_name="SurfaceLongitude",
+                context="TexNet wells API response",
+                row_labels=texnet_labels,
+            )
+            invalid_coord_mask = texnet_lat.eq(0) | texnet_lon.eq(0)
+            _log_masked_samples(
+                context="TexNet wells API response",
+                field_name="SurfaceLatitude/SurfaceLongitude",
+                row_labels=texnet_labels,
+                raw_series=raw_well_df["SurfaceLatitude"].astype(str) + ", " + raw_well_df["SurfaceLongitude"].astype(str),
+                mask=invalid_coord_mask,
+                issue_label="rejected zero/invalid coordinate",
+            )
+            valid_wells = raw_well_df[
+                texnet_lat.ne(0) & texnet_lon.ne(0)
+            ].copy()
+            valid_wells["SurfaceLatitude"] = texnet_lat.loc[valid_wells.index]
+            valid_wells["SurfaceLongitude"] = texnet_lon.loc[valid_wells.index]
+            logger.info(
+                "TexNet well filter: %d total fetched → %d with valid coordinates",
+                len(raw_well_df),
+                len(valid_wells),
+            )
+            well_df = texnet_update_well_csv(valid_wells.to_csv(index=False), tx_well_raw)
 
-    # Step 2: Fetch + update well list
-    logger.info("TexNet Step 1: Fetching well list…")
-    well_text = texnet_fetch(TEXNET_WELL_URL, token)
-    if not well_text:
-        raise RuntimeError("Failed to fetch TexNet well data.")
+            # Step 2: Fetch + update injection data in chunks.
+            # The full well list (~1000+ IDs) times 10 years of data causes the
+            # TexNet API to time out with a 400 error.  Splitting into smaller
+            # chunks keeps each request well within the server's time limit.
+            logger.info(
+                "TexNet Step 2: Fetching injection data in %d-well chunks…",
+                TEXNET_INJ_CHUNK_SIZE,
+            )
+            id_array = well_df["Id"].to_numpy()
+            n_chunks = (len(id_array) + TEXNET_INJ_CHUNK_SIZE - 1) // TEXNET_INJ_CHUNK_SIZE
+            chunk_dfs: List[pd.DataFrame] = []
 
-    raw_well_df = pd.read_csv(
-        StringIO(well_text),
-        dtype={"Uicnumber": str, "Apinumber": str, "Id": int},
-        low_memory=False,
-    )
-    _log_missing_required_columns(
-        raw_well_df,
-        ["Uicnumber", "Apinumber", "Id", "SurfaceLatitude", "SurfaceLongitude"],
-        "TexNet wells API response",
-    )
-    texnet_labels = _build_record_labels(raw_well_df, ["Uicnumber", "Apinumber", "Id"])
-    texnet_lat = _to_numeric_safe(
-        raw_well_df["SurfaceLatitude"],
-        default=0.0,
-        field_name="SurfaceLatitude",
-        context="TexNet wells API response",
-        row_labels=texnet_labels,
-    )
-    texnet_lon = _to_numeric_safe(
-        raw_well_df["SurfaceLongitude"],
-        default=0.0,
-        field_name="SurfaceLongitude",
-        context="TexNet wells API response",
-        row_labels=texnet_labels,
-    )
-    invalid_coord_mask = texnet_lat.eq(0) | texnet_lon.eq(0)
-    _log_masked_samples(
-        context="TexNet wells API response",
-        field_name="SurfaceLatitude/SurfaceLongitude",
-        row_labels=texnet_labels,
-        raw_series=raw_well_df["SurfaceLatitude"].astype(str) + ", " + raw_well_df["SurfaceLongitude"].astype(str),
-        mask=invalid_coord_mask,
-        issue_label="rejected zero/invalid coordinate",
-    )
-    valid_wells = raw_well_df[
-        texnet_lat.ne(0) & texnet_lon.ne(0)
-    ].copy()
-    valid_wells["SurfaceLatitude"] = texnet_lat.loc[valid_wells.index]
-    valid_wells["SurfaceLongitude"] = texnet_lon.loc[valid_wells.index]
-    logger.info(
-        "TexNet well filter: %d total fetched → %d with valid coordinates",
-        len(raw_well_df),
-        len(valid_wells),
-    )
-    well_df = texnet_update_well_csv(valid_wells.to_csv(index=False), tx_well_raw)
+            for chunk_idx, chunk_start in enumerate(range(0, len(id_array), TEXNET_INJ_CHUNK_SIZE)):
+                time.sleep(2)
+                chunk_ids = id_array[chunk_start : chunk_start + TEXNET_INJ_CHUNK_SIZE].tolist()
+                payload = {
+                    "BeginMonth":     start.month,
+                    "BeginYear":      start.year,
+                    "EndMonth":       now.month,
+                    "EndYear":        now.year,
+                    "Format":         "excel",
+                    "IncludeWellIds": True,
+                    "WellIds":        chunk_ids,
+                }
+                logger.info(
+                    "TexNet Step 2: chunk %d/%d (%d wells)…",
+                    chunk_idx + 1, n_chunks, len(chunk_ids),
+                )
+                chunk_text = texnet_fetch(
+                    TEXNET_INJ_URL, token, method="POST", json_payload=payload
+                )
+                if chunk_text:
+                    chunk_df = pd.read_csv(
+                        StringIO(chunk_text),
+                        dtype={"UIC Number": str, "Id": int},
+                        low_memory=False,
+                    )
+                    chunk_dfs.append(chunk_df)
+                else:
+                    logger.warning(
+                        "TexNet injection chunk %d/%d failed — skipping.",
+                        chunk_idx + 1, n_chunks,
+                    )
 
-    # Step 3: Fetch + update injection data
-    logger.info("TexNet Step 2: Fetching injection data…")
-    id_array = well_df["Id"].to_numpy()
-    payload = {
-        "BeginMonth":     start.month,
-        "BeginYear":      start.year,
-        "EndMonth":       (now.month % 12) + 1,
-        "EndYear":        now.year if now.month < 12 else now.year + 1,
-        "Format":         "excel",
-        "IncludeWellIds": True,
-        "WellIds":        id_array.tolist(),
-    }
-    inj_text = texnet_fetch(TEXNET_INJ_URL, token, method="POST", json_payload=payload)
-    if not inj_text:
-        raise RuntimeError("Failed to fetch TexNet injection data.")
-    texnet_update_inj_csv(inj_text, tx_inj_raw)
+            if chunk_dfs:
+                combined_inj = pd.concat(chunk_dfs, ignore_index=True)
+                texnet_update_inj_csv(combined_inj.to_csv(index=False), tx_inj_raw)
+                fetch_ok = True
+                logger.info(
+                    "TexNet injection fetch complete: %d rows across %d/%d successful chunks.",
+                    len(combined_inj), len(chunk_dfs), n_chunks,
+                )
+            else:
+                logger.warning(
+                    "All %d TexNet injection chunks failed — will use existing raw CSV if available.",
+                    n_chunks,
+                )
 
-    # Step 4: Transform to B3 format
+    # ── Guard: pipeline requires raw files on disk ───────────────────────────
+    missing = [str(f) for f in [tx_well_raw, tx_inj_raw] if not f.exists()]
+    if missing:
+        raise RuntimeError(
+            f"TexNet API fetch failed and no existing raw files found: {missing}"
+        )
+
+    if not fetch_ok:
+        logger.warning(
+            "TexNet: API fetch did not complete successfully; "
+            "running pipeline on existing raw data."
+        )
+
+    # Step 3: Transform to B3 format
     logger.info("TexNet Step 3: Transforming to B3 format…")
     texnet_well_to_b3(tx_well_raw, tx_well_b3)
     texnet_inj_to_b3(tx_inj_raw, tx_inj_b3)
 
-    # Step 5: Run GIST pipeline (Shallow + Deep)
+    # Step 4: Run GIST pipeline (Shallow + Deep)
     logger.info("TexNet Step 4: Running GIST pipeline…")
     run_gist_pipeline(
         b3_well_file=tx_well_b3, b3_inj_file=tx_inj_b3,
@@ -1241,7 +1350,7 @@ def run_texnet_section(
         end_date_str=end_date_str, verbose=verbose,
     )
 
-    # Step 6: Cleanup B3 intermediates (skip in debug mode to aid inspection)
+    # Step 5: Cleanup B3 intermediates (skip in debug mode to aid inspection)
     if not debug:
         for temp in [tx_well_b3, tx_inj_b3]:
             if temp.exists():
@@ -1262,7 +1371,11 @@ def run_rrc_section(
     Fetch RRC wells + injection via Socrata, transform to B3 format (with
     monthly→daily conversion), and run the GIST pipeline (Shallow + Deep).
     Writes all rrc_* and rrc_gist_* CSVs.
-    Raises RuntimeError on any unrecoverable failure so the caller can react.
+
+    API failures are treated as warnings: if the raw CSV files already exist on
+    disk the pipeline will run on the previously-fetched data so the script can
+    still produce usable output.  A RuntimeError is only raised when both the
+    API is unavailable AND there are no existing raw files to fall back on.
     """
     logger.info("-" * 40)
     logger.info("Section 2 (RRC): starting")
@@ -1281,58 +1394,57 @@ def run_rrc_section(
         credentials.RRC_APP_TOKEN,
     )
 
-    # Step 1: Fetch wells → B3 → update raw well CSV
+    # ── Best-effort well fetch ───────────────────────────────────────────────
     logger.info("RRC Step 1: Fetching well locations…")
     raw_rrc_wells = rrc_fetch_wells(client)
     if raw_rrc_wells is None or raw_rrc_wells.empty:
-        raise RuntimeError("No RRC well data returned.")
+        logger.warning("No RRC well data returned — will use existing raw CSV if available.")
+    else:
+        rrc_labels = _build_record_labels(raw_rrc_wells, ["uic_number", "api_no", "lease_name"])
+        lat = _to_numeric_safe(
+            raw_rrc_wells.get("latitude_nad83"),
+            default=0.0,
+            field_name="latitude_nad83",
+            context="RRC wells API response",
+            row_labels=rrc_labels,
+        )
+        lon = _to_numeric_safe(
+            raw_rrc_wells.get("longitude_nad83"),
+            default=0.0,
+            field_name="longitude_nad83",
+            context="RRC wells API response",
+            row_labels=rrc_labels,
+        )
+        invalid_rrc_coord_mask = lat.eq(0) | lon.eq(0)
+        _log_masked_samples(
+            context="RRC wells API response",
+            field_name="latitude_nad83/longitude_nad83",
+            row_labels=rrc_labels,
+            raw_series=raw_rrc_wells.get("latitude_nad83", pd.Series(index=raw_rrc_wells.index, dtype="object")).astype(str)
+            + ", "
+            + raw_rrc_wells.get("longitude_nad83", pd.Series(index=raw_rrc_wells.index, dtype="object")).astype(str),
+            mask=invalid_rrc_coord_mask,
+            issue_label="rejected zero/invalid coordinate",
+        )
+        valid_rrc_wells = raw_rrc_wells[lat.ne(0) & lon.ne(0)].copy()
+        logger.info(
+            "RRC well filter: %d total fetched → %d with valid coordinates",
+            len(raw_rrc_wells),
+            len(valid_rrc_wells),
+        )
 
-    rrc_labels = _build_record_labels(raw_rrc_wells, ["uic_number", "api_no", "lease_name"])
-    lat = _to_numeric_safe(
-        raw_rrc_wells.get("latitude_nad83"),
-        default=0.0,
-        field_name="latitude_nad83",
-        context="RRC wells API response",
-        row_labels=rrc_labels,
-    )
-    lon = _to_numeric_safe(
-        raw_rrc_wells.get("longitude_nad83"),
-        default=0.0,
-        field_name="longitude_nad83",
-        context="RRC wells API response",
-        row_labels=rrc_labels,
-    )
-    invalid_rrc_coord_mask = lat.eq(0) | lon.eq(0)
-    _log_masked_samples(
-        context="RRC wells API response",
-        field_name="latitude_nad83/longitude_nad83",
-        row_labels=rrc_labels,
-        raw_series=raw_rrc_wells.get("latitude_nad83", pd.Series(index=raw_rrc_wells.index, dtype="object")).astype(str)
-        + ", "
-        + raw_rrc_wells.get("longitude_nad83", pd.Series(index=raw_rrc_wells.index, dtype="object")).astype(str),
-        mask=invalid_rrc_coord_mask,
-        issue_label="rejected zero/invalid coordinate",
-    )
-    valid_rrc_wells = raw_rrc_wells[
-        lat.ne(0) & lon.ne(0)
-    ].copy()
-    logger.info(
-        "RRC well filter: %d total fetched → %d with valid coordinates",
-        len(raw_rrc_wells),
-        len(valid_rrc_wells),
-    )
+        logger.info("RRC Step 2: Mapping well data to B3 format…")
+        b3_rrc_well_df = rrc_map_wells_to_b3(valid_rrc_wells)
+        update_csv(b3_rrc_well_df, rrc_well_raw, dedup_cols=["InjectionWellId"])
 
-    logger.info("RRC Step 2: Mapping well data to B3 format…")
-    b3_rrc_well_df = rrc_map_wells_to_b3(valid_rrc_wells)
-    update_csv(b3_rrc_well_df, rrc_well_raw, dedup_cols=["InjectionWellId"])
-
-    # Step 2: Fetch injection → B3 (monthly→daily) → update raw inj CSV
+    # ── Best-effort injection fetch ──────────────────────────────────────────
     logger.info("RRC Step 3: Fetching injection data (last %d days)…", days)
     raw_rrc_inj = rrc_fetch_injection(client, days)
     if raw_rrc_inj is None:
-        raise RuntimeError("Failed to fetch RRC injection data.")
-
-    if raw_rrc_inj.empty:
+        logger.warning(
+            "Failed to fetch RRC injection data — will use existing raw CSV if available."
+        )
+    elif raw_rrc_inj.empty:
         logger.warning(
             "No RRC injection data for the last %d days — proceeding with existing CSV.",
             days,
@@ -1342,7 +1454,14 @@ def run_rrc_section(
         b3_rrc_inj_df = rrc_map_injection_to_b3(raw_rrc_inj)
         update_csv(b3_rrc_inj_df, rrc_inj_raw, dedup_cols=["InjectionWellId", "Date"])
 
-    # Step 3: Run GIST pipeline (Shallow + Deep)
+    # ── Guard: pipeline requires raw files on disk ───────────────────────────
+    missing = [str(f) for f in [rrc_well_raw, rrc_inj_raw] if not f.exists()]
+    if missing:
+        raise RuntimeError(
+            f"RRC API fetch failed and no existing raw files found: {missing}"
+        )
+
+    # Step 5: Run GIST pipeline (Shallow + Deep)
     logger.info("RRC Step 5: Running GIST pipeline…")
     run_gist_pipeline(
         b3_well_file=rrc_well_raw, b3_inj_file=rrc_inj_raw,
@@ -1370,14 +1489,16 @@ def main() -> None:
     Sections 1 (TexNet) and 2 (RRC) run concurrently in separate threads;
     Section 3 (merge) waits for both before writing the final CSVs.
     """
+    print("MAIN STARTING...")
     args = parse_args()
     setup_logging(args.debug)
 
     logger.info("=" * 60)
     logger.info("injection_updater_v5 started")
     logger.info(
-        "target-dir: %s | days: %s | dev: %s | debug: %s",
+        "target-dir: %s | days: %s | dev: %s | debug: %s | texnet-only: %s | rrc-only: %s",
         args.target_dir, args.days, args.dev, args.debug,
+        args.texnet_only, args.rrc_only,
     )
 
     if not args.target_dir.exists():
@@ -1413,31 +1534,45 @@ def main() -> None:
     )
 
     # ════════════════════════════════════════════════════════════════════════
-    # SECTIONS 1 & 2 — run TexNet and RRC concurrently
-    # Each section writes to non-overlapping files so there are no race
-    # conditions. ThreadPoolExecutor is used (vs ProcessPoolExecutor) to
-    # avoid pickling overhead and keep shared logging straightforward; the
-    # work is predominantly I/O-bound (API calls + file reads/writes).
+    # SECTIONS 1 & 2 — run TexNet and RRC (concurrently by default)
     # ════════════════════════════════════════════════════════════════════════
-    logger.info("Starting TexNet and RRC sections concurrently…")
     errors = []
+    tasks = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        texnet_future = executor.submit(
-            run_texnet_section,
-            tdir, dev, args.debug, start, now, end_date_str, verbose,
-        )
-        rrc_future = executor.submit(
-            run_rrc_section,
-            tdir, dev, args.days, end_date_str, verbose,
-        )
+    if args.rrc_only:
+        logger.info("Skipping TexNet section (--rrc-only)")
+    else:
+        tasks.append(("TexNet", run_texnet_section, (tdir, dev, args.debug, start, now, end_date_str, verbose)))
 
-        for label, future in [("TexNet", texnet_future), ("RRC", rrc_future)]:
-            try:
-                future.result()
-            except Exception as exc:
-                logger.error("%s section failed: %s", label, exc, exc_info=True)
-                errors.append(label)
+    if args.texnet_only:
+        logger.info("Skipping RRC section (--texnet-only)")
+    else:
+        tasks.append(("RRC", run_rrc_section, (tdir, dev, args.days, end_date_str, verbose)))
+
+    if not tasks:
+        logger.warning("No sections to run.")
+    elif len(tasks) == 1:
+        label, func, args_tuple = tasks[0]
+        logger.info("Starting %s section…", label)
+        try:
+            func(*args_tuple)
+        except Exception as exc:
+            logger.error("%s section failed: %s", label, exc, exc_info=True)
+            errors.append(label)
+    else:
+        logger.info("Starting TexNet and RRC sections concurrently…")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_to_label = {
+                executor.submit(func, *args_tuple): label
+                for label, func, args_tuple in tasks
+            }
+            for future in concurrent.futures.as_completed(future_to_label):
+                label = future_to_label[future]
+                try:
+                    future.result()
+                except Exception as exc:
+                    logger.error("%s section failed: %s", label, exc, exc_info=True)
+                    errors.append(label)
 
     if errors:
         logger.error(
