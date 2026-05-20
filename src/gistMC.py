@@ -1095,7 +1095,7 @@ class gistMC:
     injWellDaysToEpicenterClip=pd.Series(np.clip(injWellDaysToEpicenter,a_min=0,a_max=36500))
     if verbose>1: print(' gistMC.findWellsVec injWellDaysToEpicenterClip',min(injWellDaysToEpicenterClip),max(injWellDaysToEpicenterClip),injWellDaysToEpicenterClip.isna().sum(),' nans')
     # Vectorized?
-    injWellDaysToEpicenterClipTD=pd.to_timedelta(injWellDaysToEpicenterClip,unit='d')
+    injWellDaysToEpicenterClipTD=pd.to_timedelta(injWellDaysToEpicenterClip,unit='day')
     if verbose>1: print(' gistMC.findWellsVec injWellDaysToEpicenterClipTD',min(injWellDaysToEpicenterClipTD),max(injWellDaysToEpicenterClipTD),injWellDaysToEpicenterClipTD.isna().sum(),' nans')
     injWellDaysToEpicenterClipTD.index=self.wellDF.index
     injWellDateAtEpicenter = pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)+injWellDaysToEpicenterClipTD
@@ -3123,11 +3123,11 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,epoch=p
   ##################################
   # Check for dates before 1950 #
   ###############################
-  if minT<dayLowerBound: raise ValueError(' gistMC.prepInj ERROR: Injection data starts before 1950: '+str(epoch+pd.to_timedelta(minT,'D')))
+  if minT<dayLowerBound: raise ValueError(' gistMC.prepInj ERROR: Injection data starts before 1950: '+str(epoch+pd.to_timedelta(minT,unit='day')))
   ##############################
   # Check for dates after 2050 #
   ##############################
-  if maxT>dayUpperBound: raise ValueError(' gistMC.prepInj ERROR: Injection data ends after 2050: '+str(epoch+pd.to_timedelta(maxT,'D')))
+  if maxT>dayUpperBound: raise ValueError(' gistMC.prepInj ERROR: Injection data ends after 2050: '+str(epoch+pd.to_timedelta(maxT,unit='day')))
   #########################################################
   # We need to prepend by a zero since we use differences #
   #########################################################
@@ -3142,7 +3142,7 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,epoch=p
     #############################
     # Sanity checks for endDate #
     #############################
-    if endDay<ot: raise ValueError(' gistMC.prepInj ERROR: End date '+str(endDate)+' is before injection start '+str(epoch+pd.to_timedelta(ot,'D')))
+    if endDay<ot: raise ValueError(' gistMC.prepInj ERROR: End date '+str(endDate)+' is before injection start '+str(epoch+pd.to_timedelta(ot,unit='day')))
     if endDay>dayUpperBound: raise ValueError(' gistMC.prepInj ERROR: End date '+str(endDate)+' is after 2050')
     maxT=endDay
     if verbose>1: print(' prepInj: endDate of ',endDate,' selected')
@@ -3150,10 +3150,10 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,epoch=p
     ###########################
     # Sanity checks for eqDay #
     ###########################
-    if eqDay<dayLowerBound: raise ValueError(' gistMC.prepInj ERROR: eqDay is before 1950: '+str(epoch+pd.to_timedelta(eqDay,'D')))
-    if eqDay>dayUpperBound: raise ValueError(' gistMC.prepInj ERROR: eqDay is after 2050: '+str(epoch+pd.to_timedelta(eqDay,'D')))
-    if eqDay>maxT: raise ValueError(' gistMC.prepInj ERROR: eqDay '+str(epoch+pd.to_timedelta(eqDay,'D'))+' is after end of injection data: '+str(epoch+pd.to_timedelta(maxT,D)))
-    if eqDay<ot: raise ValueError(' gistMC.prepInj ERROR: eqDay is before injection start '+str(epoch+pd.to_timedelta(ot,'D')))
+    if eqDay<dayLowerBound: raise ValueError(' gistMC.prepInj ERROR: eqDay is before 1950: '+str(epoch+pd.to_timedelta(eqDay,unit='day')))
+    if eqDay>dayUpperBound: raise ValueError(' gistMC.prepInj ERROR: eqDay is after 2050: '+str(epoch+pd.to_timedelta(eqDay,unit='day')))
+    if eqDay>maxT: raise ValueError(' gistMC.prepInj ERROR: eqDay '+str(epoch+pd.to_timedelta(eqDay,unit='day'))+' is after end of injection data: '+str(epoch+pd.to_timedelta(maxT,unit='day')))
+    if eqDay<ot: raise ValueError(' gistMC.prepInj ERROR: eqDay is before injection start '+str(epoch+pd.to_timedelta(ot,unit='day')))
     maxT=max(int(round((eqDay-ot)/dt))*dt,max(injDF['Days']))+dt
     if verbose>1: print(' prepInj: eqDay of ',eqDay,' used ',maxT)
   else:
@@ -3488,7 +3488,7 @@ def getDates(inDF,epoch,dayName='Days',default=99999999,verbose=0):
       try:
         dateList.append(epoch+pd.Timedelta(day,unit='day'))
       except:
-        print('getDates error ',day,pd.Timedelta(day),epoch)
+        print('getDates error ',day,pd.Timedelta(day,unit='day'),epoch)
   #print(' getDates - dateList ', dateList)
   outDF[outName]=dateList
   return outDF
@@ -4103,8 +4103,8 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
   PPSpaghettiDF = pd.concat(spaghetti_list, ignore_index=True) if spaghetti_list else pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
   #  PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
   #  PPSpaghettiDF=pd.concat([PPSpaghettiDF,wellPPDF[['DeltaPressure','Days','Realization','WellID','Diffusivity']]],ignore_index=True)
-  PPQuantilesDF['Date']=epoch+pd.to_timedelta(PPQuantilesDF['Days'],unit='d')
-  PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='d')
+  PPQuantilesDF['Date']=epoch+pd.to_timedelta(PPQuantilesDF['Days'],unit='day')
+  PPSpaghettiDF['Date']=epoch+pd.to_timedelta(PPSpaghettiDF['Days'],unit='day')
   return PPQuantilesDF,PPSpaghettiDF
 
 def prepPressureAndDisposalTimeSeriesPlots(PPQuantilesDF,PPSpaghettiDF,wellsDF,injDF,wellIDs,verbose=0):
@@ -4188,7 +4188,7 @@ def prepTotalPressureTimeSeriesQuantilesPlot(deltaPP,dayVec,nQuantiles=11,epoch=
   #td={'DeltaPressure':np.ravel(totalDeltaPP[:,:],order='F'), 'Days':np.tile(dayVec,nReal),'Date':np.tile(dateVec,nReal), 'Realization':np.arange(nReal).repeat(nt),'Percentile':np.ravel(totalDeltaPPPercentile[:,:],order='F')}
   td={'DeltaPressure':totalDeltaPP[:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.repeat(np.arange(nReal),nt),'Percentile':totalDeltaPPPercentile[:,:].flatten(),'Ordering':totalDeltaPPOrder[:,:].flatten()}
   totalPPDF=pd.DataFrame(td)
-  totalPPDF['Date']=epoch+pd.to_timedelta(totalPPDF['Days'],unit='d')
+  totalPPDF['Date']=epoch+pd.to_timedelta(totalPPDF['Days'],unit='day')
   ptiles_list=list(range(0,nReal))
   ptiles=[round(ptile*100./(nReal-1),1) for ptile in ptiles_list]
   indices=[round(i *(nReal-1)/(nQuantiles-1)) for i in range(nQuantiles)]
@@ -4218,7 +4218,7 @@ def prepTotalPressureTimeSeriesSpaghettiPlot(deltaPP,dayVec,diffPPVec,epoch=pd.t
   # Calculate order of totalDeltaPP for each value to get percentiles
   td={'DeltaPressure':totalDeltaPP[:,:].flatten(), 'Days':np.tile(dayVec,nReal), 'Realization':np.repeat(np.arange(nReal),nt), 'Diffusivity':diffPPVec.repeat(nt)}
   totalPPDF=pd.DataFrame(td)
-  totalPPDF['Date']=epoch+pd.to_timedelta(totalPPDF['Days'],unit='d')
+  totalPPDF['Date']=epoch+pd.to_timedelta(totalPPDF['Days'],unit='day')
   return totalPPDF
 
 def extendDisposal(injDF,startDate,endDate,rateDict,dDays=10,epoch=pd.to_datetime('1970-01-01'),verbose=0):
@@ -4257,7 +4257,7 @@ def extendDisposal(injDF,startDate,endDate,rateDict,dDays=10,epoch=pd.to_datetim
   # Here is where the input well rates come into play #
   #####################################################
   futureDays=np.arange(lastDay+dDays,endDay+dDays,float(dDays))
-  futureDates=[epoch+pd.to_timedelta(d,unit='D') for d in futureDays]
+  futureDates=[epoch+pd.to_timedelta(d,unit='day') for d in futureDays]
   futureInjDF=pd.DataFrame(columns=['ID','Days','BPD','Date','Type'])
   if verbose>0: print(' gist.extendDisposal - future time horizon: ',lastDay+dDays,endDay+dDays,float(dDays))
   #####################
