@@ -4,6 +4,8 @@ import io
 import json
 import math
 import pathlib
+from datetime import datetime
+from typing import Optional
 
 import matplotlib
 
@@ -555,6 +557,34 @@ def _rt_marker_area_from_mmbbl(mmbbl):
 def _rt_svg_radius_from_mmbbl(mmbbl):
     """SVG circle radius in viewBox units from Matplotlib-equivalent area."""
     return math.sqrt(_rt_marker_area_from_mmbbl(mmbbl) / math.pi)
+
+
+def filter_rt_plot_wells_future_start_date(
+    well_df: pd.DataFrame,
+    reference_date: Optional[datetime] = None,
+) -> pd.DataFrame:
+    """
+    Drop R-t plot wells whose StartDate is strictly after reference_date.
+
+    Aligns with injection_updater_v5 future-start exclusion (calendar day).
+    Wells activating on reference_date are kept; unparseable StartDate values are kept.
+    """
+    if well_df.empty or "StartDate" not in well_df.columns:
+        return well_df
+
+    ref = reference_date or datetime.now()
+    ref_day = pd.Timestamp(ref.date())
+    parsed = pd.to_datetime(well_df["StartDate"], errors="coerce")
+    future_mask = parsed.notna() & (parsed.dt.normalize() > ref_day)
+
+    before = len(well_df)
+    filtered = well_df[~future_mask].copy()
+    if len(filtered) < before:
+        print(
+            f"Info: R-t plot excluded {before - len(filtered)}/{before} wells "
+            f"with StartDate after {ref_day.strftime('%Y-%m-%d')}."
+        )
+    return filtered
 
 
 def save_rt_plot_graph_artifact(helper, small_pp_df, well_df, artifact_key, display_order, title="R-t plot"):

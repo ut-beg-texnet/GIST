@@ -435,6 +435,55 @@ def _filter_critical_columns(
     return df
 
 
+def _exclude_wells_with_future_start_date(
+    df: pd.DataFrame,
+    *,
+    reference_date: datetime,
+    date_col: str = "WellActivatedDate",
+    context: str,
+    row_labels: Optional[pd.Series] = None,
+) -> pd.DataFrame:
+    """
+    Drop wells whose start date is strictly after reference_date (calendar day).
+
+    Wells activating on reference_date are kept. Unparseable dates and the
+    B3 default epoch (01-01-1970) are not treated as future.
+    """
+    if date_col not in df.columns or df.empty:
+        return df
+
+    ref_day = pd.Timestamp(reference_date.date())
+    raw = _coerce_to_series(df[date_col], index=df.index)
+    parsed = pd.to_datetime(raw, format="%m-%d-%Y", errors="coerce")
+    still_na = parsed.isna()
+    if still_na.any():
+        parsed = parsed.fillna(pd.to_datetime(raw.loc[still_na], errors="coerce"))
+
+    future_mask = parsed.notna() & (parsed.dt.normalize() > ref_day)
+    _log_masked_samples(
+        context=context,
+        field_name=date_col,
+        row_labels=row_labels,
+        raw_series=raw,
+        mask=future_mask,
+        issue_label="excluded (future start date)",
+    )
+
+    before = len(df)
+    df = df[~future_mask].copy()
+    if before > len(df):
+        logger.info(
+            "%s: excluded %d/%d rows (%.1f%%) with %s after %s.",
+            context,
+            before - len(df),
+            before,
+            100.0 * (before - len(df)) / before,
+            date_col,
+            ref_day.strftime("%Y-%m-%d"),
+        )
+    return df
+
+
 def update_csv(new_df: pd.DataFrame, path: Path, dedup_cols: List[str]) -> pd.DataFrame:
     """
     Merge new_df with the existing CSV at path (if present), deduplicate on
@@ -612,7 +661,9 @@ _TEXNET_INJ_B3_MAP = {
 }
 
 
-def texnet_well_to_b3(input_path: Path, output_path: Path) -> None:
+def texnet_well_to_b3(
+    input_path: Path, output_path: Path, *, reference_date: datetime
+) -> None:
     """
     Transform raw TexNet well CSV to B3 format.
     Combines LeaseName + WellNumber into WellName, then renames columns.
@@ -680,6 +731,13 @@ def texnet_well_to_b3(input_path: Path, output_path: Path) -> None:
         context="TexNet wells",
         row_labels=row_labels,
     )
+    df = _exclude_wells_with_future_start_date(
+        df,
+        reference_date=reference_date,
+        context="TexNet wells",
+        row_labels=row_labels.loc[df.index],
+    )
+    row_labels = row_labels.loc[df.index]
     df["PermittedMaxLiquidBPD"] = _to_numeric_safe(
         df["PermittedMaxLiquidBPD"],
         default=0.0,
@@ -847,7 +905,7 @@ def rrc_fetch_injection(client: Socrata, days: Optional[int] = None) -> Optional
 # RRC — B3 format transformations
 # ──────────────────────────────────────────────────────────────────────────────
 
-def rrc_map_wells_to_b3(df: pd.DataFrame) -> pd.DataFrame:
+def rrc_map_wells_to_b3(df: pd.DataFrame, *, reference_date: datetime) -> pd.DataFrame:
     """
     Map raw RRC well DataFrame (givw-z9t4 SODA columns) to the B3 schema
     expected by injectionV3.injTX.
@@ -933,6 +991,12 @@ def rrc_map_wells_to_b3(df: pd.DataFrame) -> pd.DataFrame:
         field_name="h1_date",
         context="RRC wells",
         row_labels=row_labels,
+    )
+    out = _exclude_wells_with_future_start_date(
+        out,
+        reference_date=reference_date,
+        context="RRC wells",
+        row_labels=_build_record_labels(out, ["InjectionWellId", "APINumber"]),
     )
     # RRC dataset does not include a permitted max injection rate column.
     # TODO: If the RRC open-data portal ever exposes a max-rate field, map it here.
@@ -1043,6 +1107,7 @@ def run_gist_pipeline(
     depth_cutoff: float,
     end_date_str: str,
     verbose: int,
+    reference_date: datetime,
 ) -> None:
     """
     Run the full injTX → addDaily → inj → processRates → outputReg pipeline
@@ -1058,10 +1123,30 @@ def run_gist_pipeline(
     depth_cutoff : depth threshold in feet (7000.0)
     end_date_str : end date 'MM-DD-YYYY' passed to processRates
     verbose      : 0 = silent, 1 = info, 2 = debug (injectionV3 internal prints)
+    reference_date : calendar day used to exclude wells with future start dates
     """
     logger.info("Running GIST pipeline for %s wells…", depth_label)
 
-    tx_inj = inj3.injTX(str(b3_well_file), depth_label, depth_cutoff, verbose=verbose)
+    well_df = pd.read_csv(b3_well_file, low_memory=False)
+    filtered_well_df = _exclude_wells_with_future_start_date(
+        well_df,
+        reference_date=reference_date,
+        context=f"{depth_label} GIST pipeline wells",
+    )
+    effective_well_file = b3_well_file
+    if len(filtered_well_df) < len(well_df):
+        filtered_path = b3_well_file.with_name(f"{b3_well_file.stem}_filtered.csv")
+        filtered_well_df.to_csv(filtered_path, index=False)
+        effective_well_file = filtered_path
+        logger.debug(
+            "%s: using filtered well file %s (%d -> %d wells)",
+            depth_label,
+            filtered_path.name,
+            len(well_df),
+            len(filtered_well_df),
+        )
+
+    tx_inj = inj3.injTX(str(effective_well_file), depth_label, depth_cutoff, verbose=verbose)
     logger.debug("%s: injTX initialised with %d wells", depth_label, len(tx_inj.wellList))
 
     tx_inj.addDaily(str(b3_inj_file), 100_000, verbose=verbose)
@@ -1360,7 +1445,7 @@ def run_texnet_section(
 
     # Step 3: Transform to B3 format
     logger.info("TexNet Step 3: Transforming to B3 format…")
-    texnet_well_to_b3(tx_well_raw, tx_well_b3)
+    texnet_well_to_b3(tx_well_raw, tx_well_b3, reference_date=now)
     texnet_inj_to_b3(tx_inj_raw, tx_inj_b3)
 
     # Step 4: Run GIST pipeline (Shallow + Deep)
@@ -1370,12 +1455,14 @@ def run_texnet_section(
         well_file=tx_shallow_well, inj_file=tx_shallow_inj,
         depth_label="Shallow", depth_cutoff=DEPTH_CUTOFF_FT,
         end_date_str=end_date_str, verbose=verbose,
+        reference_date=now,
     )
     run_gist_pipeline(
         b3_well_file=tx_well_b3, b3_inj_file=tx_inj_b3,
         well_file=tx_deep_well, inj_file=tx_deep_inj,
         depth_label="Deep", depth_cutoff=DEPTH_CUTOFF_FT,
         end_date_str=end_date_str, verbose=verbose,
+        reference_date=now,
     )
 
     # Step 5: Cleanup B3 intermediates (skip in debug mode to aid inspection)
@@ -1394,6 +1481,7 @@ def run_rrc_section(
     days: Optional[int],
     end_date_str: str,
     verbose: int,
+    now: datetime,
 ) -> None:
     """
     Fetch RRC wells + injection via Socrata, transform to B3 format (with
@@ -1462,7 +1550,7 @@ def run_rrc_section(
         )
 
         logger.info("RRC Step 2: Mapping well data to B3 format…")
-        b3_rrc_well_df = rrc_map_wells_to_b3(valid_rrc_wells)
+        b3_rrc_well_df = rrc_map_wells_to_b3(valid_rrc_wells, reference_date=now)
         update_csv(b3_rrc_well_df, rrc_well_raw, dedup_cols=["InjectionWellId"])
 
     # ── Best-effort injection fetch ──────────────────────────────────────────
@@ -1504,12 +1592,14 @@ def run_rrc_section(
         well_file=rrc_shallow_well, inj_file=rrc_shallow_inj,
         depth_label="Shallow", depth_cutoff=DEPTH_CUTOFF_FT,
         end_date_str=end_date_str, verbose=verbose,
+        reference_date=now,
     )
     run_gist_pipeline(
         b3_well_file=rrc_well_raw, b3_inj_file=rrc_inj_raw,
         well_file=rrc_deep_well, inj_file=rrc_deep_inj,
         depth_label="Deep", depth_cutoff=DEPTH_CUTOFF_FT,
         end_date_str=end_date_str, verbose=verbose,
+        reference_date=now,
     )
 
     logger.info("Section 2 (RRC): complete")
@@ -1586,7 +1676,7 @@ def main() -> None:
     if args.texnet_only:
         logger.info("Skipping RRC section (--texnet-only)")
     else:
-        tasks.append(("RRC", run_rrc_section, (tdir, dev, args.days, end_date_str, verbose)))
+        tasks.append(("RRC", run_rrc_section, (tdir, dev, args.days, end_date_str, verbose, now)))
 
     if not tasks:
         logger.warning("No sections to run.")
