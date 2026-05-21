@@ -1162,16 +1162,31 @@ class gistMC:
     # Check if we selected everything! #
     ####################################
     if sum(~consideredMask)==0: warnings.warn('gistMC.findWellsVec WARNING: All wells were selected for this event, parameters are likely overly diffusive.',UserWarning,stacklevel=2)
-    excludedWellsDF=self.wellDF[~consideredMask].reset_index(drop=True)
-    excludedWellsDF['Distances']=wellDistances[~consideredMask]
-    excludedWellsDF['DXs']=dxs[~consideredMask]
-    excludedWellsDF['DYs']=dys[~consideredMask]
-    excludedWellsDF['DDRatio']=ddRatios[~consideredMask]
+    _excludedMask=~consideredMask
+    excludedWellsDF=self.wellDF[_excludedMask].reset_index(drop=True)
+    # Assign by position: masked Series keep wellDF index labels and misalign after reset_index.
+    excludedWellsDF['Distances']=np.asarray(wellDistances[_excludedMask])
+    excludedWellsDF['DXs']=np.asarray(dxs[_excludedMask])
+    excludedWellsDF['DYs']=np.asarray(dys[_excludedMask])
+    excludedWellsDF['DDRatio']=ddRatios[_excludedMask]
     # Add a column with the time injecting prior to the earthquake
-    excludedWellsDF['YearsInjecting']=wellDurations[~consideredMask]
-    excludedWellsDF['EncompassingDay']=encompassingDays[~consideredMask]
-    excludedWellsDF['EncompassingDiffusivity']=encompassingDiffusivity[~consideredMask]
+    excludedWellsDF['YearsInjecting']=np.asarray(wellDurations[_excludedMask])
+    excludedWellsDF['EncompassingDay']=np.asarray(encompassingDays[_excludedMask])
+    excludedWellsDF['EncompassingDiffusivity']=np.asarray(encompassingDiffusivity[_excludedMask])
     excludedWellsDF['EventID']=eq['EventID']
+    # #region agent log
+    try:
+      import json as _json, time as _time
+      _dbg_uic = excludedWellsDF.loc[excludedWellsDF['UICNumber'].astype(str) == '115597']
+      if len(_dbg_uic) > 0:
+        _r = _dbg_uic.iloc[0]
+        _idx = self.wellDF.index[self.wellDF['ID'] == _r['ID']][0]
+        _true_yi = float(((pd.to_datetime(eq['Origin Date']) - pd.to_datetime(self.wellDF.loc[_idx, 'StartDate'])).days) / 365.25)
+        with open(r'c:\Users\bakirtzisn\source\repos\GIST\GIST\debug-bab168.log', 'a', encoding='utf-8') as _df:
+          _df.write(_json.dumps({'sessionId': 'bab168', 'runId': 'post-fix', 'hypothesisId': 'A', 'location': 'gistMC.py:findWellsVec', 'message': 'UIC115597 YearsInjecting alignment', 'data': {'assigned': float(_r['YearsInjecting']), 'true': _true_yi, 'delta': float(_r['YearsInjecting']) - _true_yi, 'startDate': str(_r['StartDate'])}, 'timestamp': int(_time.time() * 1000)}) + '\n')
+    except Exception:
+      pass
+    # #endregion
     ##########################################################################
     # Step 3: Pull injection data from injection file that matches well list #
     #         and calculate total injected volume for all wells at EQ date   #

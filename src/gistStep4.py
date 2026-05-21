@@ -18,6 +18,7 @@ from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
 from gist_graphs import (
+    filter_rt_plot_wells_future_start_date,
     save_pressure_ranges_graph_artifact,
     save_rt_plot_graph_artifact,
     save_time_series_quantiles_graph_artifact,
@@ -118,6 +119,7 @@ max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance']
 rt_plot_cutoff = max_dist_max_diff * 3
 smallWellList_r_t_plot_updated = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
 smallWellList_r_t_plot_updated = smallWellList_r_t_plot_updated.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
+smallWellList_r_t_plot_updated = filter_rt_plot_wells_future_start_date(smallWellList_r_t_plot_updated)
 
 # for testing, check the length of the allPerWellDisposalDF and its column names
 if allPerWellDisposalDF is not None:

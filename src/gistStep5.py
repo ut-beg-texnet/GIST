@@ -18,6 +18,7 @@ from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
 from gist_graphs import (
+    filter_rt_plot_wells_future_start_date,
     save_pressure_ranges_graph_artifact,
     save_rt_plot_graph_artifact,
     save_time_series_quantiles_graph_artifact,
@@ -111,6 +112,7 @@ else:
     rt_plot_cutoff = max_dist_max_diff * 3
     smallWellList_r_t_plot_forecast = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
     smallWellList_r_t_plot_forecast = smallWellList_r_t_plot_forecast.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
+    smallWellList_r_t_plot_forecast = filter_rt_plot_wells_future_start_date(smallWellList_r_t_plot_forecast)
     # D3 graph datasets temporarily disabled for matplotlib-only portal performance testing.
     # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_r_t_plot_forecast", smallWellList_r_t_plot_forecast)
 
