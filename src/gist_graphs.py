@@ -14,6 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.colors as mcolors
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -21,6 +22,12 @@ _TIME_SERIES_QUANTILES_TITLE = "Time Series Quantiles"
 _TIME_SERIES_SPAGHETTI_TITLE = "Time Series Spaghetti"
 _TIME_SERIES_QUANTILES_PER_WELL_TITLE = "Time Series Quantiles Per Well"
 _TIME_SERIES_SPAGHETTI_PER_WELL_TITLE = "Time Series Spaghetti Per Well"
+
+# Portal HTML limits: min-max downsampling preserves extrema; fewer lines/points still show the envelope.
+_PER_WELL_SPAGHETTI_MAX_REALIZATIONS = 40
+_PER_WELL_SPAGHETTI_MAX_GROUPS = 40
+_PER_WELL_SPAGHETTI_MAX_POINTS_PER_GROUP = 80
+_PER_WELL_QUANTILES_MAX_POINTS_PER_GROUP = 200
 
 _RT_SELECTION_STYLES = {
     "Must Include": {"fill": "#329839", "stroke": "#000000"},
@@ -462,12 +469,16 @@ def _build_time_series_payload(df, group_column, color_column=None, max_groups=N
 
     series = []
     for group_value, group_df in groups:
-        points = []
-        for row in group_df.itertuples(index=False):
-            x = getattr(row, "timestamp", None)
-            y = _rounded_float(getattr(row, "DeltaPressure"), 3)
-            if x is not None and y is not None:
-                points.append([x, y])
+        timestamps = pd.to_numeric(group_df["timestamp"], errors="coerce").to_numpy(dtype="int64")
+        pressures = pd.to_numeric(group_df["DeltaPressure"], errors="coerce").to_numpy(dtype=float)
+        valid = np.isfinite(timestamps) & np.isfinite(pressures)
+        if not np.any(valid):
+            continue
+        points = [
+            [int(timestamps[i]), round(float(pressures[i]), 3)]
+            for i in range(len(timestamps))
+            if valid[i]
+        ]
         if not points:
             continue
         points = _downsample_time_series_points(points, max_points_per_group)
@@ -491,13 +502,123 @@ def _build_time_series_payload(df, group_column, color_column=None, max_groups=N
     return series
 
 
+def _split_interval_volume_across_months(subgraph, interval_end, interval_start, volume_bbl, interval_days):
+    """
+    Allocate interval volume across calendar months when the window crosses a boundary.
+
+    Each row represents a backward-averaged rate over ``interval_days`` ending at
+    ``interval_end``. Volume is split in proportion to calendar-day overlap per month.
+    """
+    allocations = []
+    start_period = interval_start.to_period("M")
+    end_period = interval_end.to_period("M")
+    total_days = float(interval_days)
+    if total_days <= 0:
+        return allocations
+
+    for period in pd.period_range(start_period, end_period, freq="M"):
+        month_start = period.to_timestamp()
+        month_end_exclusive = (period + 1).to_timestamp()
+        overlap_start = max(interval_start, month_start)
+        overlap_end = min(interval_end, month_end_exclusive)
+        if overlap_end <= overlap_start:
+            continue
+        overlap_days = (overlap_end - overlap_start).total_seconds() / 86400.0
+        if overlap_days <= 0:
+            continue
+        allocated = volume_bbl * (overlap_days / total_days)
+        if allocated > 0:
+            allocations.append({"subgraph": subgraph, "month": period, "BPD": allocated})
+    return allocations
+
+
+def _aggregate_disposal_to_monthly_volumes(disposal_df):
+    """
+    Roll up interval-averaged disposal (BPD) to monthly barrel totals for per-well graphs.
+
+    Each input row is a backward-averaged daily rate (bbl/day) over the preceding interval
+    ending at Date (from injectionV3.regularize). Monthly volume integrates BPD × interval_days.
+    When an interval crosses a month boundary, volume is split proportionally by calendar-day
+    overlap. The output BPD column holds monthly BBL totals, not daily rates.
+    """
+    if disposal_df is None or disposal_df.empty:
+        return disposal_df if disposal_df is not None else pd.DataFrame()
+    if not {"Date", "BPD", "subgraph"}.issubset(disposal_df.columns):
+        return pd.DataFrame(columns=list(disposal_df.columns))
+
+    plot_df = disposal_df.copy()
+    plot_df["Date"] = pd.to_datetime(plot_df["Date"], errors="coerce")
+    plot_df["BPD"] = pd.to_numeric(plot_df["BPD"], errors="coerce")
+    if "Days" in plot_df.columns:
+        plot_df["Days"] = pd.to_numeric(plot_df["Days"], errors="coerce")
+    plot_df = plot_df.dropna(subset=["Date", "BPD", "subgraph"])
+    if plot_df.empty:
+        return plot_df
+
+    sort_cols = ["subgraph", "Days", "Date"] if "Days" in plot_df.columns else ["subgraph", "Date"]
+    plot_df = plot_df.sort_values(sort_cols).reset_index(drop=True)
+
+    grouped = plot_df.groupby("subgraph", sort=False)
+    if "Days" in plot_df.columns:
+        plot_df["interval_days"] = grouped["Days"].diff()
+    else:
+        plot_df["interval_days"] = grouped["Date"].diff().dt.days
+
+    median_interval = grouped["interval_days"].transform(
+        lambda values: values.dropna().median() if values.dropna().size else 1.0
+    )
+    plot_df["interval_days"] = plot_df["interval_days"].fillna(median_interval)
+    plot_df["interval_days"] = plot_df["interval_days"].clip(lower=1.0)
+    plot_df["volume_bbl"] = plot_df["BPD"] * plot_df["interval_days"]
+    plot_df["interval_start"] = plot_df["Date"] - pd.to_timedelta(plot_df["interval_days"], unit="D")
+
+    plot_df["start_month"] = plot_df["interval_start"].dt.to_period("M")
+    plot_df["end_month"] = plot_df["Date"].dt.to_period("M")
+    crosses_boundary = plot_df["start_month"] != plot_df["end_month"]
+
+    monthly_chunks = []
+    same_month = plot_df.loc[~crosses_boundary, ["subgraph", "end_month", "volume_bbl"]].rename(
+        columns={"end_month": "month", "volume_bbl": "BPD"}
+    )
+    if not same_month.empty:
+        monthly_chunks.append(
+            same_month.groupby(["subgraph", "month"], as_index=False)["BPD"].sum()
+        )
+
+    if crosses_boundary.any():
+        boundary_rows = []
+        for row in plot_df.loc[crosses_boundary].itertuples(index=False):
+            boundary_rows.extend(
+                _split_interval_volume_across_months(
+                    row.subgraph,
+                    row.Date,
+                    row.interval_start,
+                    row.volume_bbl,
+                    row.interval_days,
+                )
+            )
+        if boundary_rows:
+            monthly_chunks.append(pd.DataFrame(boundary_rows))
+
+    if not monthly_chunks:
+        return pd.DataFrame(columns=list(disposal_df.columns))
+
+    monthly = pd.concat(monthly_chunks, ignore_index=True)
+    monthly = monthly.groupby(["subgraph", "month"], as_index=False)["BPD"].sum()
+    monthly["Date"] = monthly["month"].dt.to_timestamp()
+    monthly = monthly.drop(columns=["month"]).sort_values(["subgraph", "Date"]).reset_index(drop=True)
+    return monthly
+
+
 def _build_disposal_payload(disposal_df):
     if disposal_df is None or disposal_df.empty:
         return {}
     if not {"Date", "BPD", "subgraph"}.issubset(disposal_df.columns):
         return {}
 
-    plot_df = disposal_df.copy()
+    plot_df = _aggregate_disposal_to_monthly_volumes(disposal_df)
+    if plot_df.empty:
+        return {}
     if "timestamp" in plot_df.columns:
         plot_df["timestamp"] = pd.to_numeric(plot_df["timestamp"], errors="coerce")
     else:
@@ -1233,7 +1354,7 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
     yl.textContent = 'Delta Pressure (PSI)';
     svg.appendChild(yl);
     const yr = makeEl('text', { x: x1 + 58, y: (y0 + y1) / 2, 'text-anchor': 'middle', class: 'axis-label', transform: 'rotate(90 ' + (x1 + 58) + ' ' + ((y0 + y1) / 2) + ')' });
-    yr.textContent = 'BPD';
+    yr.textContent = 'BBL/month';
     svg.appendChild(yr);
 
     if (payload.mode === 'quantiles') {
@@ -1267,6 +1388,21 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 
+def _subsample_spaghetti_plot_df(plot_df, group_column):
+    """Reduce rows before HTML payload build; min-max downsampling keeps curve shape."""
+    if group_column not in plot_df.columns:
+        return plot_df
+
+    unique_groups = plot_df[group_column].dropna().unique()
+    if len(unique_groups) <= _PER_WELL_SPAGHETTI_MAX_REALIZATIONS:
+        return plot_df
+
+    keep_groups = unique_groups[
+        np.linspace(0, len(unique_groups) - 1, _PER_WELL_SPAGHETTI_MAX_REALIZATIONS, dtype=int)
+    ]
+    return plot_df[plot_df[group_column].isin(keep_groups)]
+
+
 def _save_per_well_time_series_graph_artifact(
     helper,
     df,
@@ -1281,16 +1417,24 @@ def _save_per_well_time_series_graph_artifact(
     plot_df = _coerce_time_series_df(df, ["Date", "DeltaPressure", "subgraph", group_column])
     if plot_df.empty:
         return
+    if mode == "spaghetti":
+        plot_df = _subsample_spaghetti_plot_df(plot_df, group_column)
 
     disposal_by_well = _build_disposal_payload(disposal_df)
     wells = []
     for well_name, well_df in plot_df.groupby("subgraph", sort=True):
+        if mode == "spaghetti":
+            max_groups = _PER_WELL_SPAGHETTI_MAX_GROUPS
+            max_points = _PER_WELL_SPAGHETTI_MAX_POINTS_PER_GROUP
+        else:
+            max_groups = None
+            max_points = _PER_WELL_QUANTILES_MAX_POINTS_PER_GROUP
         series = _build_time_series_payload(
             well_df,
             group_column=group_column,
             color_column=color_column,
-            max_groups=500 if mode == "spaghetti" else None,
-            max_points_per_group=220 if mode == "spaghetti" else 400,
+            max_groups=max_groups,
+            max_points_per_group=max_points,
         )
         if not series:
             continue

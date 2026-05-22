@@ -14,7 +14,6 @@ from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
 from gist_graphs import (
-    filter_rt_plot_wells_future_start_date,
     save_pressure_ranges_graph_artifact,
     save_rt_plot_graph_artifact,
     save_time_series_quantiles_graph_artifact,
@@ -139,7 +138,8 @@ rt_plot_cutoff = max_dist_max_diff * 3
 # Filter the dataset
 smallWellList_r_t_plot = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
 smallWellList_r_t_plot = smallWellList_r_t_plot.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
-smallWellList_r_t_plot = filter_rt_plot_wells_future_start_date(smallWellList_r_t_plot)
+
+
 
 
 if disaggregationDF.empty:
