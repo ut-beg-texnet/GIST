@@ -721,16 +721,35 @@ class gistMC:
     #####################
     self.wellDF=pd.read_csv(self.wellFile)
     self.nw=self.wellDF.shape[0]
-    # Check sanity of injection file
-    injWellCount=pd.read_csv(self.injFile,usecols=['ID']).nunique()
-    # This part is probably very slow
-    injWellDays=pd.read_csv(self.injFile,usecols=['Days'])
-    injWellDayMin=injWellDays.min().iloc[0]
-    injWellDayMax=float(injWellDays.max().iloc[0])
-    injWellDDay=injWellDays[injWellDays>injWellDayMin].min().iloc[0]-injWellDayMin
+    # Compute injection file statistics in a single chunked pass
+    _unique_ids=set()
+    _day_min1=np.inf
+    _day_min2=np.inf
+    _day_max=-np.inf
+    for _chunk in pd.read_csv(self.injFile, usecols=['ID','Days'], chunksize=100000):
+      _unique_ids.update(_chunk['ID'].unique())
+      _chunk_days=_chunk['Days'].dropna()
+      if len(_chunk_days)==0: continue
+      _cmax=float(_chunk_days.max())
+      if _cmax>_day_max: _day_max=_cmax
+      _cmin=float(_chunk_days.min())
+      if _cmin<_day_min1:
+        _day_min2=_day_min1
+        _day_min1=_cmin
+      _second=float(_chunk_days[_chunk_days>_day_min1].min()) if (_chunk_days>_day_min1).any() else np.inf
+      if _second<_day_min2:
+        _day_min2=_second
+    if _day_min1==np.inf:
+      raise ValueError("Injection file has no valid Days values: "+self.injFile)
+    if _day_min2==np.inf:
+      raise ValueError("Injection file has only one unique Days value — cannot determine time step interval: "+self.injFile)
+    injWellDayMin=_day_min1
+    injWellDayMax=_day_max
+    injWellDDay=_day_min2-_day_min1
     self.injDT=float(injWellDDay)
     self.injOT=float(injWellDayMin)
     self.injNT=1+int((injWellDayMax-injWellDayMin)/injWellDDay)
+    injWellCount=pd.Series([len(_unique_ids)])
     if verbose>0:
       print(' gistMC.addWells: well file added with ',self.nw,' wells')
       print(' gistMC.addWells: well columns:',self.wellDF.columns)
@@ -1195,25 +1214,23 @@ class gistMC:
     ###################
     ids=consideredWellsDF['ID']
     excludedIDs=excludedWellsDF['ID']
+    ids_set=set(ids)
+    excludedIDs_set=set(excludedIDs)
     #####################
     # Open self.injFile #
     #####################
     iter_csv=pd.read_csv(self.injFile, iterator=True,chunksize=100000)
-    #############################################################
-    # Shelly suggests looking at SPARKF for reading through this #
-    #############################################################
-    injDF=pd.DataFrame()
-    injExcludedDF=pd.DataFrame()
+    injChunks=[]
+    injExcludedChunks=[]
     for chunk in iter_csv:
-      #############################################
-      # Collect injection data for selected wells #
-      # This concat is slow! #
-      #############################################
-      injDF=pd.concat([injDF, chunk[chunk['ID'].isin(ids)]])
-      ###############################################
-      # Collect injection data for unselected wells #
-      ###############################################
-      injExcludedDF=pd.concat([injExcludedDF, chunk[chunk['ID'].isin(excludedIDs)]])
+      matched=chunk[chunk['ID'].isin(ids_set)]
+      if len(matched)>0:
+        injChunks.append(matched)
+      excluded=chunk[chunk['ID'].isin(excludedIDs_set)]
+      if len(excluded)>0:
+        injExcludedChunks.append(excluded)
+    injDF=pd.concat(injChunks, ignore_index=True) if injChunks else pd.DataFrame()
+    injExcludedDF=pd.concat(injExcludedChunks, ignore_index=True) if injExcludedChunks else pd.DataFrame()
     ############################################################
     # Do we need this? Peter commented it out - Bill had it in #
     ############################################################
@@ -1522,10 +1539,8 @@ class gistMC:
     # This has the well function in it - sc.exp1. Moving this out of the loop speeds up   #
     # computation vs. FSP for a time series by O(nt). epp is [nwC,nReal,nt].              #
     # We reuse parts of this array in the summation as we assume that dt is fixed.        #
-    # I'm sure that there are better ways to broadcast these shapes but I don't know how! #
-    # To-do: Update with new shape of ppp.                                                #
     #######################################################################################
-    epp=sc.exp1(ppp.reshape((nwC,nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(nReal,1))
+    epp=sc.exp1(ppp[:,:,np.newaxis] / durations[np.newaxis,np.newaxis,:nt])
     if verbose>1: print('runPressureScenariosVectorized epp min/max: ',min(epp.flatten()),max(epp.flatten()))
     #########################################################
     # Get output of well function x the change in injection #
@@ -1542,20 +1557,20 @@ class gistMC:
         )
     timeStepsSum1 = np.sum(
         epp[:, :, -ieq:]
-        * dQdtArray[:, :ieq].reshape((nwC, 1, ieq)).repeat(nReal, 1),
+        * dQdtArray[:, np.newaxis, :ieq],
         axis=2,
     )
     timeStepsSum2 = np.sum(
         epp[:, :, -(ieq + 1) :]
-        * dQdtArray[:, : ieq + 1].reshape((nwC, 1, ieq + 1)).repeat(nReal, 1),
+        * dQdtArray[:, np.newaxis, : ieq + 1],
         axis=2,
     )
     ########################################################################
     # Multiply the sum of the time steps with gRhoOverT and convert to PSI #
     # dP is the change in pressure from the first time step [nw,nReal,nt]  #
     ########################################################################
-    dP1=timeStepsSum1 * gRhoOverT.reshape((1,nReal)).repeat(nwC,0) / 6894.76
-    dP2=timeStepsSum2 * gRhoOverT.reshape((1,nReal)).repeat(nwC,0) / 6894.76
+    dP1=timeStepsSum1 * (gRhoOverT[np.newaxis,:] / 6894.76)
+    dP2=timeStepsSum2 * (gRhoOverT[np.newaxis,:] / 6894.76)
     ###################################################
     # Linear interpolation between the two time steps #
     # bounding the EQ time dPatEQ [nw,nReal]          #
@@ -1578,7 +1593,7 @@ class gistMC:
     #########################################################
     # Calculate percentages for each realization [nw,nReal] #
     #########################################################
-    percentages=100.* dPatEQ / totalPressureAtEQ.repeat(nwC,0)
+    percentages=100.* dPatEQ / totalPressureAtEQ
     ##########################################
     # Get dataframe of output scenarios from #
     # input numpy arrays and well dataframe  #
@@ -1862,9 +1877,8 @@ class gistMC:
     # This has the well function in it - sc.exp1. Moving this out of the loop speeds up   #
     # computation vs. FSP for a time series by O(nt). epp is [nwC,nReal,nt].              #
     # We reuse parts of this array in the summation as we assume that dt is fixed.        #
-    # I'm sure that there are better ways to broadcast these shapes but I don't know how! #
     #######################################################################################
-    epp=sc.exp1(ppp.reshape((nwC,nReal,1)).repeat(nt,2) / durations[:nt].reshape((1,1,nt)).repeat(nwC,0).repeat(nReal,1))
+    epp=sc.exp1(ppp[:,:,np.newaxis] / durations[np.newaxis,np.newaxis,:nt])
     if verbose>1: print('runPressureScenariosTimeSeriesConv epp min/max: ',min(epp.flatten()),max(epp.flatten()))
     #dP=np.zeros([nwC,self.nReal,nt])
     #
@@ -1872,8 +1886,8 @@ class gistMC:
     # dP output should be [nwC,nReal,nt]
     # dQdtArray is [nwC,nt]
     # epp is [nwC,nReal,nt]
-    dP=sg.fftconvolve(np.flip(epp[:,:,:],axis=2),dQdtArray[:,np.newaxis,:].repeat(nReal,1), mode='full',axes=(2,))
-    dP=dP[:,:,:nt] * gRhoOverT.reshape((1,nReal,1)).repeat(nwC,0).repeat(nt,2) / 6894.76
+    dP=sg.fftconvolve(np.flip(epp,axis=2),dQdtArray[:,np.newaxis,:].repeat(nReal,1), mode='full',axes=(2,))
+    dP=dP[:,:,:nt] * (gRhoOverT[np.newaxis,:,np.newaxis] / 6894.76)
     ######################################################
     # Check output for negative values and warn if found #
     # There are some very small negative numbers due to  #
@@ -1892,7 +1906,7 @@ class gistMC:
     #########################################################
     # Calculate percentages for each realization [nw,nReal] #
     #########################################################
-    percentages=100.* dPatEQ / totalPressureAtEQ.repeat(nwC,0)
+    percentages=100.* dPatEQ / totalPressureAtEQ
     ##########################################
     # Get dataframe of output scenarios from #
     # input numpy arrays and well dataframe  #
@@ -1959,10 +1973,10 @@ class gistMC:
     ############################################################################
     dP=np.zeros([nx,ny,nw,self.nReal,nt])
     durations=np.max(secArray)-secArray+dts
-    epp=sc.exp1(ppp.reshape((nwxy,self.nReal,1)).repeat(nt,2) / durations[:].reshape((1,1,nt)).repeat(nwxy,0).repeat(self.nReal,1)).reshape((nx,ny,nw,self.nReal,nt))
-    # Use convolution with the 
-    dP=sg.fftconvolve(np.flip(epp[:,:,:,:,:],axis=4),dQdtArray[np.newaxis,np.newaxis,:,np.newaxis,:], mode='full',axes=(4,))
-    dP= dP[:,:,:,:,:nt]*gRhoOverT.reshape((1,1,1,self.nReal,1)).repeat(nw,2).repeat(nx,0).repeat(ny,1).repeat(nt,4) / 6894.76
+    epp=sc.exp1(ppp[:,:,np.newaxis] / durations[np.newaxis,np.newaxis,:nt]).reshape((nx,ny,nw,self.nReal,nt))
+    # Use convolution with the
+    dP=sg.fftconvolve(np.flip(epp,axis=4),dQdtArray[np.newaxis,np.newaxis,:,np.newaxis,:], mode='full',axes=(4,))
+    dP=dP[:,:,:,:,:nt] * (gRhoOverT[np.newaxis,np.newaxis,np.newaxis,:,np.newaxis] / 6894.76)
     ##############
     # dP is big! #
     ##############
@@ -3210,28 +3224,18 @@ def prepInj(consideredWells,injDF,dt,dxdyIn=None,eqDay=None,endDate=None,epoch=p
   ###################
   # Loop over wells #
   ###################
-  for iw in range(nwC):
-    # Check maximum and minimum indicies relative to array size
-    
-    ############################################################
-    # Make list of BPD and Days values that match this well ID #
-    ############################################################
-    bpds=injDF['BPD'][injDF['ID']==consideredWells['ID'][iw]].tolist()
-    days=injDF['Days'][injDF['ID']==consideredWells['ID'][iw]].tolist()
-    #############################################################
-    # Check if we have any injection for this well              #
-    # Should I put a warning here if we have no injection data? #
-    #############################################################
-    if len(days)>0:
-      for id in range(len(days)):
-        #################################################
-        # Get index of day value - this should be exact #
-        #################################################
-        it=int(round((days[id]-ot)/dt))
-        if verbose>0:
-          if it<itMin: itMin=it
-          if it>itMax: itMax=it
-        bpdArray[iw,it]=bpds[id]
+  wellID_to_row={wid: iw for iw, wid in enumerate(wellIDs)}
+  for wid, group in injDF.groupby('ID', sort=False):
+    if wid not in wellID_to_row: continue
+    iw=wellID_to_row[wid]
+    days_arr=group['Days'].values
+    bpds_arr=group['BPD'].values
+    it_arr=np.rint((days_arr-ot)/dt).astype(int)
+    valid=(it_arr>=0) & (it_arr<=nt)
+    bpdArray[iw,it_arr[valid]]=bpds_arr[valid]
+    if verbose>0 and len(it_arr)>0:
+      itMin=min(itMin,int(it_arr.min()))
+      itMax=max(itMax,int(it_arr.max()))
   if verbose>0: print(' prepInj: min,max indicies ',itMin,itMax)
   ######################################################
   # Get index for time of earthquake if eqDay provided #
@@ -3487,25 +3491,13 @@ def getDates(inDF,epoch,dayName='Days',default=99999999,verbose=0):
   """
   outName=dayName.replace('Days','Date')
   outDF=inDF.copy()
-  dateList=[]
   if verbose>0: print(' getDates: ',len(inDF[dayName]))
-  ##################
-  # Loop over rows #
-  ##################
-  for index,row in inDF.iterrows():
-    #######################
-    # Access Days column #
-    #######################
-    day=row[dayName]
-    if pd.isna(day):
-      dateList.append(epoch+ pd.Timedelta(default,unit='day'))
-    else:
-      try:
-        dateList.append(epoch+pd.Timedelta(day,unit='day'))
-      except:
-        print('getDates error ',day,pd.Timedelta(day,unit='day'),epoch)
-  #print(' getDates - dateList ', dateList)
-  outDF[outName]=dateList
+  try:
+    outDF[outName]=epoch+pd.to_timedelta(inDF[dayName].fillna(default),unit='day')
+  except (ValueError,TypeError) as e:
+    bad=inDF[dayName][pd.to_numeric(inDF[dayName],errors='coerce').isna() & inDF[dayName].notna()]
+    print('getDates error in column',dayName,'- non-numeric values:',bad.head(5).tolist())
+    raise
   return outDF
 
 def datesFromEpoch(epoch,dayOffsetSeries):
@@ -4113,7 +4105,14 @@ def getPerWellPressureTimeSeriesSpaghettiAndQuantiles(deltaPP,dayVec,diffPPVec,w
     wellPPDF=pd.DataFrame(d)
     winWellPPDF=wellPPDF[wellPPDF['Percentile'].isin(quantiles)]
     quantiles_list.append(winWellPPDF)
-    spaghetti_list.append(wellPPDF[['DeltaPressure','Days','Realization','WellID','Diffusivity']])
+    # Keep a representative subset of realizations for portal spaghetti HTML (full set is not needed for display).
+    max_spaghetti_realizations = 40
+    spaghetti_cols = ['DeltaPressure', 'Days', 'Realization', 'WellID', 'Diffusivity']
+    if nReal > max_spaghetti_realizations:
+      keep_realizations = np.linspace(0, nReal - 1, max_spaghetti_realizations, dtype=int)
+      spaghetti_list.append(wellPPDF[wellPPDF['Realization'].isin(keep_realizations)][spaghetti_cols])
+    else:
+      spaghetti_list.append(wellPPDF[spaghetti_cols])
   PPQuantilesDF = pd.concat(quantiles_list, ignore_index=True) if quantiles_list else pd.DataFrame(columns=['DeltaPressure','Days','Realization','Order','WellID','Percentile'])
   PPSpaghettiDF = pd.concat(spaghetti_list, ignore_index=True) if spaghetti_list else pd.DataFrame(columns=['DeltaPressure','Days','Realization','WellID','Diffusivity'])
   #  PPQuantilesDF=pd.concat([PPQuantilesDF,winWellPPDF],ignore_index=True)
