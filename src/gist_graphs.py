@@ -702,8 +702,9 @@ def filter_rt_plot_wells_future_start_date(
     filtered = well_df[~future_mask].copy()
     if len(filtered) < before:
         print(
-            f"Info: R-t plot excluded {before - len(filtered)}/{before} wells "
-            f"with StartDate after {ref_day.strftime('%Y-%m-%d')}."
+            f"R-t plot excluded {before - len(filtered)}/{before} wells "
+            f"with StartDate after {ref_day.strftime('%Y-%m-%d')}.",
+            flush=True,
         )
     return filtered
 

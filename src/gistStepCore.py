@@ -19,6 +19,7 @@ from gistMC import summarizePPResults
 from gistMC import prepTotalPressureTimeSeriesQuantilesPlot
 from gistMC import prepTotalPressureTimeSeriesSpaghettiPlot
 from gistMC import getPerWellPressureTimeSeriesSpaghettiAndQuantiles
+from progress import report_progress
 
 def runGistCore(input, wellcsv, injectioncsv):
     # Initialize gistMC class
@@ -26,10 +27,11 @@ def runGistCore(input, wellcsv, injectioncsv):
     porePressureParams = input.get("porePressureParams")
     gistMC_instance.initPP(**porePressureParams)
     eq = input.get("eq")
+    report_progress("Loading well and injection data")
     gistMC_instance.addWells(wellcsv, injectioncsv)
     forecastYears = input.get("years_diff")
 
-    print("Info: Finding Wells")
+    report_progress("Finding nearby wells")
 
     considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWellsVec(eq,PE=False, responseYears=forecastYears)
     if 'Date' not in inj_df.columns:
@@ -39,12 +41,12 @@ def runGistCore(input, wellcsv, injectioncsv):
     else:
         inj_df['Date'] = pd.to_datetime(inj_df['Date'])
 
-    print("Info: Generating r-t Plot")
+    report_progress("Preparing data for R-t plot")
 
     # r-t plot combination of considered well and excluded wells df reference plots.py
     smallPPDF,smallWellList = prepRTPlot(considered_wells_df, excluded_wells_df, 1980, [gistMC_instance.diffPPMin, gistMC_instance.diffPPMax], eq, True)
 
-    print("Info: Generating Disaggregation Plot")
+    report_progress("Running pressure scenarios")
 
     # disaggregationPlot plot
     currentWellsDF=considered_wells_df[considered_wells_df['EncompassingDay']<0.].reset_index(drop=True)
@@ -62,7 +64,7 @@ def runGistCore(input, wellcsv, injectioncsv):
   
     disaggregationDF = prepDisaggregationPlot(filteredDF,orderedWellList,jitter=0.1)
 
-    print("Info: Generating Time Series Plots")
+    report_progress("Building pressure time series")
 
     # time series plot
     winWellsDF,winInjDF = getWinWells(filteredDF,currentWellsDF,inj_df)

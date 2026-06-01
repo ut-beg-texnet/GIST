@@ -13,6 +13,7 @@ from math import ceil
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
+from progress import report_progress
 from gist_graphs import (
     save_pressure_ranges_graph_artifact,
     save_rt_plot_graph_artifact,
@@ -36,7 +37,7 @@ eventType = helper.getParameterValueWithStepIndexAndParamName(0,"eventType")
 
 formattedEarthquake = {}
 
-print("Info: Starting Analysis")
+report_progress("Preparing analysis inputs")
 
 if eventType == 'Earthquake':
 
@@ -123,12 +124,15 @@ else:
     injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
 
 try:
+    report_progress("Running analysis workflow")
     smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
 except ValueError as e:
     helper.addMessageWithStepIndex(1, str(e), 2)
     helper.setSuccessForStepIndex(1, False)
     helper.writeResultsFile()
     sys.exit(1)
+
+report_progress("Preparing graph data")
 
 # Calculate cutoff for R-T Plot
 max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance'].max()
@@ -146,6 +150,7 @@ if disaggregationDF.empty:
     helper.addMessageWithStepIndex(1, "No Wells Found.", 2)
     helper.setSuccessForStepIndex(1, False)
 else:
+    report_progress("Saving result datasets")
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallPPDF", smallPPDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList", smallWellList)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "smallWellList_r_t_plot", smallWellList_r_t_plot)
@@ -160,6 +165,7 @@ else:
     GISTInjection = pd.read_csv(injectioncsv)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTWells-corrections", GISTWells)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTInjection-corrections", GISTInjection)
+    report_progress("Generating result graphs")
     save_rt_plot_graph_artifact(
         helper,
         smallPPDF,

@@ -17,6 +17,7 @@ from math import ceil
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
+from progress import report_progress
 from gist_graphs import (
     filter_rt_plot_wells_future_start_date,
     save_pressure_ranges_graph_artifact,
@@ -35,6 +36,8 @@ helper = TexNetWebToolLaunchHelper(scratchPath)
 
 #Get the args data out of it.
 argsData = helper.argsData
+
+report_progress("Preparing forecast inputs")
 
 #getParameterValueWithStepIndexAndParamName
 Earthquake = helper.getParameterValueWithStepIndexAndParamName(0,"Earthquake").get("selectedRow").get("attributes")
@@ -98,15 +101,15 @@ else:
     wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
     injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
 
+report_progress("Running forecast workflow")
 smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
+
+report_progress("Preparing graph data")
 
 if disaggregationDF.empty:
     helper.addMessageWithStepIndex(4, "No Wells Found.", 2)
     helper.setSuccessForStepIndex(4, False)
 else:
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF_forecast", smallPPDF)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_forecast", smallWellList)
-
     # Calculate cutoff for R-T Plot
     max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance'].max()
     rt_plot_cutoff = max_dist_max_diff * 3
@@ -121,8 +124,12 @@ else:
     # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "totalPPSpaghettiDF_forecast", totalPPSpaghettiDF)
     # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellPPQuantilesDF_forecast", allPerWellPPQuantilesDF)
     # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellPPSpaghettiDF_forecast", allPerWellPPSpaghettiDF)
+    report_progress("Saving result datasets")
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallPPDF_forecast", smallPPDF)
+    helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_forecast", smallWellList)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "allPerWellDisposalDF_forecast", allPerWellDisposalDF)
 
+    report_progress("Generating result graphs")
     save_rt_plot_graph_artifact(
         helper,
         smallPPDF,

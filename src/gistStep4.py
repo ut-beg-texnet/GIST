@@ -17,6 +17,7 @@ from math import ceil
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
+from progress import report_progress
 from gist_graphs import (
     filter_rt_plot_wells_future_start_date,
     save_pressure_ranges_graph_artifact,
@@ -54,6 +55,8 @@ helper = TexNetWebToolLaunchHelper(scratchPath)
 
 #Get the args data out of it.
 argsData = helper.argsData
+
+report_progress("Preparing updated analysis inputs")
 
 #getParameterValueWithStepIndexAndParamName
 Earthquake = helper.getParameterValueWithStepIndexAndParamName(0,"Earthquake").get("selectedRow").get("attributes")
@@ -112,7 +115,10 @@ input = {
 
 wellcsv, injectioncsv = get_corrected_gist_data_paths(helper, wellType)
 
+report_progress("Running updated analysis workflow")
 smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
+
+report_progress("Preparing graph data")
 
 # Calculate cutoff for R-T Plot
 max_dist_max_diff = smallPPDF[smallPPDF['Diffusivity'] == 'Maximum']['Distance'].max()
@@ -120,13 +126,6 @@ rt_plot_cutoff = max_dist_max_diff * 3
 smallWellList_r_t_plot_updated = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
 smallWellList_r_t_plot_updated = smallWellList_r_t_plot_updated.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
 smallWellList_r_t_plot_updated = filter_rt_plot_wells_future_start_date(smallWellList_r_t_plot_updated)
-
-# for testing, check the length of the allPerWellDisposalDF and its column names
-if allPerWellDisposalDF is not None:
-    print(f"allPerWellDisposalDF length: {len(allPerWellDisposalDF)}")
-    print(f"allPerWellDisposalDF column names: {allPerWellDisposalDF.columns.tolist()}")
-else:
-    print("allPerWellDisposalDF is None")
 
 if disaggregationDF.empty:
     helper.addMessageWithStepIndex(3, "No Wells Found.", 2)
@@ -151,6 +150,7 @@ else:
     )
     orderedWellListWithFutureRates = orderedWellList.drop(orderedWellList.index[-1])
 
+    report_progress("Saving results")
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallPPDF_updated", smallPPDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "smallWellList_updated", smallWellList)
     # D3 graph datasets temporarily disabled for matplotlib-only portal performance testing.
@@ -163,6 +163,7 @@ else:
     # helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellPPSpaghettiDF_updated", allPerWellPPSpaghettiDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(3, "allPerWellDisposalDF_updated", allPerWellDisposalDF)
 
+    report_progress("Generating result graphs")
     save_rt_plot_graph_artifact(
         helper,
         smallPPDF,
