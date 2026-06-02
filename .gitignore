@@ -7,14 +7,18 @@
 /src/__pycache__
 /.idea
 
-# markdown files
-*.md
+# Agent markdown files
+AGENTS.md
+CLAUDE.md
 
 # any __pycache__ directories
 **/__pycache__/
 
 # cursor directory
 .cursor/
+
+# claude
+.claude/
 
 # any .venv directories
 **/venv/
@@ -46,6 +50,7 @@ credentials.py
 RRC_data/
 rrc_transformed/
 test_data/
+injection_data_backups/
 
 # .pyc files
 *.pyc
@@ -53,3 +58,7 @@ test_data/
 /src/injection/inspect_shapefiles.py
 /src/injection/basement_permian/
 /src/data/texnet_injection_data.csv
+
+injection_updater_v5_documentation.md
+RRC_Data_Integration_Overview.md
+
