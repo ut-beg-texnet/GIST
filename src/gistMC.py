@@ -498,28 +498,26 @@ class gistMC:
       # If we match - nu_u Unc goes away #
       ####################################
       if verbose>0: print(" Monte Carlo poroelastic - matched diffusivities")
-      for i in range(len(self.lamdaVec)):
-        # I don't think that we need this loop - just operate on the vectors #
-        #############################
-        # Get new Lame's parameters #
-        #############################
-        lamda,lamda_u = matchPE2PP(self.muVec[i],self.nuVec[i],self.alphaVec[i],self.CVec[i])
-        nu_u=lamda_u/(2.*(lamda_u+self.muVec[i]))
-        self.lamdaVec[i]=lamda
-        self.lamda_uVec[i]=lamda_u
-        #######################################
-        # Recompute undrained Poisson's ratio #
-        #######################################
-        self.nu_uVec[i]=nu_u
-        ###########################################
-        # Recompute Skempton's coefficient vector #
-        ###########################################
-        self.BVec[i]=3.*(self.nu_uVec[i]-self.nuVec[i])/(self.alphaVec[i]*(1.+self.nu_uVec[i])*(1.-2.*self.nuVec[i]))
-        ############################################
-        # Recompute poroelastic diffusivity vector #
-        # This should be the same as the PP one    #
-        ############################################
-        self.diffPEVec[i]=(self.kapM2Vec[i])*(self.lamda_uVec[i]-self.lamdaVec[i])*(self.lamdaVec[i]+2.*self.muVec[i])/(self.ntaVec[i]*self.alphaVec[i]*self.alphaVec[i]*(self.lamda_uVec[i]+2.*self.muVec[i]))
+      # Vectorized: matchPE2PP is pure elementwise arithmetic, so operate on
+      # the whole realization vectors at once instead of looping per realization.
+      # Per-element operations and their order are unchanged, so results are identical.
+      #############################
+      # Get new Lame's parameters #
+      #############################
+      self.lamdaVec,self.lamda_uVec = matchPE2PP(self.muVec,self.nuVec,self.alphaVec,self.CVec)
+      #######################################
+      # Recompute undrained Poisson's ratio #
+      #######################################
+      self.nu_uVec=self.lamda_uVec/(2.*(self.lamda_uVec+self.muVec))
+      ###########################################
+      # Recompute Skempton's coefficient vector #
+      ###########################################
+      self.BVec=3.*(self.nu_uVec-self.nuVec)/(self.alphaVec*(1.+self.nu_uVec)*(1.-2.*self.nuVec))
+      ############################################
+      # Recompute poroelastic diffusivity vector #
+      # This should be the same as the PP one    #
+      ############################################
+      self.diffPEVec=(self.kapM2Vec)*(self.lamda_uVec-self.lamdaVec)*(self.lamdaVec+2.*self.muVec)/(self.ntaVec*self.alphaVec*self.alphaVec*(self.lamda_uVec+2.*self.muVec))
       if verbose>0:
         print(" Monte Carlo poroelastic (matched) - B     min/max:",np.amin(self.BVec),np.amax(self.BVec))
         print(" Monte Carlo poroelastic (matched) -diffPE min/max:",np.amin(self.diffPEVec),np.amax(self.diffPEVec))
@@ -721,35 +719,29 @@ class gistMC:
     #####################
     self.wellDF=pd.read_csv(self.wellFile)
     self.nw=self.wellDF.shape[0]
-    # Compute injection file statistics in a single chunked pass
-    _unique_ids=set()
-    _day_min1=np.inf
-    _day_min2=np.inf
-    _day_max=-np.inf
-    for _chunk in pd.read_csv(self.injFile, usecols=['ID','Days'], chunksize=100000):
-      _unique_ids.update(_chunk['ID'].unique())
-      _chunk_days=_chunk['Days'].dropna()
-      if len(_chunk_days)==0: continue
-      _cmax=float(_chunk_days.max())
-      if _cmax>_day_max: _day_max=_cmax
-      _cmin=float(_chunk_days.min())
-      if _cmin<_day_min1:
-        _day_min2=_day_min1
-        _day_min1=_cmin
-      _second=float(_chunk_days[_chunk_days>_day_min1].min()) if (_chunk_days>_day_min1).any() else np.inf
-      if _second<_day_min2:
-        _day_min2=_second
-    if _day_min1==np.inf:
+    # Read the injection file ONCE into memory. findWellsVec() filters this
+    # in-memory frame by selected well IDs instead of re-reading the file from
+    # disk, eliminating a second full parse of the largest input file. The
+    # frame is held on the instance (self.injAllDF) for the run; default dtypes
+    # are used so downstream results are byte-identical to reading fresh.
+    self.injAllDF=pd.read_csv(self.injFile)
+    # Compute injection file statistics from the in-memory frame.
+    # injOT = smallest Days; injDT = (2nd-smallest distinct Days) - smallest;
+    # injNT = 1 + int((maxDays - minDays)/injDT). This reproduces the prior
+    # chunked logic (which tracked the second-smallest *distinct* Days value).
+    _days=self.injAllDF['Days'].dropna()
+    if len(_days)==0:
       raise ValueError("Injection file has no valid Days values: "+self.injFile)
-    if _day_min2==np.inf:
+    _uniqueDays=np.sort(_days.unique())
+    if len(_uniqueDays)<2:
       raise ValueError("Injection file has only one unique Days value — cannot determine time step interval: "+self.injFile)
-    injWellDayMin=_day_min1
-    injWellDayMax=_day_max
-    injWellDDay=_day_min2-_day_min1
+    injWellDayMin=float(_uniqueDays[0])
+    injWellDayMax=float(_days.max())
+    injWellDDay=float(_uniqueDays[1]-_uniqueDays[0])
     self.injDT=float(injWellDDay)
     self.injOT=float(injWellDayMin)
     self.injNT=1+int((injWellDayMax-injWellDayMin)/injWellDDay)
-    injWellCount=pd.Series([len(_unique_ids)])
+    injWellCount=pd.Series([int(self.injAllDF['ID'].nunique())])
     if verbose>0:
       print(' gistMC.addWells: well file added with ',self.nw,' wells')
       print(' gistMC.addWells: well columns:',self.wellDF.columns)
@@ -1193,19 +1185,6 @@ class gistMC:
     excludedWellsDF['EncompassingDay']=np.asarray(encompassingDays[_excludedMask])
     excludedWellsDF['EncompassingDiffusivity']=np.asarray(encompassingDiffusivity[_excludedMask])
     excludedWellsDF['EventID']=eq['EventID']
-    # #region agent log
-    try:
-      import json as _json, time as _time
-      _dbg_uic = excludedWellsDF.loc[excludedWellsDF['UICNumber'].astype(str) == '115597']
-      if len(_dbg_uic) > 0:
-        _r = _dbg_uic.iloc[0]
-        _idx = self.wellDF.index[self.wellDF['ID'] == _r['ID']][0]
-        _true_yi = float(((pd.to_datetime(eq['Origin Date']) - pd.to_datetime(self.wellDF.loc[_idx, 'StartDate'])).days) / 365.25)
-        with open(r'c:\Users\bakirtzisn\source\repos\GIST\GIST\debug-bab168.log', 'a', encoding='utf-8') as _df:
-          _df.write(_json.dumps({'sessionId': 'bab168', 'runId': 'post-fix', 'hypothesisId': 'A', 'location': 'gistMC.py:findWellsVec', 'message': 'UIC115597 YearsInjecting alignment', 'data': {'assigned': float(_r['YearsInjecting']), 'true': _true_yi, 'delta': float(_r['YearsInjecting']) - _true_yi, 'startDate': str(_r['StartDate'])}, 'timestamp': int(_time.time() * 1000)}) + '\n')
-    except Exception:
-      pass
-    # #endregion
     ##########################################################################
     # Step 3: Pull injection data from injection file that matches well list #
     #         and calculate total injected volume for all wells at EQ date   #
@@ -1216,21 +1195,22 @@ class gistMC:
     excludedIDs=excludedWellsDF['ID']
     ids_set=set(ids)
     excludedIDs_set=set(excludedIDs)
-    #####################
-    # Open self.injFile #
-    #####################
-    iter_csv=pd.read_csv(self.injFile, iterator=True,chunksize=100000)
-    injChunks=[]
-    injExcludedChunks=[]
-    for chunk in iter_csv:
-      matched=chunk[chunk['ID'].isin(ids_set)]
-      if len(matched)>0:
-        injChunks.append(matched)
-      excluded=chunk[chunk['ID'].isin(excludedIDs_set)]
-      if len(excluded)>0:
-        injExcludedChunks.append(excluded)
-    injDF=pd.concat(injChunks, ignore_index=True) if injChunks else pd.DataFrame()
-    injExcludedDF=pd.concat(injExcludedChunks, ignore_index=True) if injExcludedChunks else pd.DataFrame()
+    ###################################################################
+    # Filter the in-memory injection frame (read once in addWells)    #
+    # by selected / excluded well IDs instead of re-reading the file. #
+    # Fall back to reading the file if it was already released (e.g.   #
+    # findWellsVec called more than once on the same instance).        #
+    ###################################################################
+    _injSource=getattr(self,'injAllDF',None)
+    if _injSource is None:
+      _injSource=pd.read_csv(self.injFile)
+    injDF=_injSource[_injSource['ID'].isin(ids_set)].reset_index(drop=True)
+    injExcludedDF=_injSource[_injSource['ID'].isin(excludedIDs_set)].reset_index(drop=True)
+    # Release the full in-memory injection frame now that the per-event
+    # subsets are extracted; it is not needed during the pressure compute and
+    # keeping it resident would inflate peak memory on large nationwide runs.
+    self.injAllDF=None
+    _injSource=None
     ############################################################
     # Do we need this? Peter commented it out - Bill had it in #
     ############################################################
@@ -3923,13 +3903,13 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   filtPPScenariosDF=ppDF[ppDF['ID'].isin(winWellsDF)]
   maxPressureListRef=[]
   maxPressureDFRef=pd.DataFrame(columns=['Name','ID','MaxPressure'])
-  names=[]
-  ids=[]
-  maxps=[]
-  for ID in winWellsDF:
-    maxps.append(max(filtPPScenariosDF[filtPPScenariosDF['ID']==ID]['Pressures']))
-    names.append(filtPPScenariosDF[filtPPScenariosDF['ID']==ID]['Name'].iloc[0])
-    ids.append(ID)
+  # Vectorized: one grouped max + first-name per ID instead of re-scanning
+  # filtPPScenariosDF once per well. Reindex by winWellsDF to preserve order.
+  _maxByID=filtPPScenariosDF.groupby('ID')['Pressures'].max()
+  _nameByID=filtPPScenariosDF.groupby('ID')['Name'].first()
+  ids=list(winWellsDF)
+  maxps=list(_maxByID.reindex(winWellsDF).values)
+  names=list(_nameByID.reindex(winWellsDF).values)
   if verbose>0: print(' disaggregationPlotPP: ',len(winWellsDF),' sorted')
   maxPressureDictRef={'Name': names, 'ID':ids, 'MaxPressure': maxps} 
   maxPressureDFRef=pd.DataFrame(maxPressureDictRef).sort_values(by='MaxPressure',ascending=False)
@@ -3951,8 +3931,13 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   eventLons=[]
   lags=[]
   smallName='Sum of All '+str(nSmallWells)+' Others Below '+str(threshold)+' PSI'
+  # Group once by Realization instead of re-scanning smallWellPPDF for every
+  # realization. Group contents (and their index) are identical to the prior
+  # boolean filter, so the per-realization Series appended below are unchanged.
+  _smallByReal=dict(tuple(smallWellPPDF.groupby('Realization')))
+  _emptySmall=smallWellPPDF.iloc[0:0]
   for ir in range(nReal):
-    smallWellScenario=smallWellPPDF[smallWellPPDF['Realization']==float(ir)]
+    smallWellScenario=_smallByReal.get(float(ir),_emptySmall)
     realizations.append(ir)
     pressures.append(smallWellScenario['Pressures'].sum())
     percentages.append(smallWellScenario['Percentages'].sum())
@@ -4009,6 +3994,11 @@ def prepDisaggregationPlot(smallPPDF,smallWellIDList,jitter=0.,verbose=0):
   if verbose>1: print(' prepDisaggregationPlot well List:')
   # Optimization: Collect DataFrames in a list and concat once
   well_dfs = []
+  # Group once by ID instead of re-scanning smallPPDF for every well. Group
+  # rows keep original order (same as the prior boolean filter).
+  _cols=['Realization','Pressures','Order','Name','ID']
+  _byID={k:v[_cols] for k,v in smallPPDF.groupby('ID')}
+  _emptyWell=smallPPDF.iloc[0:0][_cols]
   # Loop over smallWellList
   for iw in range(len(smallWellIDList)):
     # Calculate y value with or without jitter
@@ -4018,7 +4008,7 @@ def prepDisaggregationPlot(smallPPDF,smallWellIDList,jitter=0.,verbose=0):
     else:
       wellNo = np.zeros(nReal,)-iw
     # Get rows for this well
-    wellDF = smallPPDF[smallPPDF['ID']==smallWellIDList[iw]][['Realization','Pressures','Order','Name','ID']]
+    wellDF = _byID.get(smallWellIDList[iw], _emptyWell).copy()
     if verbose>0: print(' prepDisaggregationPlot: ',len(wellDF),' rows for ',smallWellIDList[iw])
     # create a new dataframe for this well
     wellDF['WellNo']=wellNo

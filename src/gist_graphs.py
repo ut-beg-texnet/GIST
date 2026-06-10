@@ -462,10 +462,16 @@ def _build_time_series_payload(df, group_column, color_column=None, max_groups=N
     if payload_df.empty:
         return []
 
-    groups = list(payload_df.groupby(group_column, sort=True))
-    if max_groups is not None and len(groups) > max_groups:
-        step = max(1, math.ceil(len(groups) / max_groups))
-        groups = groups[::step][:max_groups]
+    grouped = payload_df.groupby(group_column, sort=True)
+    if max_groups is not None and grouped.ngroups > max_groups:
+        # Subsample groups by sorted key without materializing every sub-frame.
+        keys = list(grouped.groups.keys())
+        step = max(1, math.ceil(len(keys) / max_groups))
+        keep = set(keys[::step][:max_groups])
+        groups = [(k, g) for k, g in grouped if k in keep]
+    else:
+        # Iterate the groupby directly; avoids building a list of all sub-frames.
+        groups = grouped
 
     series = []
     for group_value, group_df in groups:
@@ -474,11 +480,12 @@ def _build_time_series_payload(df, group_column, color_column=None, max_groups=N
         valid = np.isfinite(timestamps) & np.isfinite(pressures)
         if not np.any(valid):
             continue
-        points = [
-            [int(timestamps[i]), round(float(pressures[i]), 3)]
-            for i in range(len(timestamps))
-            if valid[i]
-        ]
+        # Vectorized mask + bulk round, then zip native lists. Avoids
+        # per-element numpy indexing over the full (often dense) series.
+        valid_idx = np.flatnonzero(valid)
+        ts_list = timestamps[valid_idx].tolist()
+        pr_list = np.round(pressures[valid_idx], 3).tolist()
+        points = [[int(t), float(p)] for t, p in zip(ts_list, pr_list)]
         if not points:
             continue
         points = _downsample_time_series_points(points, max_points_per_group)
@@ -631,12 +638,12 @@ def _build_disposal_payload(disposal_df):
 
     disposal_by_well = {}
     for well_name, well_df in plot_df.groupby("subgraph", sort=True):
-        points = []
-        for row in well_df.itertuples(index=False):
-            x = getattr(row, "timestamp", None)
-            y = _rounded_float(getattr(row, "BPD"), 2)
-            if x is not None and y is not None:
-                points.append([x, y])
+        # timestamp and BPD are already coerced to numeric and dropna'd above,
+        # so every row is valid here. Bulk-round BPD and zip native lists
+        # instead of itertuples + getattr per row.
+        ts_list = well_df["timestamp"].to_numpy().tolist()
+        bpd_list = np.round(well_df["BPD"].to_numpy(dtype=float), 2).tolist()
+        points = [[x, y] for x, y in zip(ts_list, bpd_list)]
         if points:
             disposal_by_well[str(well_name)] = points
     return disposal_by_well
@@ -750,9 +757,7 @@ def save_rt_plot_graph_artifact(helper, small_pp_df, well_df, artifact_key, disp
     for diffusivity, curve_df in small_pp_df.groupby("Diffusivity", sort=False):
         curve_df = curve_df.sort_values("Years Before Earthquake")
         curve_style = _RT_CURVE_STYLES.get(diffusivity, {"color": "#444444", "dash": "solid"})
-        xy_pairs = []
-        for _, r in curve_df.iterrows():
-            xy_pairs.append([float(r["Years Before Earthquake"]), float(r["Distance"])])
+        xy_pairs = curve_df[["Years Before Earthquake", "Distance"]].to_numpy(dtype=float).tolist()
         curves.append(
             {
                 "label": f"{diffusivity} diffusivity",
