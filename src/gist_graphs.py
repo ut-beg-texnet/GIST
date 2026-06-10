@@ -1360,7 +1360,7 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
     yl.textContent = 'Delta Pressure (PSI)';
     svg.appendChild(yl);
     const yr = makeEl('text', { x: x1 + 58, y: (y0 + y1) / 2, 'text-anchor': 'middle', class: 'axis-label', transform: 'rotate(90 ' + (x1 + 58) + ' ' + ((y0 + y1) / 2) + ')' });
-    yr.textContent = 'BBL/month';
+    yr.textContent = 'BBL/day Sampled Monthly';
     svg.appendChild(yr);
 
     if (payload.mode === 'quantiles') {

@@ -90,6 +90,7 @@ SOCRATA_DOMAIN      = "data.texas.gov"
 RRC_WELLS_DATASET   = "givw-z9t4"
 RRC_INJ_DATASET     = "qq2j-f2zm"
 SOCRATA_PAGE_SIZE   = 10_000
+RRC_INJECTION_MIN_DATE = datetime(1950, 1, 1)
 
 # Feet threshold separating Shallow from Deep wells
 DEPTH_CUTOFF_FT = 7000.0
@@ -484,7 +485,43 @@ def _exclude_wells_with_future_start_date(
     return df
 
 
-def update_csv(new_df: pd.DataFrame, path: Path, dedup_cols: List[str]) -> pd.DataFrame:
+def _filter_dates_on_or_after(
+    df: pd.DataFrame,
+    *,
+    date_col: str,
+    min_date: datetime,
+    context: str,
+) -> pd.DataFrame:
+    """Exclude missing, unparseable, and pre-cutoff dates."""
+    if date_col not in df.columns:
+        raise ValueError(f"{context} missing required date column: {date_col}")
+
+    raw_dates = df[date_col]
+    parsed_dates = pd.to_datetime(raw_dates, errors="coerce")
+    cutoff = pd.Timestamp(min_date.date())
+    excluded_mask = parsed_dates.isna() | (parsed_dates < cutoff)
+    excluded_count = int(excluded_mask.sum())
+
+    if excluded_count:
+        logger.info(
+            "%s: excluded %d/%d records with missing, invalid, or pre-%s dates.",
+            context,
+            excluded_count,
+            len(df),
+            cutoff.strftime("%Y-%m-%d"),
+        )
+
+    return df.loc[~excluded_mask].copy()
+
+
+def update_csv(
+    new_df: pd.DataFrame,
+    path: Path,
+    dedup_cols: List[str],
+    *,
+    date_col: Optional[str] = None,
+    min_date: Optional[datetime] = None,
+) -> pd.DataFrame:
     """
     Merge new_df with the existing CSV at path (if present), deduplicate on
     dedup_cols keeping the newest value, save, and return the combined DataFrame.
@@ -499,6 +536,14 @@ def update_csv(new_df: pd.DataFrame, path: Path, dedup_cols: List[str]) -> pd.Da
     else:
         logger.info("No existing file at %s — creating new.", path)
         combined = new_df.copy()
+
+    if date_col is not None and min_date is not None:
+        combined = _filter_dates_on_or_after(
+            combined,
+            date_col=date_col,
+            min_date=min_date,
+            context=f"CSV merge {path.name}",
+        )
 
     before = len(combined)
     combined.drop_duplicates(subset=dedup_cols, keep="last", inplace=True)
@@ -872,27 +917,30 @@ def rrc_fetch_injection(client: Socrata, days: Optional[int] = None) -> Optional
     """
     Fetch RRC H10 injection monitoring records (qq2j-f2zm).
 
-    When ``days`` is None, fetches the entire published dataset (no SoQL date
-    filter). When ``days`` is set, fetches only rows with
-    ``formatted_date >= now - days``. Returns a DataFrame or None on failure.
+    Always excludes records before RRC_INJECTION_MIN_DATE. When ``days`` is
+    set, uses the later of that minimum date and ``now - days``. Returns a
+    DataFrame or None on failure.
     """
     try:
+        cutoff = RRC_INJECTION_MIN_DATE
+        if days is not None:
+            cutoff = max(cutoff, datetime.now() - timedelta(days=days))
+        cutoff_text = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
+        where = f"formatted_date >= '{cutoff_text}'"
+
         if days is None:
             logger.info(
-                "Fetching all RRC injection records from %s (no date filter) …",
-                RRC_INJ_DATASET,
+                "Fetching RRC injection records from %s where %s …",
+                RRC_INJ_DATASET, where,
             )
-            records = client.get_all(RRC_INJ_DATASET, limit=SOCRATA_PAGE_SIZE)
         else:
-            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
-            where = f"formatted_date >= '{cutoff}'"
             logger.info(
                 "Fetching RRC injection from %s where %s …",
                 RRC_INJ_DATASET, where,
             )
-            records = client.get_all(
-                RRC_INJ_DATASET, where=where, limit=SOCRATA_PAGE_SIZE
-            )
+        records = client.get_all(
+            RRC_INJ_DATASET, where=where, limit=SOCRATA_PAGE_SIZE
+        )
         df = pd.DataFrame.from_records(records)
         logger.info("Fetched %d RRC injection records.", len(df))
         return df
@@ -1053,6 +1101,12 @@ def rrc_map_injection_to_b3(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         logger.warning("RRC injection DataFrame missing expected columns: %s", missing)
 
+    df = _filter_dates_on_or_after(
+        df,
+        date_col="formatted_date",
+        min_date=RRC_INJECTION_MIN_DATE,
+        context="RRC injection mapping",
+    )
     row_labels = _build_record_labels(df, ["uic_no", "well_no", "api_no"])
     out = pd.DataFrame()
     out["InjectionWellId"] = _normalize_uic_series(
@@ -1077,18 +1131,10 @@ def rrc_map_injection_to_b3(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Vectorized: parse the B3 date strings we just produced, then use
-    # dt.days_in_month.  Unparseable originals became "01-01-1970" (January,
-    # 31 days) which is a safe divisor.  fillna(31) guards any remaining NaT.
+    # dt.days_in_month. The source dates have already been validated above.
     parsed_dates = pd.to_datetime(out["Date"], format="%m-%d-%Y", errors="coerce")
     days_per_month = parsed_dates.dt.days_in_month.fillna(31).astype(int)
     out["InjectedLiquidBBL"] = monthly_vol / days_per_month
-
-    n_epoch = (out["Date"] == "01-01-1970").sum()
-    if n_epoch > 0:
-        logger.debug(
-            "RRC injection: %d/%d records had unparseable dates → defaulted to 01-01-1970",
-            n_epoch, len(out),
-        )
 
     logger.info("Mapped %d RRC injection records to B3 format (monthly→daily).", len(out))
     return out
@@ -1555,7 +1601,10 @@ def run_rrc_section(
 
     # ── Best-effort injection fetch ──────────────────────────────────────────
     if days is None:
-        logger.info("RRC Step 3: Fetching injection data (full dataset)…")
+        logger.info(
+            "RRC Step 3: Fetching injection data since %s…",
+            RRC_INJECTION_MIN_DATE.strftime("%Y-%m-%d"),
+        )
     else:
         logger.info("RRC Step 3: Fetching injection data (last %d days)…", days)
     raw_rrc_inj = rrc_fetch_injection(client, days)
@@ -1576,7 +1625,13 @@ def run_rrc_section(
     else:
         logger.info("RRC Step 4: Mapping injection data to B3 format (monthly→daily)…")
         b3_rrc_inj_df = rrc_map_injection_to_b3(raw_rrc_inj)
-        update_csv(b3_rrc_inj_df, rrc_inj_raw, dedup_cols=["InjectionWellId", "Date"])
+        update_csv(
+            b3_rrc_inj_df,
+            rrc_inj_raw,
+            dedup_cols=["InjectionWellId", "Date"],
+            date_col="Date",
+            min_date=RRC_INJECTION_MIN_DATE,
+        )
 
     # ── Guard: pipeline requires raw files on disk ───────────────────────────
     missing = [str(f) for f in [rrc_well_raw, rrc_inj_raw] if not f.exists()]
@@ -1655,7 +1710,9 @@ def main() -> None:
     verbose      = 1 if args.debug else 0
 
     rrc_inj_mode = (
-        f"last {args.days} days" if args.days is not None else "full dataset (qq2j-f2zm)"
+        f"last {args.days} days"
+        if args.days is not None
+        else f"since {RRC_INJECTION_MIN_DATE:%Y-%m-%d} (qq2j-f2zm)"
     )
     logger.info(
         "TexNet date range: %s → %s | RRC injection: %s",
