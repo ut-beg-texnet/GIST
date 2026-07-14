@@ -511,10 +511,10 @@ def _build_time_series_payload(df, group_column, color_column=None, max_groups=N
 
 def _split_interval_volume_across_months(subgraph, interval_end, interval_start, volume_bbl, interval_days):
     """
-    Allocate interval volume across calendar months when the window crosses a boundary.
+    Allocate interval volume and coverage days across calendar months when the window crosses a boundary.
 
     Each row represents a backward-averaged rate over ``interval_days`` ending at
-    ``interval_end``. Volume is split in proportion to calendar-day overlap per month.
+    ``interval_end``. Volume and days are split in proportion to calendar-day overlap per month.
     """
     allocations = []
     start_period = interval_start.to_period("M")
@@ -533,20 +533,27 @@ def _split_interval_volume_across_months(subgraph, interval_end, interval_start,
         overlap_days = (overlap_end - overlap_start).total_seconds() / 86400.0
         if overlap_days <= 0:
             continue
-        allocated = volume_bbl * (overlap_days / total_days)
-        if allocated > 0:
-            allocations.append({"subgraph": subgraph, "month": period, "BPD": allocated})
+        allocated_volume = volume_bbl * (overlap_days / total_days)
+        allocations.append(
+            {
+                "subgraph": subgraph,
+                "month": period,
+                "volume_bbl": allocated_volume,
+                "coverage_days": overlap_days,
+            }
+        )
     return allocations
 
 
-def _aggregate_disposal_to_monthly_volumes(disposal_df):
+def _aggregate_disposal_to_monthly_bpd(disposal_df):
     """
-    Roll up interval-averaged disposal (BPD) to monthly barrel totals for per-well graphs.
+    Roll up interval-averaged disposal (BPD) to monthly average daily rates for per-well graphs.
 
     Each input row is a backward-averaged daily rate (bbl/day) over the preceding interval
-    ending at Date (from injectionV3.regularize). Monthly volume integrates BPD × interval_days.
-    When an interval crosses a month boundary, volume is split proportionally by calendar-day
-    overlap. The output BPD column holds monthly BBL totals, not daily rates.
+    ending at Date (from injectionV3.regularize). For each well/month the plotted BPD is
+    total represented barrels divided by total represented calendar-day coverage.
+    When an interval crosses a month boundary, volume and days are split proportionally by
+    calendar-day overlap.
     """
     if disposal_df is None or disposal_df.empty:
         return disposal_df if disposal_df is not None else pd.DataFrame()
@@ -584,13 +591,11 @@ def _aggregate_disposal_to_monthly_volumes(disposal_df):
     crosses_boundary = plot_df["start_month"] != plot_df["end_month"]
 
     monthly_chunks = []
-    same_month = plot_df.loc[~crosses_boundary, ["subgraph", "end_month", "volume_bbl"]].rename(
-        columns={"end_month": "month", "volume_bbl": "BPD"}
+    same_month = plot_df.loc[~crosses_boundary, ["subgraph", "end_month", "volume_bbl", "interval_days"]].rename(
+        columns={"end_month": "month", "interval_days": "coverage_days"}
     )
     if not same_month.empty:
-        monthly_chunks.append(
-            same_month.groupby(["subgraph", "month"], as_index=False)["BPD"].sum()
-        )
+        monthly_chunks.append(same_month)
 
     if crosses_boundary.any():
         boundary_rows = []
@@ -611,7 +616,12 @@ def _aggregate_disposal_to_monthly_volumes(disposal_df):
         return pd.DataFrame(columns=list(disposal_df.columns))
 
     monthly = pd.concat(monthly_chunks, ignore_index=True)
-    monthly = monthly.groupby(["subgraph", "month"], as_index=False)["BPD"].sum()
+    monthly = monthly.groupby(["subgraph", "month"], as_index=False).agg(
+        volume_bbl=("volume_bbl", "sum"),
+        coverage_days=("coverage_days", "sum"),
+    )
+    monthly["BPD"] = monthly["volume_bbl"] / monthly["coverage_days"]
+    monthly = monthly.drop(columns=["volume_bbl", "coverage_days"])
     monthly["Date"] = monthly["month"].dt.to_timestamp()
     monthly = monthly.drop(columns=["month"]).sort_values(["subgraph", "Date"]).reset_index(drop=True)
     return monthly
@@ -623,7 +633,7 @@ def _build_disposal_payload(disposal_df):
     if not {"Date", "BPD", "subgraph"}.issubset(disposal_df.columns):
         return {}
 
-    plot_df = _aggregate_disposal_to_monthly_volumes(disposal_df)
+    plot_df = _aggregate_disposal_to_monthly_bpd(disposal_df)
     if plot_df.empty:
         return {}
     if "timestamp" in plot_df.columns:
@@ -1280,14 +1290,23 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
     });
     if (!isFinite(xmin) || !isFinite(xmax) || xmin === xmax) { xmin = Date.now() - 86400000; xmax = Date.now(); }
     if (!isFinite(ymax) || ymin === ymax) { ymin = 0; ymax = 1; }
-    if (!isFinite(bpdMax) || bpdMax <= 0) { bpdMax = 1; }
+    if (!isFinite(bpdMax) || bpdMax <= 0) { bpdMax = 0; }
     const ypad = (ymax - ymin) * 0.06 || 1;
     ymin = Math.min(0, ymin - ypad);
     ymax = ymax + ypad;
 
+    function roundedBpdAxisMax(maxValue) {
+      const increment = maxValue <= 50000 ? 5000 : 10000;
+      if (!isFinite(maxValue) || maxValue <= 0) return increment;
+      return Math.max(increment, Math.ceil(maxValue / increment) * increment);
+    }
+    const bpdAxisMax = roundedBpdAxisMax(bpdMax);
+    const bpdIncrement = bpdAxisMax <= 50000 ? 5000 : 10000;
+    const bpdTickCount = Math.max(1, Math.round(bpdAxisMax / bpdIncrement));
+
     function sx(v) { return x0 + (v - xmin) / (xmax - xmin) * plotW; }
     function sy(v) { return y1 - (v - ymin) / (ymax - ymin) * plotH; }
-    function syBpd(v) { return y1 - (v / bpdMax) * plotH; }
+    function syBpd(v) { return y1 - (v / bpdAxisMax) * plotH; }
 
     const disposal = well.disposal || [];
     if (disposal.length) {
@@ -1329,9 +1348,10 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
       t.textContent = fmtNum(v);
       svg.appendChild(t);
     }
-    for (let k = 0; k <= 5; k++) {
-      const y = y1 - k / 5 * plotH;
-      const v = k / 5 * bpdMax;
+    for (let k = 0; k <= bpdTickCount; k++) {
+      const v = k * bpdIncrement;
+      const y = syBpd(v);
+      svg.appendChild(makeEl('line', { x1: x0, x2: x1, y1: y, y2: y, stroke: '#dce8f5', 'stroke-width': 1 }));
       const t = makeEl('text', { x: x1 + 8, y: y + 4, 'text-anchor': 'start', class: 'tick' });
       t.textContent = fmtNum(v);
       svg.appendChild(t);
@@ -1360,7 +1380,7 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
     yl.textContent = 'Delta Pressure (PSI)';
     svg.appendChild(yl);
     const yr = makeEl('text', { x: x1 + 58, y: (y0 + y1) / 2, 'text-anchor': 'middle', class: 'axis-label', transform: 'rotate(90 ' + (x1 + 58) + ' ' + ((y0 + y1) / 2) + ')' });
-    yr.textContent = 'BBL/day Sampled Monthly';
+    yr.textContent = 'BBL/day';
     svg.appendChild(yr);
 
     if (payload.mode === 'quantiles') {
