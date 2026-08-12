@@ -17,6 +17,7 @@ from math import ceil
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
 from gistStepCore import runGistCore
+from gistMC import normalizeGistIds
 from progress import report_progress
 from gist_graphs import (
     filter_rt_plot_wells_future_start_date,
@@ -132,7 +133,10 @@ if disaggregationDF.empty:
     helper.setSuccessForStepIndex(3, False)
 else:
     # orderedWellList with proposed Future Rate initalize at 10000
-    originalWellDF = pd.read_csv(wellcsv)
+    originalWellDF = pd.read_csv(wellcsv, dtype={'ID': 'string'})
+    originalWellDF['ID'] = normalizeGistIds(originalWellDF['ID'])
+    if 'PermittedMaxLiquidBPD' not in originalWellDF.columns:
+        originalWellDF['PermittedMaxLiquidBPD'] = np.nan
     orderedWellList = pd.DataFrame(orderedWellList, columns=['ID'])
     orderedWellList = orderedWellList.merge(
         originalWellDF[['ID', 'WellName', 'PermittedMaxLiquidBPD']],
@@ -140,8 +144,10 @@ else:
         right_on='ID',
         how='left'
     )
-    # Normalize so exported CSV / portal validation never receives null in this column.
-    orderedWellList["PermittedMaxLiquidBPD"] = orderedWellList["PermittedMaxLiquidBPD"].fillna(0.0)
+    # A missing permit maximum uses GIST's standard forecasting cap.
+    orderedWellList["PermittedMaxLiquidBPD"] = pd.to_numeric(
+        orderedWellList["PermittedMaxLiquidBPD"], errors='coerce'
+    ).fillna(10000.0)
     permitted_rate = orderedWellList["PermittedMaxLiquidBPD"]
     orderedWellList['Proposed Future Rate (BPD)'] = np.where(
         permitted_rate < 10000,

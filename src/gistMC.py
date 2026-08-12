@@ -34,6 +34,18 @@ import gc
 import time
 import warnings
 
+
+# A synthetic label keeps the aggregated "small wells" row distinct from
+# user-supplied IDs, which may now be strings.
+SMALL_WELLS_ID = "__GIST_SMALL_WELLS__"
+
+
+def normalizeGistIds(values, field_name="ID"):
+  """Return trimmed string IDs and reject blank values before joins occur."""
+  normalized = values.astype("string").str.strip()
+  if normalized.isna().any() or (normalized == "").any():
+    raise ValueError("gistMC.addWells ERROR: " + field_name + " contains blank values")
+  return normalized
 #############################################
 # Contains:                                 #
 #   Classes:                                #
@@ -717,14 +729,22 @@ class gistMC:
     #####################
     # Read in well file #
     #####################
-    self.wellDF=pd.read_csv(self.wellFile)
+    # IDs are matching keys, not numeric quantities. Reading them as strings
+    # preserves long B3 identifiers and leading zeroes in corrected uploads.
+    self.wellDF=pd.read_csv(self.wellFile,dtype={'ID':'string'})
     self.nw=self.wellDF.shape[0]
     # Read the injection file ONCE into memory. findWellsVec() filters this
     # in-memory frame by selected well IDs instead of re-reading the file from
     # disk, eliminating a second full parse of the largest input file. The
     # frame is held on the instance (self.injAllDF) for the run; default dtypes
     # are used so downstream results are byte-identical to reading fresh.
-    self.injAllDF=pd.read_csv(self.injFile)
+    self.injAllDF=pd.read_csv(self.injFile,dtype={'ID':'string'})
+    if 'ID' not in self.wellDF.columns:
+      raise ValueError('gistMC.addWells ERROR: ID not in well file')
+    if 'ID' not in self.injAllDF.columns:
+      raise ValueError('gistMC.addWells ERROR: ID not in injection file')
+    self.wellDF['ID']=normalizeGistIds(self.wellDF['ID'])
+    self.injAllDF['ID']=normalizeGistIds(self.injAllDF['ID'])
     # Compute injection file statistics from the in-memory frame.
     # injOT = smallest Days; injDT = (2nd-smallest distinct Days) - smallest;
     # injNT = 1 + int((maxDays - minDays)/injDT). This reproduces the prior
@@ -755,7 +775,7 @@ class gistMC:
     ######################
     # Well column names: #
     ######################
-    requiredWellColumns=['StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','ID','WellName','APINumber']
+    requiredWellColumns=['StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','ID','WellName']
     for col in requiredWellColumns:
       if col not in self.wellDF.columns:  raise ValueError(' gistMC.addWells: ERROR: ',col,' not in well file')
     ################################
@@ -3947,7 +3967,7 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
     eventLons.append(smallWellScenario['EventLongitude'])
     names.append(smallName)
     lags.append(smallWellScenario['LagInDays'].mean())
-    ids.append(0)
+    ids.append(SMALL_WELLS_ID)
   if verbose>0: print(' disaggregationPlotPP: ',len(smallWells),' minimally-contributing wells sorted')
   sumSmallPPDF=pd.DataFrame()
   sumSmallPPDF['Percentages']=percentages
@@ -3966,8 +3986,8 @@ def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
   smallWellList = smallPPDF[smallPPDF['Name']!=smallName].groupby('Name')['Pressures'].max().sort_values(ascending=False).index
   smallWellList = smallWellList.append(smallPPDF[smallPPDF['Name']==smallName].groupby('Name')['Pressures'].max().index)
   # Add well IDs here in case there are duplicate names
-  smallWellIDList = smallPPDF[smallPPDF['ID']!=0].groupby('ID')['Pressures'].max().sort_values(ascending=False).index
-  smallWellIDList = smallWellIDList.append(smallPPDF[smallPPDF['ID']==0].groupby('ID')['Pressures'].max().index)
+  smallWellIDList = smallPPDF[smallPPDF['ID']!=SMALL_WELLS_ID].groupby('ID')['Pressures'].max().sort_values(ascending=False).index
+  smallWellIDList = smallWellIDList.append(smallPPDF[smallPPDF['ID']==SMALL_WELLS_ID].groupby('ID')['Pressures'].max().index)
   # Now come up with a category that colors it by relative contribution
   smallPPDF['Order'] = smallPPDF.groupby('Realization')['Percentages'].rank(method='dense', ascending=False)
   smallPPDF.loc[smallPPDF['Order']>nOrder,'Order'] = nOrder+1
@@ -4033,7 +4053,7 @@ def getWinWells(summaryDF,wellsDF,injDF,verbose=0):
     winWellsDF - dataframe of wells with nontrivial pressures
     winInjDF   - dataframe of injection for winWellsDF
   """
-  subsetIdx=summaryDF['ID'].unique()[summaryDF['ID'].unique()>0]
+  subsetIdx=summaryDF.loc[summaryDF['ID']!=SMALL_WELLS_ID,'ID'].unique()
   if verbose>0: print("getWinWells: Selected well numbers:",subsetIdx)
   winWellsDF=wellsDF[wellsDF['ID'].isin(subsetIdx)].reset_index()
   if verbose>0: print("getWinWells: Selected well information:",winWellsDF)
