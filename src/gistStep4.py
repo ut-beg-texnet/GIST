@@ -144,13 +144,13 @@ else:
         right_on='ID',
         how='left'
     )
-    # A missing permit maximum uses GIST's standard forecasting cap.
+    # Keep missing permit maxima blank; the 10,000 BPD cap applies only to proposed rate.
     orderedWellList["PermittedMaxLiquidBPD"] = pd.to_numeric(
         orderedWellList["PermittedMaxLiquidBPD"], errors='coerce'
-    ).fillna(10000.0)
+    )
     permitted_rate = orderedWellList["PermittedMaxLiquidBPD"]
     orderedWellList['Proposed Future Rate (BPD)'] = np.where(
-        permitted_rate < 10000,
+        permitted_rate.fillna(10000.0) < 10000,
         permitted_rate,  # Use permit max if it is below the standard cap
         10000
     )
