@@ -161,10 +161,11 @@ else:
     # helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "allPerWellPPSpaghettiDF", allPerWellPPSpaghettiDF)
     helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "allPerWellDisposalDF", allPerWellDisposalDF)
 
-    GISTWells = pd.read_csv(wellcsv)
-    GISTInjection = pd.read_csv(injectioncsv)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTWells-corrections", GISTWells)
-    helper.saveDataFrameAsParameterWithStepIndexAndParamName(1, "GISTInjection-corrections", GISTInjection)
+    # Passed through unmodified for step 3 (download/correct/reupload), so copy the files
+    # directly instead of round-tripping them through pandas read_csv/to_csv - avoids a second
+    # full parse plus a full CSV re-serialization of the (very large) injection dataset.
+    helper.saveFileAsParameterWithStepIndexAndParamName(1, "GISTWells-corrections", wellcsv)
+    helper.saveFileAsParameterWithStepIndexAndParamName(1, "GISTInjection-corrections", injectioncsv)
     report_progress("Generating result graphs")
     save_rt_plot_graph_artifact(
         helper,

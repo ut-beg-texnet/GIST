@@ -4,6 +4,7 @@ import json
 import mimetypes
 
 import os
+import shutil
 
 import pandas as pd
 
@@ -157,7 +158,37 @@ class TexNetWebToolLaunchHelper(object):
             tries = tries + 1
             
         df.to_csv(path, index=False)
-        
+
+        self.setParamValueWithStepIndexAndParamName(stepIndex, paramName, path)
+
+    def saveFileAsParameterWithStepIndexAndParamName(self, stepIndex, paramName, srcPath):
+        """Registers an existing file on disk as a parameter, without loading it into a DataFrame.
+
+        Same filename collision-avoidance and parameter registration as
+        saveDataFrameAsParameterWithStepIndexAndParamName, but for callers that already have the
+        desired CSV on disk verbatim (e.g. passing an input dataset through unmodified) and would
+        otherwise pay for a wasted pd.read_csv/df.to_csv round-trip on a large file.
+        """
+
+        #First, we need to figure out the filename.
+        path = ""
+        tries = 0
+
+        while path == "" or os.path.exists(path) == True:
+
+            filename = ""
+
+            if tries == 0:
+                filename = paramName + ".csv"
+            else:
+                filename = paramName + "_" + str(tries) + ".csv"
+
+            path = os.path.join(self._scratchPath, filename)
+
+            tries = tries + 1
+
+        shutil.copyfile(srcPath, path)
+
         self.setParamValueWithStepIndexAndParamName(stepIndex, paramName, path)
 
     def saveGraphArtifact(self, key, title, renderer, path, contentType=None, caption=None, displayOrder=0, preferredHeight=None):

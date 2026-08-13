@@ -41,7 +41,30 @@ SMALL_WELLS_ID = "__GIST_SMALL_WELLS__"
 
 
 def normalizeGistIds(values, field_name="ID"):
-  """Return trimmed string IDs and reject blank values before joins occur."""
+  """Return trimmed string IDs and reject blank values before joins occur.
+
+  Categorical columns (used when reading the injection file's ID column - it
+  repeats a small number of distinct IDs across millions of rows) are
+  normalized by stripping and validating only the distinct category labels
+  instead of every row - equivalent to, but far cheaper than, the elementwise
+  string path used below for plain (non-categorical) columns.
+  """
+  if isinstance(values.dtype, pd.CategoricalDtype):
+    if values.isna().any():
+      raise ValueError("gistMC.addWells ERROR: " + field_name + " contains blank values")
+    categories=values.cat.categories.astype("string")
+    strippedCategories=categories.str.strip()
+    if strippedCategories.isna().any() or (strippedCategories == "").any():
+      raise ValueError("gistMC.addWells ERROR: " + field_name + " contains blank values")
+    if strippedCategories.duplicated().any():
+      # Stripping collapsed two distinct category labels (e.g. "123" and " 123")
+      # into the same ID - can't represent that as a rename, so fall back to
+      # the exact elementwise path used below for non-categorical columns.
+      normalized=values.astype("string").str.strip()
+      if normalized.isna().any() or (normalized == "").any():
+        raise ValueError("gistMC.addWells ERROR: " + field_name + " contains blank values")
+      return normalized
+    return values.cat.rename_categories(strippedCategories)
   normalized = values.astype("string").str.strip()
   if normalized.isna().any() or (normalized == "").any():
     raise ValueError("gistMC.addWells ERROR: " + field_name + " contains blank values")
@@ -736,15 +759,21 @@ class gistMC:
     # Read the injection file ONCE into memory. findWellsVec() filters this
     # in-memory frame by selected well IDs instead of re-reading the file from
     # disk, eliminating a second full parse of the largest input file. The
-    # frame is held on the instance (self.injAllDF) for the run; default dtypes
-    # are used so downstream results are byte-identical to reading fresh.
-    self.injAllDF=pd.read_csv(self.injFile,dtype={'ID':'string'})
+    # frame is held on the instance (self.injAllDF) for the run.
+    # ID is read as 'category' rather than 'string': the file repeats a small
+    # number of distinct well IDs (~12K) across millions of rows, so
+    # normalizeGistIds only has to strip/validate the distinct labels instead
+    # of every row. Materialize back to 'string' dtype immediately afterward
+    # so every downstream consumer sees exactly the same column type/values
+    # as the previous dtype={'ID':'string'} read - this is purely a faster
+    # path to the identical normalized column.
+    self.injAllDF=pd.read_csv(self.injFile,dtype={'ID':'category'})
     if 'ID' not in self.wellDF.columns:
       raise ValueError('gistMC.addWells ERROR: ID not in well file')
     if 'ID' not in self.injAllDF.columns:
       raise ValueError('gistMC.addWells ERROR: ID not in injection file')
     self.wellDF['ID']=normalizeGistIds(self.wellDF['ID'])
-    self.injAllDF['ID']=normalizeGistIds(self.injAllDF['ID'])
+    self.injAllDF['ID']=normalizeGistIds(self.injAllDF['ID']).astype('string')
     # Compute injection file statistics from the in-memory frame.
     # injOT = smallest Days; injDT = (2nd-smallest distinct Days) - smallest;
     # injNT = 1 + int((maxDays - minDays)/injDT). This reproduces the prior
@@ -1225,10 +1254,21 @@ class gistMC:
     if _injSource is None:
       _injSource=pd.read_csv(self.injFile)
     injDF=_injSource[_injSource['ID'].isin(ids_set)].reset_index(drop=True)
-    injExcludedDF=_injSource[_injSource['ID'].isin(excludedIDs_set)].reset_index(drop=True)
+    ###########################################################################
+    # "Excluded" is almost every well in the file (all wells not selected for #
+    # this event), so building a separate injExcludedDF used to mean copying  #
+    # a near-total duplicate of the (potentially 10M+ row) injection frame.   #
+    # Instead, group the full source frame by ID once - this covers every ID  #
+    # present in the file (included and excluded alike) - and slice the      #
+    # resulting per-ID sums for both the included and excluded well sets.    #
+    # groupby(...).sum() skips NaN the same way fillna(0.).sum() does, so     #
+    # these per-ID volumes are unchanged from the previous two-groupby form.  #
+    ###########################################################################
+    _allVolumesByIDSeries=_injSource.groupby('ID')['BPD'].sum()*self.injDT
     # Release the full in-memory injection frame now that the per-event
-    # subsets are extracted; it is not needed during the pressure compute and
-    # keeping it resident would inflate peak memory on large nationwide runs.
+    # subset and aggregate are extracted; it is not needed during the pressure
+    # compute and keeping it resident would inflate peak memory on large
+    # nationwide runs.
     self.injAllDF=None
     _injSource=None
     ############################################################
@@ -1247,7 +1287,7 @@ class gistMC:
     # Throw warning if numDataWells ~= nw #
     #######################################
     if numDataWells!=self.nw: warnings.warn('gistMC.findWellsVec WARNING: '+str(self.nw)+' wells were selected but '+str(numDataWells)+' wells have rates in the injection file.',UserWarning,stacklevel=2)
-    numExcludedWells=len(pd.unique(injExcludedDF['ID']))
+    numExcludedWells=len(_allVolumesByIDSeries.index.intersection(excludedIDs_set))
     ########################################
     # Throw warning if numExcludedWells==0 #
     ########################################
@@ -1256,11 +1296,8 @@ class gistMC:
     if verbose>0: print(" gistMC.findWellsVec excluded: ",excludedWellsDF.shape[0],numExcludedWells,len(excludedIDs))
     totalVolumes=np.zeros([len(ids)])
     injDF['BPD']=injDF['BPD'].fillna(0.)
-    injExcludedDF['BPD']=injExcludedDF['BPD'].fillna(0.)
-    totalIncludedVolumesVecSeries=injDF.groupby('ID')['BPD'].sum()*self.injDT
-    totalExcludedVolumesVecSeries=injExcludedDF.groupby('ID')['BPD'].sum()*self.injDT
-    totalVolumesIncludedSeries=totalIncludedVolumesVecSeries[totalIncludedVolumesVecSeries.index.isin(ids)]
-    totalVolumesExcludedSeries=totalExcludedVolumesVecSeries[totalExcludedVolumesVecSeries.index.isin(excludedIDs)]
+    totalVolumesIncludedSeries=_allVolumesByIDSeries[_allVolumesByIDSeries.index.isin(ids)]
+    totalVolumesExcludedSeries=_allVolumesByIDSeries[_allVolumesByIDSeries.index.isin(excludedIDs)]
     if verbose>0: print(" gistMC.findWellsVec separating volumes, consideredWells ",totalVolumesIncludedSeries.info(),totalVolumesIncludedSeries.shape[0],totalVolumesIncludedSeries.min(),totalVolumesIncludedSeries.max(),totalVolumesIncludedSeries.isna().sum( ),' nans')
     if verbose>0: print(" gistMC.findWellsVec separating volumes, excludedWells ",totalVolumesExcludedSeries.info(),totalVolumesExcludedSeries.shape[0],totalVolumesExcludedSeries.min(),totalVolumesExcludedSeries.max(),totalVolumesExcludedSeries.isna().sum( ),' nans')
     ##############################################################
@@ -1555,15 +1592,24 @@ class gistMC:
             "The earthquake date precedes all available injection data for the "
             "selected wells. No pressure contribution can be computed."
         )
-    timeStepsSum1 = np.sum(
-        epp[:, :, -ieq:]
-        * dQdtArray[:, np.newaxis, :ieq],
-        axis=2,
+    # einsum contracts the well-function/injection-rate product directly into the
+    # per-[well,realization] sum without ever materializing the full [nwC,nReal,ieq]
+    # product array that np.sum(a*b,axis=2) would allocate - this is the single
+    # largest temporary in the function (it's what the 2GB/10GB size guards above
+    # are sized against). Numerically equivalent to the elementwise-product-then-sum
+    # form to ~1e-15 relative (BLAS accumulates in a different order than np.sum's
+    # pairwise summation), far below Monte Carlo sampling noise.
+    timeStepsSum1 = np.einsum(
+        'ijk,ik->ij',
+        epp[:, :, -ieq:],
+        dQdtArray[:, :ieq],
+        optimize=True,
     )
-    timeStepsSum2 = np.sum(
-        epp[:, :, -(ieq + 1) :]
-        * dQdtArray[:, np.newaxis, : ieq + 1],
-        axis=2,
+    timeStepsSum2 = np.einsum(
+        'ijk,ik->ij',
+        epp[:, :, -(ieq + 1) :],
+        dQdtArray[:, : ieq + 1],
+        optimize=True,
     )
     ########################################################################
     # Multiply the sum of the time steps with gRhoOverT and convert to PSI #
@@ -1886,7 +1932,12 @@ class gistMC:
     # dP output should be [nwC,nReal,nt]
     # dQdtArray is [nwC,nt]
     # epp is [nwC,nReal,nt]
-    dP=sg.fftconvolve(np.flip(epp,axis=2),dQdtArray[:,np.newaxis,:].repeat(nReal,1), mode='full',axes=(2,))
+    # dQdtArray is identical across the nReal axis, so broadcast it there via
+    # np.newaxis instead of .repeat(nReal,1) - fftconvolve already broadcasts
+    # non-convolved axes (see the runPressureGrid usage below), so materializing
+    # nReal duplicate copies of the kernel was pure overhead. Output is bitwise
+    # identical to the .repeat(...) form.
+    dP=sg.fftconvolve(np.flip(epp,axis=2),dQdtArray[:,np.newaxis,:], mode='full',axes=(2,))
     dP=dP[:,:,:nt] * (gRhoOverT[np.newaxis,:,np.newaxis] / 6894.76)
     ######################################################
     # Check output for negative values and warn if found #
