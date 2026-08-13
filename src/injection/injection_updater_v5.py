@@ -91,6 +91,8 @@ RRC_WELLS_DATASET   = "givw-z9t4"
 RRC_INJ_DATASET     = "qq2j-f2zm"
 SOCRATA_PAGE_SIZE   = 10_000
 RRC_INJECTION_MIN_DATE = datetime(1950, 1, 1)
+# GIST injection Days are offsets from this epoch (Unix day 0).
+GIST_EPOCH = datetime(1970, 1, 1)
 
 # Feet threshold separating Shallow from Deep wells
 DEPTH_CUTOFF_FT = 7000.0
@@ -511,6 +513,104 @@ def _filter_dates_on_or_after(
             cutoff.strftime("%Y-%m-%d"),
         )
 
+    return df.loc[~excluded_mask].copy()
+
+
+def _drop_injection_before_well_start(
+    inj_df: pd.DataFrame,
+    well_df: pd.DataFrame,
+    *,
+    context: str,
+    min_start_date: datetime = RRC_INJECTION_MIN_DATE,
+) -> pd.DataFrame:
+    """
+    Drop injection rows dated before a real well activation date.
+
+    Only wells whose WellActivatedDate parses as MM-DD-YYYY and falls on or
+    after min_start_date (default 1950-01-01) are used. Placeholder starts
+    (01-01-1970 defaults, 01-01-1901 sentinels, unparseable values) are
+    skipped so they do not delete legitimate pre-1970 volumes. Unparseable
+    injection dates are left in place.
+    """
+    required_inj = ("InjectionWellId", "Date")
+    required_well = ("InjectionWellId", "WellActivatedDate")
+    if inj_df.empty or any(col not in inj_df.columns for col in required_inj):
+        return inj_df
+    if well_df.empty or any(col not in well_df.columns for col in required_well):
+        return inj_df
+
+    cutoff = pd.Timestamp(min_start_date.date())
+    epoch_day = pd.Timestamp(GIST_EPOCH.date())
+    wells = well_df.loc[:, ["InjectionWellId", "WellActivatedDate"]].copy()
+    wells["InjectionWellId"] = wells["InjectionWellId"].astype(str)
+    wells = wells.drop_duplicates(subset=["InjectionWellId"], keep="first")
+    start_parsed = pd.to_datetime(
+        wells["WellActivatedDate"], format="%m-%d-%Y", errors="coerce"
+    )
+    start_day = start_parsed.dt.normalize()
+    # Real starts only: on/after 1950, excluding the 01-01-1970 parser default.
+    usable_start = start_parsed.notna() & (start_day >= cutoff) & (start_day != epoch_day)
+    start_map = pd.Series(
+        start_parsed.loc[usable_start].to_numpy(),
+        index=wells.loc[usable_start, "InjectionWellId"],
+        dtype="datetime64[ns]",
+    )
+    if start_map.empty:
+        return inj_df
+
+    join_ids = inj_df["InjectionWellId"].astype(str)
+    start_aligned = join_ids.map(start_map)
+    inj_dates = pd.to_datetime(inj_df["Date"], format="%m-%d-%Y", errors="coerce")
+    drop_mask = start_aligned.notna() & inj_dates.notna() & (inj_dates < start_aligned)
+    dropped = int(drop_mask.sum())
+    if not dropped:
+        return inj_df
+
+    n_wells = join_ids.loc[drop_mask].nunique()
+    logger.info(
+        "%s: excluded %d/%d injection records (%.1f%%) dated before well start "
+        "(%d wells with a real activation date on/after %s).",
+        context,
+        dropped,
+        len(inj_df),
+        100.0 * dropped / len(inj_df),
+        n_wells,
+        cutoff.strftime("%Y-%m-%d"),
+    )
+    return inj_df.loc[~drop_mask].copy()
+
+
+def _filter_gist_days_on_or_after(
+    df: pd.DataFrame,
+    *,
+    min_date: datetime = RRC_INJECTION_MIN_DATE,
+    epoch: datetime = GIST_EPOCH,
+    context: str,
+) -> pd.DataFrame:
+    """
+    Drop GIST injection rows whose Days offset is before min_date.
+
+    No-op when Days is absent (well files) or the frame is empty. NaN Days
+    are left in place. prepInj rejects Days before 1950-01-01 (~-7305).
+    """
+    if df.empty or "Days" not in df.columns:
+        return df
+
+    min_days = (pd.Timestamp(min_date.date()) - pd.Timestamp(epoch.date())).days
+    days = pd.to_numeric(df["Days"], errors="coerce")
+    excluded_mask = days.notna() & (days < min_days)
+    excluded_count = int(excluded_mask.sum())
+    if not excluded_count:
+        return df
+
+    logger.info(
+        "%s: excluded %d/%d records with Days before %s (Days < %d).",
+        context,
+        excluded_count,
+        len(df),
+        pd.Timestamp(min_date.date()).strftime("%Y-%m-%d"),
+        min_days,
+    )
     return df.loc[~excluded_mask].copy()
 
 
@@ -1192,10 +1292,29 @@ def run_gist_pipeline(
             len(filtered_well_df),
         )
 
+    inj_df = pd.read_csv(b3_inj_file, dtype={"InjectionWellId": str}, low_memory=False)
+    clipped_inj_df = _drop_injection_before_well_start(
+        inj_df,
+        filtered_well_df,
+        context=f"{depth_label} GIST pipeline injection",
+    )
+    effective_inj_file = b3_inj_file
+    if len(clipped_inj_df) < len(inj_df):
+        filtered_inj_path = b3_inj_file.with_name(f"{b3_inj_file.stem}_filtered.csv")
+        clipped_inj_df.to_csv(filtered_inj_path, index=False)
+        effective_inj_file = filtered_inj_path
+        logger.debug(
+            "%s: using filtered injection file %s (%d -> %d rows)",
+            depth_label,
+            filtered_inj_path.name,
+            len(inj_df),
+            len(clipped_inj_df),
+        )
+
     tx_inj = inj3.injTX(str(effective_well_file), depth_label, depth_cutoff, verbose=verbose)
     logger.debug("%s: injTX initialised with %d wells", depth_label, len(tx_inj.wellList))
 
-    tx_inj.addDaily(str(b3_inj_file), 100_000, verbose=verbose)
+    tx_inj.addDaily(str(effective_inj_file), 100_000, verbose=verbose)
     logger.debug("%s: addDaily complete", depth_label)
 
     wells = inj3.inj(None, tx_inj, "01-01-1970", str(well_file), verbose=verbose)
@@ -1205,6 +1324,13 @@ def run_gist_pipeline(
     logger.debug("%s: processRates complete", depth_label)
 
     wells.outputReg(str(inj_file), verbose=verbose)
+    gist_inj_df = pd.read_csv(inj_file, dtype={"ID": str}, low_memory=False)
+    clipped_gist_inj_df = _filter_gist_days_on_or_after(
+        gist_inj_df,
+        context=f"{depth_label} GIST regularized injection",
+    )
+    if len(clipped_gist_inj_df) < len(gist_inj_df):
+        clipped_gist_inj_df.to_csv(inj_file, index=False)
     logger.info(
         "%s GIST files written: wells → %s | injection → %s",
         depth_label, well_file, inj_file,
@@ -1247,6 +1373,10 @@ def merge_datasets(
 
     # TexNet is appended last, so keep="last" gives TexNet priority on conflicts
     combined.drop_duplicates(subset=dedup_cols, keep="last", inplace=True)
+    combined = _filter_gist_days_on_or_after(
+        combined,
+        context=f"merge {output_file.name}",
+    )
 
     sort_cols = [c for c in ["ID", "Days", "Date"] if c in combined.columns]
     if sort_cols:
