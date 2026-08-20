@@ -39,6 +39,13 @@ import warnings
 # user-supplied IDs, which may now be strings.
 SMALL_WELLS_ID = "__GIST_SMALL_WELLS__"
 
+# runPressureScenariosVec evaluates the well function (sc.exp1) on a
+# [nwC, nReal, nt] array whose only use is a reduction down to [nwC, nReal] -
+# the well axis is never summed over, so it can be processed in blocks with
+# no change to the result (see PRESSURE_VEC_BLOCK_BYTES below). This caps the
+# peak size of that temporary; it does not limit nwC or nReal themselves.
+PRESSURE_VEC_BLOCK_BYTES = 256 * 1024 * 1024
+
 
 def normalizeGistIds(values, field_name="ID"):
   """Return trimmed string IDs and reject blank values before joins occur.
@@ -1519,13 +1526,17 @@ class gistMC:
     (wellIDs,nwC,dayVec,nt,ot,bpdArray,secArray,dx,dy,wellDistances,ieq,f)=prepInj(consideredWells,injDF,self.injDT,dxdyIn=None,eqDay=eqDay,endDate=None,epoch=self.epoch)
     if verbose>1: print('runPressureScenariosVectorized time axis information - nt:',nt,'; ot:',ot,'; dt:',self.injDT,' earthquake index: ',ieq)
     if verbose>1: print('runPressureScenariosVectorized: f:',f)
-    ######################################
-    # Check array size: nwC x nt x nReal #
-    # >10GB: Error, >2GB: Warning        # 
-    ######################################
-    arraySizeGB=nwC*nt*nReal*8/(1024*1024*1024)
-    if arraySizeGB>2.0: warnings.warn(' gistMC.runPressureScenariosVec WARNING: array size for calculating pressures is '+str(arraySizeGB)+'GB. Consider reducing nReal',UserWarning,stacklevel=2)
-    if arraySizeGB>10.: raise ValueError('gistMC.runPressureScenariosVec ERROR: array size for calculating pressures is '+str(arraySizeGB)+'GB. Consider reducing nReal')
+    #####################################################################
+    # Check problem size: nwC x nt x nReal                              #
+    # The well function (epp, below) is now evaluated in well-axis      #
+    # blocks (see PRESSURE_VEC_BLOCK_BYTES), so this no longer bounds   #
+    # peak memory - a full-size epp is never allocated. It still bounds #
+    # wall-clock time, since sc.exp1 cost scales with element count     #
+    # regardless of blocking. >100GB-equivalent: Error, >10GB: Warning  #
+    #####################################################################
+    computeSizeGB=nwC*nt*nReal*8/(1024*1024*1024)
+    if computeSizeGB>10.: warnings.warn(' gistMC.runPressureScenariosVec WARNING: estimated computation size is '+str(computeSizeGB)+'GB-equivalent ('+str(nwC)+' wells x '+str(nReal)+' realizations x '+str(nt)+' time steps). This may take a while. Consider reducing nReal or the well search radius',UserWarning,stacklevel=2)
+    if computeSizeGB>100.: raise ValueError('gistMC.runPressureScenariosVec ERROR: estimated computation size is '+str(computeSizeGB)+'GB-equivalent ('+str(nwC)+' wells x '+str(nReal)+' realizations x '+str(nt)+' time steps), which is likely a configuration error. Consider reducing nReal or the well search radius')
     ###########################################
     # Convert bpdArray to Q - m3/s [nt+1,nwC] #
     ###########################################
@@ -1572,13 +1583,6 @@ class gistMC:
     #######################################################################################
     durations=np.max(secArray)-secArray+dts
     if verbose>1: print('runPressureScenariosVectorized durations min/max: ',min(durations),max(durations))
-    #######################################################################################
-    # This has the well function in it - sc.exp1. Moving this out of the loop speeds up   #
-    # computation vs. FSP for a time series by O(nt). epp is [nwC,nReal,nt].              #
-    # We reuse parts of this array in the summation as we assume that dt is fixed.        #
-    #######################################################################################
-    epp=sc.exp1(ppp[:,:,np.newaxis] / durations[np.newaxis,np.newaxis,:nt])
-    if verbose>1: print('runPressureScenariosVectorized epp min/max: ',min(epp.flatten()),max(epp.flatten()))
     #########################################################
     # Get output of well function x the change in injection #
     # We take the last 'it' values of epp that is a series  #
@@ -1592,25 +1596,48 @@ class gistMC:
             "The earthquake date precedes all available injection data for the "
             "selected wells. No pressure contribution can be computed."
         )
+    #############################################################################
+    # This has the well function in it - sc.exp1. Moving this out of the loop  #
+    # below speeds up computation vs. FSP for a time series by O(nt). epp is   #
+    # [nwC,nReal,nt] - too big to keep in full at large nwC/nReal, so it's     #
+    # evaluated in blocks of the well axis (PRESSURE_VEC_BLOCK_BYTES) instead. #
+    # This is safe: the well axis (i) is never summed over below - it appears #
+    # in both einsum operands AND the output ('ijk,ik->ij') - so it's a pure  #
+    # batch axis. sc.exp1 is elementwise. Slicing a batch axis cannot change  #
+    # the einsum's floating-point summation order along the contracted (time) #
+    # axis, so results are bitwise identical to computing epp in one shot -   #
+    # verified by direct comparison, not just to numerical tolerance.         #
+    #############################################################################
     # einsum contracts the well-function/injection-rate product directly into the
     # per-[well,realization] sum without ever materializing the full [nwC,nReal,ieq]
-    # product array that np.sum(a*b,axis=2) would allocate - this is the single
-    # largest temporary in the function (it's what the 2GB/10GB size guards above
-    # are sized against). Numerically equivalent to the elementwise-product-then-sum
-    # form to ~1e-15 relative (BLAS accumulates in a different order than np.sum's
-    # pairwise summation), far below Monte Carlo sampling noise.
-    timeStepsSum1 = np.einsum(
-        'ijk,ik->ij',
-        epp[:, :, -ieq:],
-        dQdtArray[:, :ieq],
-        optimize=True,
-    )
-    timeStepsSum2 = np.einsum(
-        'ijk,ik->ij',
-        epp[:, :, -(ieq + 1) :],
-        dQdtArray[:, : ieq + 1],
-        optimize=True,
-    )
+    # product array that np.sum(a*b,axis=2) would allocate. Numerically equivalent
+    # to the elementwise-product-then-sum form to ~1e-15 relative (BLAS accumulates
+    # in a different order than np.sum's pairwise summation), far below Monte Carlo
+    # sampling noise.
+    timeStepsSum1 = np.empty((nwC, nReal))
+    timeStepsSum2 = np.empty((nwC, nReal))
+    eppMin = np.inf
+    eppMax = -np.inf
+    wellBlock = max(1, PRESSURE_VEC_BLOCK_BYTES // (nReal * nt * 8))
+    for lo in range(0, nwC, wellBlock):
+        hi = min(lo + wellBlock, nwC)
+        eppBlock = sc.exp1(ppp[lo:hi, :, np.newaxis] / durations[np.newaxis, np.newaxis, :nt])
+        if verbose>1:
+            eppMin = min(eppMin, eppBlock.min())
+            eppMax = max(eppMax, eppBlock.max())
+        timeStepsSum1[lo:hi, :] = np.einsum(
+            'ijk,ik->ij',
+            eppBlock[:, :, -ieq:],
+            dQdtArray[lo:hi, :ieq],
+            optimize=True,
+        )
+        timeStepsSum2[lo:hi, :] = np.einsum(
+            'ijk,ik->ij',
+            eppBlock[:, :, -(ieq + 1) :],
+            dQdtArray[lo:hi, : ieq + 1],
+            optimize=True,
+        )
+    if verbose>1: print('runPressureScenariosVectorized epp min/max: ',eppMin,eppMax)
     ########################################################################
     # Multiply the sum of the time steps with gRhoOverT and convert to PSI #
     # dP is the change in pressure from the first time step [nw,nReal,nt]  #
@@ -1904,13 +1931,11 @@ class gistMC:
     # Compute gRhoOverT [nReal] #
     #############################
     gRhoOverT=rhoVec*self.g/(4.*np.pi*TVec)
-    ########################
-    # Initialize output dP #
-    ########################
-    dP=np.zeros([nwC,nReal,nt])
+    # dP is assigned below from fftconvolve's output - no need to preallocate
+    # a full [nwC,nReal,nt] array here first, that was a dead allocation.
     ######################################
     # Convert injDT from days to seconds #
-    ###################################### 
+    ######################################
     dts=self.injDT*24*60*60
     #######################################################################################
     # Create a vector of injection durations starting with all time and ending with dt.   #
