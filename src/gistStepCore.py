@@ -21,9 +21,32 @@ from gistMC import prepTotalPressureTimeSeriesSpaghettiPlot
 from gistMC import getPerWellPressureTimeSeriesSpaghettiAndQuantiles
 from progress import report_progress
 
+DEFAULT_REALIZATION_COUNT = 50
+
+
+def _resolve_realization_count(raw_count):
+    """Return a non-negative int realization count, or the portal default of 50.
+
+    Missing, unparseable, and negative values fall back to DEFAULT_REALIZATION_COUNT.
+    Values 0 and 1 are passed through; gistMC still rejects nReal < 2.
+    """
+    if raw_count is None:
+        return DEFAULT_REALIZATION_COUNT
+    try:
+        n_real = int(raw_count)
+    except (TypeError, ValueError):
+        return DEFAULT_REALIZATION_COUNT
+    if n_real < 0:
+        return DEFAULT_REALIZATION_COUNT
+    return n_real
+
+
 def runGistCore(input, wellcsv, injectioncsv):
+    """Run well filtering and pore-pressure Monte Carlo for a portal GIST step.
+    """
     # Initialize gistMC class
-    gistMC_instance = gistMC()
+    n_real = _resolve_realization_count(input.get("realizationCount"))
+    gistMC_instance = gistMC(nReal=n_real)
     porePressureParams = input.get("porePressureParams")
     gistMC_instance.initPP(**porePressureParams)
     eq = input.get("eq")
