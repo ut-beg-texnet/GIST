@@ -3,6 +3,7 @@ import requests
 import json
 import numpy as np
 from pandas import Timestamp
+from datetime import datetime
 import pandas as pd
 import matplotlib.colors as mcolors
 # from pandas import DataFrame
@@ -22,6 +23,76 @@ from gistMC import getPerWellPressureTimeSeriesSpaghettiAndQuantiles
 from progress import report_progress
 
 DEFAULT_REALIZATION_COUNT = 50
+
+
+def get_selected_event(helper):
+    """Return the event selected in the portal as a GIST event dictionary."""
+    event_type = helper.getParameterValueWithStepIndexAndParamName(0, "eventType")
+    if event_type == "Earthquake":
+        selected_event = helper.getParameterValueWithStepIndexAndParamName(0, "Earthquake")
+        attributes = (selected_event or {}).get("selectedRow", {}).get("attributes")
+        if attributes is None:
+            raise ValueError("Select an earthquake before running GIST.")
+        event_date = Timestamp(attributes.get("Origin Date"), unit="ms")
+        return {
+            "Latitude": attributes.get("Latitude (WGS84)"),
+            "LatitudeError": attributes.get("Latitude Error (km)"),
+            "Longitude": attributes.get("Longitude (WGS84)"),
+            "LongitudeError": attributes.get("Longitude Error (km)"),
+            "Origin Date": event_date.strftime("%Y-%m-%d"),
+            "EventID": attributes.get("EventID"),
+        }
+    if event_type == "Scenario":
+        scenario_loc = helper.getParameterValueWithStepIndexAndParamName(0, "scenarioLoc")
+        scenario_date = helper.getParameterValueWithStepIndexAndParamName(0, "scenarioDate")
+        if scenario_loc is None or scenario_date is None:
+            raise ValueError("Select a scenario location and date before running GIST.")
+        event_date = Timestamp(scenario_date, unit="ms")
+        return {
+            "Latitude": scenario_loc.get("y"), "LatitudeError": 0,
+            "Longitude": scenario_loc.get("x"), "LongitudeError": 0,
+            "Origin Date": event_date.strftime("%Y-%m-%d"), "EventID": "AAAAAA",
+        }
+    raise ValueError("Select either an earthquake or a scenario before running GIST.")
+
+
+def get_portal_analysis_input(helper, step_index):
+    """Build independent GIST model input from one portal step."""
+    event = get_selected_event(helper)
+    forecast_date = helper.getParameterValueWithStepIndexAndParamName(step_index, "forecastEndDate")
+    if forecast_date is None:
+        raise ValueError("Provide a forecast end date before running GIST.")
+    try:
+        future_date = datetime.strptime(forecast_date, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except ValueError:
+        future_date = datetime.fromisoformat(str(forecast_date).replace("Z", "+00:00").replace("+00:00", ""))
+    event_date = datetime.strptime(event["Origin Date"], "%Y-%m-%d")
+    parameter_names = ("realizationCount", "wellType", "rho0", "phi", "nta", "kMD", "h", "cppMS", "betaMS")
+    values = {name: helper.getParameterValueWithStepIndexAndParamName(step_index, name) for name in parameter_names}
+    if any(values[name] is None for name in parameter_names):
+        raise ValueError("Complete all Updated Analysis inputs before running GIST.")
+    return {
+        "years_diff": (future_date - event_date).days / 365,
+        "realizationCount": values["realizationCount"], "wellType": values["wellType"],
+        "porePressureParams": {
+            "rho0_min": float(values["rho0"].get("min")), "rho0_max": float(values["rho0"].get("max")),
+            "nta_min": float(values["nta"].get("min")), "nta_max": float(values["nta"].get("max")),
+            "phi_min": float(values["phi"].get("min")), "phi_max": float(values["phi"].get("max")),
+            "kMD_min": float(values["kMD"].get("min")), "kMD_max": float(values["kMD"].get("max")),
+            "h_min": float(values["h"].get("min")), "h_max": float(values["h"].get("max")),
+            "cppMS_min": float(values["cppMS"].get("min")), "cppMS_max": float(values["cppMS"].get("max")),
+            "betaMS_min": float(values["betaMS"].get("min")), "betaMS_max": float(values["betaMS"].get("max")),
+        }, "eq": event,
+    }
+
+
+def get_corrected_gist_data_paths(helper):
+    """Return the corrected disposal datasets required by later GIST steps."""
+    well_csv = helper.getDatasetFilePathWithStepIndexAndParamName(2, "GISTWells")
+    injection_csv = helper.getDatasetFilePathWithStepIndexAndParamName(2, "GISTInjection")
+    if well_csv is None or injection_csv is None:
+        raise ValueError("Upload both corrected GIST well and injection datasets before running Updated Analysis.")
+    return well_csv, injection_csv
 
 
 def _resolve_realization_count(raw_count):

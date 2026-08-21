@@ -34,6 +34,9 @@ def get_corrected_gist_data_paths(helper, well_type):
     wellcsv = helper.getDatasetFilePathWithStepIndexAndParamName(2, "GISTWells")
     injectioncsv = helper.getDatasetFilePathWithStepIndexAndParamName(2, "GISTInjection")
 
+    if wellcsv is None or injectioncsv is None:
+        raise ValueError("Upload both corrected GIST well and injection datasets before running Updated Analysis.")
+
     if wellcsv is not None and injectioncsv is not None:
         return wellcsv, injectioncsv
 
@@ -60,7 +63,20 @@ argsData = helper.argsData
 report_progress("Preparing updated analysis inputs")
 
 #getParameterValueWithStepIndexAndParamName
-Earthquake = helper.getParameterValueWithStepIndexAndParamName(0,"Earthquake").get("selectedRow").get("attributes")
+eventType = helper.getParameterValueWithStepIndexAndParamName(0, "eventType")
+selectedEvent = helper.getParameterValueWithStepIndexAndParamName(0, "Earthquake")
+if eventType == "Scenario":
+    scenarioLoc = helper.getParameterValueWithStepIndexAndParamName(0, "scenarioLoc")
+    scenarioDate = helper.getParameterValueWithStepIndexAndParamName(0, "scenarioDate")
+    selectedEvent = {"selectedRow": {"attributes": {
+        "Origin Date": scenarioDate,
+        "Latitude (WGS84)": scenarioLoc.get("y"), "Latitude Error (km)": 0,
+        "Longitude (WGS84)": scenarioLoc.get("x"), "Longitude Error (km)": 0,
+        "EventID": "AAAAAA"
+    }}}
+Earthquake = (selectedEvent or {}).get("selectedRow", {}).get("attributes")
+if Earthquake is None:
+    raise ValueError("Select an earthquake or scenario before running Updated Analysis.")
 
 date = Timestamp(Earthquake.get("Origin Date"), unit="ms")
 formatted_date = date.strftime("%Y-%m-%d")
@@ -74,7 +90,7 @@ formattedEarthquake = {
     "EventID": Earthquake.get("EventID")
 }
 
-forecastDate = helper.getParameterValueWithStepIndexAndParamName(1,"forecastEndDate")
+forecastDate = helper.getParameterValueWithStepIndexAndParamName(3,"forecastEndDate")
 
 eq_date = datetime.strptime(formatted_date, "%Y-%m-%d")
 future_date = datetime.strptime(forecastDate, "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -117,7 +133,13 @@ input = {
 wellcsv, injectioncsv = get_corrected_gist_data_paths(helper, wellType)
 
 report_progress("Running updated analysis workflow")
-smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
+try:
+    smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
+except ValueError as e:
+    helper.addMessageWithStepIndex(3, str(e), 2)
+    helper.setSuccessForStepIndex(3, False)
+    helper.writeResultsFile()
+    sys.exit(1)
 
 report_progress("Preparing graph data")
 

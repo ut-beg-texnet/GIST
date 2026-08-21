@@ -16,7 +16,7 @@ from math import ceil
 
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
-from gistStepCore import runGistCore
+from gistStepCore import runGistCore, get_corrected_gist_data_paths
 from progress import report_progress
 from gist_graphs import (
     filter_rt_plot_wells_future_start_date,
@@ -40,7 +40,20 @@ argsData = helper.argsData
 report_progress("Preparing forecast inputs")
 
 #getParameterValueWithStepIndexAndParamName
-Earthquake = helper.getParameterValueWithStepIndexAndParamName(0,"Earthquake").get("selectedRow").get("attributes")
+eventType = helper.getParameterValueWithStepIndexAndParamName(0, "eventType")
+selectedEvent = helper.getParameterValueWithStepIndexAndParamName(0, "Earthquake")
+if eventType == "Scenario":
+    scenarioLoc = helper.getParameterValueWithStepIndexAndParamName(0, "scenarioLoc")
+    scenarioDate = helper.getParameterValueWithStepIndexAndParamName(0, "scenarioDate")
+    selectedEvent = {"selectedRow": {"attributes": {
+        "Origin Date": scenarioDate,
+        "Latitude (WGS84)": scenarioLoc.get("y"), "Latitude Error (km)": 0,
+        "Longitude (WGS84)": scenarioLoc.get("x"), "Longitude Error (km)": 0,
+        "EventID": "AAAAAA"
+    }}}
+Earthquake = (selectedEvent or {}).get("selectedRow", {}).get("attributes")
+if Earthquake is None:
+    raise ValueError("Select an earthquake or scenario before running Forecast.")
 
 date = Timestamp(Earthquake.get("Origin Date"), unit="ms")
 formatted_date = date.strftime("%Y-%m-%d")
@@ -54,7 +67,7 @@ formattedEarthquake = {
     "EventID": Earthquake.get("EventID")
 }
 
-forecastDate = helper.getParameterValueWithStepIndexAndParamName(1,"forecastEndDate")
+forecastDate = helper.getParameterValueWithStepIndexAndParamName(3,"forecastEndDate")
 
 eq_date = datetime.strptime(formatted_date, "%Y-%m-%d")
 future_date = datetime.strptime(forecastDate, "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -94,12 +107,7 @@ input = {
     "eq": formattedEarthquake
 }
 
-if wellType == 'Shallow':
-    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_shallow.csv'
-    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_shallow.csv'
-else:
-    wellcsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_well_deep.csv'
-    injectioncsv = 'C:/texnetwebtools/tools/GIST/src/data/gist_injection_deep.csv'
+wellcsv, injectioncsv = get_corrected_gist_data_paths(helper)
 
 report_progress("Running forecast workflow")
 smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
