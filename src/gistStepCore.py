@@ -59,7 +59,8 @@ def get_selected_event(helper):
 def get_portal_analysis_input(helper, step_index):
     """Build independent GIST model input from one portal step."""
     event = get_selected_event(helper)
-    forecast_date = helper.getParameterValueWithStepIndexAndParamName(step_index, "forecastEndDate")
+    # Forecast end date is shared by every analysis step from Select Event.
+    forecast_date = helper.getParameterValueWithStepIndexAndParamName(0, "forecastEndDate")
     if forecast_date is None:
         raise ValueError("Provide a forecast end date before running GIST.")
     try:

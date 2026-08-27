@@ -76,7 +76,8 @@ if eventType == 'Scenario':
     }
 
 
-forecastDate = helper.getParameterValueWithStepIndexAndParamName(1,"forecastEndDate")
+# Forecast end date is collected with the shared event inputs.
+forecastDate = helper.getParameterValueWithStepIndexAndParamName(0,"forecastEndDate")
 
 eq_date = datetime.strptime(formatted_date, "%Y-%m-%d")
 future_date = datetime.strptime(forecastDate, "%Y-%m-%dT%H:%M:%S.%fZ")
