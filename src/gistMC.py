@@ -1151,8 +1151,10 @@ class gistMC:
     # the wells first injection date                     #
     #######################################################
     # To-do: include earthquake location uncertainty here #
+    # Done - well distances include 1 S.D. of uncertainty #
     #######################################################
-    injWellDaysToEpicenter=(1000000.*wellDistances*wellDistances /(4. * np.pi * self.diffPPMax))/(24*60*60)
+    #injWellDaysToEpicenter=(1000000.*wellDistances*wellDistances /(4. * np.pi * self.diffPPMax))/(24*60*60)
+    injWellDaysToEpicenter=(1000000.*(wellDistances-eqUncert)*(wellDistances-eqUncert) /(4. * np.pi * self.diffPPMax))/(24*60*60)
     ##############################################################
     # Now add that number of days to the well time to get a date #
     # This is overflowing pd datetime, so clip things at 100 years #
