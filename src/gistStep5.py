@@ -16,7 +16,12 @@ from math import ceil
 
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
-from gistStepCore import runGistCore, get_corrected_gist_data_paths
+from gistStepCore import (
+    DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM,
+    eq_location_error_km,
+    get_corrected_gist_data_paths,
+    runGistCore,
+)
 from progress import report_progress
 from gist_graphs import (
     filter_rt_plot_wells_future_start_date,
@@ -58,11 +63,13 @@ if Earthquake is None:
 date = Timestamp(Earthquake.get("Origin Date"), unit="ms")
 formatted_date = date.strftime("%Y-%m-%d")
 
+# Catalog earthquakes may omit location error; scenarios already supply 0.
+location_error_default = DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM if eventType == "Earthquake" else 0
 formattedEarthquake = {
     "Latitude": Earthquake.get("Latitude (WGS84)"),
-    "LatitudeError": Earthquake.get("Latitude Error (km)"),
+    "LatitudeError": eq_location_error_km(Earthquake.get("Latitude Error (km)"), location_error_default),
     "Longitude": Earthquake.get("Longitude (WGS84)"),
-    "LongitudeError": Earthquake.get("Longitude Error (km)"),
+    "LongitudeError": eq_location_error_km(Earthquake.get("Longitude Error (km)"), location_error_default),
     "Origin Date": formatted_date,
     "EventID": Earthquake.get("EventID")
 }

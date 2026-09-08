@@ -12,7 +12,11 @@ from math import ceil
 
 from TexNetWebToolGPWrappers import TexNetWebToolLaunchHelper
 
-from gistStepCore import runGistCore
+from gistStepCore import (
+    DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM,
+    eq_location_error_km,
+    runGistCore,
+)
 from progress import report_progress
 from gist_graphs import (
     save_pressure_ranges_graph_artifact,
@@ -48,9 +52,13 @@ if eventType == 'Earthquake':
 
     formattedEarthquake = {
         "Latitude": Earthquake.get("Latitude (WGS84)"),
-        "LatitudeError": Earthquake.get("Latitude Error (km)"),
+        "LatitudeError": eq_location_error_km(
+            Earthquake.get("Latitude Error (km)"), DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM
+        ),
         "Longitude": Earthquake.get("Longitude (WGS84)"),
-        "LongitudeError": Earthquake.get("Longitude Error (km)"),
+        "LongitudeError": eq_location_error_km(
+            Earthquake.get("Longitude Error (km)"), DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM
+        ),
         "Origin Date": formatted_date,
         "EventID": Earthquake.get("EventID")
     }

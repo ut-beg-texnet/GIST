@@ -23,6 +23,15 @@ from gistMC import getPerWellPressureTimeSeriesSpaghettiAndQuantiles
 from progress import report_progress
 
 DEFAULT_REALIZATION_COUNT = 50
+# Catalog earthquakes sometimes omit location error; use 1 km so checkEQ/findWellsVec get a number. For eventType 'Earthquake' we default to 1 km, 'Scenario' we default to 0 km.
+DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM = 1
+
+
+def eq_location_error_km(value, missing_default=0):
+    """Return a numeric location error in km; use missing_default when the catalog value is absent."""
+    if value is None or value == "":
+        return missing_default
+    return value
 
 
 def get_selected_event(helper):
@@ -36,9 +45,13 @@ def get_selected_event(helper):
         event_date = Timestamp(attributes.get("Origin Date"), unit="ms")
         return {
             "Latitude": attributes.get("Latitude (WGS84)"),
-            "LatitudeError": attributes.get("Latitude Error (km)"),
+            "LatitudeError": eq_location_error_km(
+                attributes.get("Latitude Error (km)"), DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM
+            ),
             "Longitude": attributes.get("Longitude (WGS84)"),
-            "LongitudeError": attributes.get("Longitude Error (km)"),
+            "LongitudeError": eq_location_error_km(
+                attributes.get("Longitude Error (km)"), DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM
+            ),
             "Origin Date": event_date.strftime("%Y-%m-%d"),
             "EventID": attributes.get("EventID"),
         }
