@@ -875,15 +875,17 @@ def save_pressure_ranges_graph_artifact(
         ticks.append(int(math.ceil(x_max)))
     x_max = max(float(ticks[-1]), x_max)
 
+    # Shared 3-column grid (names | plot | pad) so axis ticks and gridlines
+    # stay in the same coordinate system at any iframe width, including fullscreen.
     label_width = 240
     plot_width = 900
-    right_pad = 32
     row_height = 30
-    svg_width = label_width + plot_width + right_pad
+    axis_height = 48
     svg_height = max(90, well_count * row_height + 16)
 
-    def x_px(value):
-        return label_width + (float(value) / x_max) * plot_width
+    def plot_x(value):
+        """Map PSI to the plot-only SVG viewBox (0 .. plot_width)."""
+        return (float(value) / x_max) * plot_width
 
     cmap = _PRESSURE_RANGES_CMAP
 
@@ -900,24 +902,29 @@ def save_pressure_ranges_graph_artifact(
     grid_lines = []
     x_tick_labels = []
     for tick in ticks:
-        tx = x_px(tick)
+        tx = plot_x(tick)
         grid_lines.append(
-            f'<line x1="{tx:.1f}" y1="0" x2="{tx:.1f}" y2="{svg_height - 16}" stroke="#e5e5e5" stroke-width="1" />'
+            f'<line class="gridline" data-tick="{html_module.escape(str(tick))}" '
+            f'x1="{tx:.1f}" y1="0" x2="{tx:.1f}" y2="{svg_height - 16}" '
+            f'stroke="#e5e5e5" stroke-width="1" />'
         )
         x_tick_labels.append(
-            f'<span class="x-tick" style="left:{((tx - label_width) / plot_width) * 100:.4f}%">{html_module.escape(str(tick))}</span>'
+            f'<text class="x-tick" data-tick="{html_module.escape(str(tick))}" '
+            f'x="{tx:.1f}" y="16" text-anchor="middle">'
+            f"{html_module.escape(str(tick))}</text>"
         )
 
     y_labels = []
     for name, y_index in y_lookup.items():
         y = y_index * row_height + row_height / 2
         y_labels.append(
-            f'<text x="{label_width - 8}" y="{y + 4:.1f}" text-anchor="end">{html_module.escape(str(name))}</text>'
+            f'<text x="{label_width - 8}" y="{y + 4:.1f}" text-anchor="end">'
+            f"{html_module.escape(str(name))}</text>"
         )
 
     points = []
     for _, row in plot_df.iterrows():
-        x = x_px(row["Pressures"])
+        x = plot_x(row["Pressures"])
         y = float(row["Y"]) * row_height + row_height / 2
         points.append(
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.3" fill="{color_for_order(row["Order"])}" opacity="0.82" />'
@@ -956,41 +963,41 @@ def save_pressure_ranges_graph_artifact(
     display: flex;
     flex-direction: column;
   }}
+  .chart-grid {{
+    display: grid;
+    grid-template-columns: minmax(240px, 240fr) minmax(0, 900fr) minmax(28px, 32fr);
+    width: 100%;
+    box-sizing: border-box;
+  }}
   .plot-scroll {{
     flex: 1 1 auto;
     min-height: 220px;
     overflow-y: auto;
     overflow-x: hidden;
+    scrollbar-gutter: stable;
     border-bottom: 1px solid #888;
   }}
-  svg {{
-    display: block;
-    box-sizing: border-box;
-    width: 100%;
-    min-width: {svg_width}px;
+  .plot-grid {{
     height: {svg_height}px;
+  }}
+  .axis-row {{
+    flex: 0 0 {axis_height}px;
+    height: {axis_height}px;
+    overflow-y: hidden;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;
+  }}
+  .chart-grid svg {{
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
   }}
   text {{
     fill: #1f1f1f;
     font-size: 12px;
   }}
-  .axis {{
-    flex: 0 0 48px;
-    margin-left: {label_width}px;
-    margin-right: {right_pad}px;
-    position: relative;
-    border-top: 1px solid #888;
-  }}
-  .x-tick {{
-    position: absolute;
-    top: 5px;
-    transform: translateX(-50%);
-    font-size: 12px;
-  }}
   .x-label {{
-    position: absolute;
-    right: 0;
-    bottom: 4px;
     font-size: 13px;
   }}
   .legend-wrap {{
@@ -1021,16 +1028,25 @@ def save_pressure_ranges_graph_artifact(
 </head>
 <body>
   <div class="plot-scroll" aria-label="{html_module.escape(title)} plot body">
-    <svg viewBox="0 0 {svg_width} {svg_height}" preserveAspectRatio="none" role="img" aria-label="{html_module.escape(title)}">
-      {"".join(grid_lines)}
-      <line x1="{label_width}" y1="0" x2="{label_width}" y2="{svg_height - 16}" stroke="#888" stroke-width="1" />
-      {"".join(y_labels)}
-      {"".join(points)}
-    </svg>
+    <div class="chart-grid plot-grid">
+      <svg viewBox="0 0 {label_width} {svg_height}" preserveAspectRatio="xMaxYMin meet" aria-hidden="true">
+        {"".join(y_labels)}
+      </svg>
+      <svg viewBox="0 0 {plot_width} {svg_height}" preserveAspectRatio="none" role="img" aria-label="{html_module.escape(title)}">
+        {"".join(grid_lines)}
+        <line x1="0" y1="0" x2="0" y2="{svg_height}" stroke="#888" stroke-width="1" />
+        {"".join(points)}
+      </svg>
+      <div></div>
+    </div>
   </div>
-  <div class="axis">
-    {"".join(x_tick_labels)}
-    <div class="x-label">Pressure Increase (PSI)</div>
+  <div class="chart-grid axis-row">
+    <div></div>
+    <svg viewBox="0 0 {plot_width} {axis_height}" preserveAspectRatio="none" aria-hidden="true">
+      {"".join(x_tick_labels)}
+      <text class="x-label" x="{plot_width}" y="42" text-anchor="end">Pressure Increase (PSI)</text>
+    </svg>
+    <div></div>
   </div>
   <div class="legend-wrap">
     <div class="legend-bar"></div>
