@@ -24,6 +24,10 @@ Usage:
     python injection_updater_v5.py --target-dir ./src/data --dev --debug
     python injection_updater_v5.py --target-dir ./src/data --texnet-only
     python injection_updater_v5.py --target-dir ./src/data --rrc-only
+    python injection_updater_v5.py --target-dir C:\\path\\to\\src\\data --production
+
+Task Scheduler: set "Start in" to the src/injection directory so credentials.py
+imports, then run the --production command above.
 """
 
 import argparse
@@ -38,7 +42,7 @@ from datetime import datetime, timedelta
 from io import StringIO
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 import requests
@@ -50,10 +54,13 @@ import injectionV3 as inj3
 from injection_id_utils import normalize_uic_string, apply_uic_normalization
 from permian_subbasin import print_permian_basins_for_wells
 
-print("SCRIPT STARTING...")
+# Set by setup_logging(); when True, skip the agent debug-file writer.
+_PRODUCTION_MODE = False
 
 # #region agent log
 def log_debug(message, data=None, hypothesisId=None):
+    if _PRODUCTION_MODE:
+        return
     try:
         payload = {
             "sessionId": "55ae8f",
@@ -77,6 +84,8 @@ requests.packages.urllib3.disable_warnings(
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
+# Production runs emit start/end/summary here; does not propagate to root.
+summary_logger = logging.getLogger("injection_updater_v5.summary")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -120,38 +129,104 @@ def add_one_calendar_month(dt: datetime) -> datetime:
 # Logging
 # ──────────────────────────────────────────────────────────────────────────────
 
-def setup_logging(debug: bool) -> None:
+def setup_logging(debug: bool, production: bool = False) -> None:
     """
     Configure root logger:
       - RotatingFileHandler → injection_updater_v5.log (30 MB × 3 backups)
       - StreamHandler → stdout
     Debug flag lowers level to DEBUG; default is INFO.
+    Production flag raises the root level to WARNING and attaches a summary
+    logger that still writes start/end/summary at INFO.
     """
-    log_level = logging.DEBUG if debug else logging.INFO
+    global _PRODUCTION_MODE
+    _PRODUCTION_MODE = production
+
+    if production:
+        root_level = logging.WARNING
+        handler_level = logging.INFO
+    elif debug:
+        root_level = logging.DEBUG
+        handler_level = logging.DEBUG
+    else:
+        root_level = logging.INFO
+        handler_level = logging.INFO
+
     log_file = Path(__file__).parent / "injection_updater_v5.log"
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 
-    # File handler: Always log at least INFO, or DEBUG if requested
     file_handler = RotatingFileHandler(
         log_file, maxBytes=30 * 1024 * 1024, backupCount=3, encoding="utf-8"
     )
     file_handler.setFormatter(fmt)
-    file_handler.setLevel(log_level)
+    file_handler.setLevel(handler_level)
 
-    # Console handler: Show essential info (INFO level)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(fmt)
     console_handler.setLevel(logging.INFO)
 
     root = logging.getLogger()
-    root.setLevel(log_level)
+    root.setLevel(root_level)
     root.addHandler(file_handler)
     root.addHandler(console_handler)
+
+    if production:
+        summary_logger.setLevel(logging.INFO)
+        summary_logger.propagate = False
+        summary_logger.addHandler(file_handler)
+        summary_logger.addHandler(console_handler)
 
     # Reduce noise from 3rd party libraries
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("sodapy").setLevel(logging.WARNING)
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Format a duration as ``Xh Ym Zs``, omitting unused larger units."""
+    total = max(0, int(round(seconds)))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def _format_section_summary(name: str, result: Optional[Dict]) -> str:
+    """One-line production summary for a TexNet or RRC section."""
+    if not result:
+        return f"{name}: not run"
+    status = result.get("status")
+    if status == "skipped":
+        reason = result.get("reason") or "skipped"
+        return f"{name}: skipped ({reason})"
+    if status == "failed":
+        return f"{name}: failed"
+
+    parts: List[str] = []
+    wells = result.get("wells")
+    inj = result.get("injection_rows")
+    if wells is not None:
+        parts.append(f"{wells} wells")
+    if inj is not None:
+        inj_label = result.get("injection_label", "injection rows")
+        parts.append(f"{inj} {inj_label}")
+    chunks_ok = result.get("chunks_ok")
+    chunks_total = result.get("chunks_total")
+    if chunks_ok is not None and chunks_total is not None:
+        parts.append(f"{chunks_ok}/{chunks_total} chunks")
+    if not parts:
+        return f"{name}: complete"
+    return f"{name}: " + ", ".join(parts)
+
+
+def _format_merged_summary(merged: Dict[str, Optional[int]]) -> str:
+    """One-line production summary of final GIST file row counts."""
+    parts = []
+    for name, count in merged.items():
+        parts.append(f"{name}={count}" if count is not None else f"{name}=skipped")
+    return "Merged: " + ", ".join(parts)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1346,11 +1421,13 @@ def merge_datasets(
     rrc_file: Path,
     output_file: Path,
     dedup_cols: List[str],
-) -> None:
+) -> Optional[int]:
     """
     Concatenate the TexNet GIST output and the RRC GIST output, normalize
     the 'ID' column, deduplicate (TexNet wins on conflict), sort, and write
     the merged result to output_file.
+
+    Returns the written row count, or None if nothing was merged.
     """
     dfs = []
     for label, path in [("TexNet", texnet_file), ("RRC", rrc_file)]:
@@ -1363,7 +1440,7 @@ def merge_datasets(
 
     if not dfs:
         logger.error("No data to merge for %s — skipping.", output_file.name)
-        return
+        return None
 
     combined = pd.concat(dfs, ignore_index=True)
     before = len(combined)
@@ -1387,6 +1464,7 @@ def merge_datasets(
         "Merged %s: %d rows (removed %d duplicates) -> %s",
         output_file.name, len(combined), before - len(combined), output_file,
     )
+    return len(combined)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1429,6 +1507,15 @@ def parse_args() -> argparse.Namespace:
         help="Enable verbose DEBUG logging and injectionV3 internal output.",
     )
     parser.add_argument(
+        "--production",
+        action="store_true",
+        default=False,
+        help=(
+            "Quiet logging for scheduled Task Scheduler runs: only start time, "
+            "end time, and a short result summary (plus warnings/errors)."
+        ),
+    )
+    parser.add_argument(
         "--backup-dir",
         type=Path,
         default=None,
@@ -1450,6 +1537,8 @@ def parse_args() -> argparse.Namespace:
 
     if args.texnet_only and args.rrc_only:
         parser.error("--texnet-only and --rrc-only are mutually exclusive.")
+    if args.production and args.debug:
+        parser.error("--production and --debug are mutually exclusive.")
 
     return args
 
@@ -1466,7 +1555,7 @@ def run_texnet_section(
     now: datetime,
     end_date_str: str,
     verbose: int,
-) -> None:
+) -> Dict:
     """
     Fetch TexNet wells + injection, transform to B3 format, and run the GIST
     pipeline (Shallow + Deep). Writes all texnet_* and texnet_gist_* CSVs.
@@ -1475,9 +1564,13 @@ def run_texnet_section(
     disk the pipeline will run on the previously-fetched data so the script can
     still produce usable output.  A RuntimeError is only raised when both the
     API is unavailable AND there are no existing raw files to fall back on.
+
+    Returns a dict with status and fetch counts for the production summary.
     """
     logger.info("-" * 40)
     logger.info("Section 1 (TexNet): starting")
+    result: Dict = {"status": "ok", "wells": None, "injection_rows": None,
+                    "chunks_ok": None, "chunks_total": None}
 
     rp = lambda name: resolve_path(tdir, name, dev)  # noqa: E731
     tx_well_raw     = rp("texnet_disposal_well.csv")
@@ -1547,6 +1640,7 @@ def run_texnet_section(
                 len(valid_wells),
             )
             well_df = texnet_update_well_csv(valid_wells.to_csv(index=False), tx_well_raw)
+            result["wells"] = len(well_df)
 
             # Step 2: Fetch + update injection data in chunks.
             # The full well list (~1000+ IDs) times 10 years of data causes the
@@ -1558,6 +1652,7 @@ def run_texnet_section(
             )
             id_array = well_df["Id"].to_numpy()
             n_chunks = (len(id_array) + TEXNET_INJ_CHUNK_SIZE - 1) // TEXNET_INJ_CHUNK_SIZE
+            result["chunks_total"] = n_chunks
             chunk_dfs: List[pd.DataFrame] = []
 
             for chunk_idx, chunk_start in enumerate(range(0, len(id_array), TEXNET_INJ_CHUNK_SIZE)):
@@ -1596,11 +1691,14 @@ def run_texnet_section(
                 combined_inj = pd.concat(chunk_dfs, ignore_index=True)
                 texnet_update_inj_csv(combined_inj.to_csv(index=False), tx_inj_raw)
                 fetch_ok = True
+                result["injection_rows"] = len(combined_inj)
+                result["chunks_ok"] = len(chunk_dfs)
                 logger.info(
                     "TexNet injection fetch complete: %d rows across %d/%d successful chunks.",
                     len(combined_inj), len(chunk_dfs), n_chunks,
                 )
             else:
+                result["chunks_ok"] = 0
                 logger.warning(
                     "All %d TexNet injection chunks failed — will use existing raw CSV if available.",
                     n_chunks,
@@ -1649,6 +1747,7 @@ def run_texnet_section(
                 logger.debug("Deleted TexNet intermediate: %s", temp)
 
     logger.info("Section 1 (TexNet): complete")
+    return result
 
 
 def run_rrc_section(
@@ -1658,7 +1757,7 @@ def run_rrc_section(
     end_date_str: str,
     verbose: int,
     now: datetime,
-) -> None:
+) -> Dict:
     """
     Fetch RRC wells + injection via Socrata, transform to B3 format (with
     monthly→daily conversion), and run the GIST pipeline (Shallow + Deep).
@@ -1668,9 +1767,17 @@ def run_rrc_section(
     disk the pipeline will run on the previously-fetched data so the script can
     still produce usable output.  A RuntimeError is only raised when both the
     API is unavailable AND there are no existing raw files to fall back on.
+
+    Returns a dict with status and fetch counts for the production summary.
     """
     logger.info("-" * 40)
     logger.info("Section 2 (RRC): starting")
+    result: Dict = {
+        "status": "ok",
+        "wells": None,
+        "injection_rows": None,
+        "injection_label": "injection records",
+    }
 
     rp = lambda name: resolve_path(tdir, name, dev)  # noqa: E731
     rrc_well_raw     = rp("rrc_disposal_well.csv")
@@ -1719,6 +1826,7 @@ def run_rrc_section(
             issue_label="rejected zero/invalid coordinate",
         )
         valid_rrc_wells = raw_rrc_wells[lat.ne(0) & lon.ne(0)].copy()
+        result["wells"] = len(valid_rrc_wells)
         logger.info(
             "RRC well filter: %d total fetched → %d with valid coordinates",
             len(raw_rrc_wells),
@@ -1753,6 +1861,7 @@ def run_rrc_section(
                 days,
             )
     else:
+        result["injection_rows"] = len(raw_rrc_inj)
         logger.info("RRC Step 4: Mapping injection data to B3 format (monthly→daily)…")
         b3_rrc_inj_df = rrc_map_injection_to_b3(raw_rrc_inj)
         update_csv(
@@ -1788,6 +1897,7 @@ def run_rrc_section(
     )
 
     logger.info("Section 2 (RRC): complete")
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1800,20 +1910,38 @@ def main() -> None:
     Sections 1 (TexNet) and 2 (RRC) run concurrently in separate threads;
     Section 3 (merge) waits for both before writing the final CSVs.
     """
-    print("MAIN STARTING...")
     args = parse_args()
-    setup_logging(args.debug)
+    setup_logging(args.debug, production=args.production)
+    production = args.production
+    run_started = datetime.now()
 
-    logger.info("=" * 60)
-    logger.info("injection_updater_v5 started")
-    logger.info(
-        "target-dir: %s | days: %s | dev: %s | debug: %s | texnet-only: %s | rrc-only: %s",
-        args.target_dir, args.days, args.dev, args.debug,
-        args.texnet_only, args.rrc_only,
-    )
+    if production:
+        summary_logger.info(
+            "injection_updater_v5 started at %s | target-dir: %s | days: %s | "
+            "dev: %s | texnet-only: %s | rrc-only: %s",
+            run_started.strftime("%Y-%m-%d %H:%M:%S"),
+            args.target_dir, args.days, args.dev,
+            args.texnet_only, args.rrc_only,
+        )
+    else:
+        logger.info("=" * 60)
+        logger.info("injection_updater_v5 started")
+        logger.info(
+            "target-dir: %s | days: %s | dev: %s | debug: %s | texnet-only: %s | rrc-only: %s",
+            args.target_dir, args.days, args.dev, args.debug,
+            args.texnet_only, args.rrc_only,
+        )
 
     if not args.target_dir.exists():
         logger.error("Target directory does not exist: %s", args.target_dir)
+        if production:
+            finished = datetime.now()
+            summary_logger.info(
+                "injection_updater_v5 finished at %s (%s)",
+                finished.strftime("%Y-%m-%d %H:%M:%S"),
+                _format_elapsed((finished - run_started).total_seconds()),
+            )
+            summary_logger.info("Result: failed (target directory missing)")
         sys.exit(1)
 
     dev  = args.dev
@@ -1854,14 +1982,17 @@ def main() -> None:
     # ════════════════════════════════════════════════════════════════════════
     errors = []
     tasks = []
+    section_results: Dict[str, Dict] = {}
 
     if args.rrc_only:
         logger.info("Skipping TexNet section (--rrc-only)")
+        section_results["TexNet"] = {"status": "skipped", "reason": "--rrc-only"}
     else:
         tasks.append(("TexNet", run_texnet_section, (tdir, dev, args.debug, start, now, end_date_str, verbose)))
 
     if args.texnet_only:
         logger.info("Skipping RRC section (--texnet-only)")
+        section_results["RRC"] = {"status": "skipped", "reason": "--texnet-only"}
     else:
         tasks.append(("RRC", run_rrc_section, (tdir, dev, args.days, end_date_str, verbose, now)))
 
@@ -1871,10 +2002,11 @@ def main() -> None:
         label, func, args_tuple = tasks[0]
         logger.info("Starting %s section…", label)
         try:
-            func(*args_tuple)
+            section_results[label] = func(*args_tuple)
         except Exception as exc:
             logger.error("%s section failed: %s", label, exc, exc_info=True)
             errors.append(label)
+            section_results[label] = {"status": "failed"}
     else:
         logger.info("Starting TexNet and RRC sections concurrently…")
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -1885,10 +2017,11 @@ def main() -> None:
             for future in concurrent.futures.as_completed(future_to_label):
                 label = future_to_label[future]
                 try:
-                    future.result()
+                    section_results[label] = future.result()
                 except Exception as exc:
                     logger.error("%s section failed: %s", label, exc, exc_info=True)
                     errors.append(label)
+                    section_results[label] = {"status": "failed"}
 
     if errors:
         logger.error(
@@ -1902,28 +2035,45 @@ def main() -> None:
     logger.info("-" * 40)
     logger.info("Section 3: Merging TexNet + RRC outputs into final GIST files")
 
-    merge_datasets(
-        rp("texnet_gist_well_shallow.csv"), rp("rrc_gist_well_shallow.csv"),
-        rp("gist_well_shallow.csv"), dedup_cols=["ID"],
-    )
-    merge_datasets(
-        rp("texnet_gist_well_deep.csv"), rp("rrc_gist_well_deep.csv"),
-        rp("gist_well_deep.csv"), dedup_cols=["ID"],
-    )
-    merge_datasets(
-        rp("texnet_gist_injection_shallow.csv"), rp("rrc_gist_injection_shallow.csv"),
-        rp("gist_injection_shallow.csv"), dedup_cols=["ID", "Days"],
-    )
-    merge_datasets(
-        rp("texnet_gist_injection_deep.csv"), rp("rrc_gist_injection_deep.csv"),
-        rp("gist_injection_deep.csv"), dedup_cols=["ID", "Days"],
-    )
+    merged = {
+        "gist_well_shallow.csv": merge_datasets(
+            rp("texnet_gist_well_shallow.csv"), rp("rrc_gist_well_shallow.csv"),
+            rp("gist_well_shallow.csv"), dedup_cols=["ID"],
+        ),
+        "gist_injection_shallow.csv": merge_datasets(
+            rp("texnet_gist_injection_shallow.csv"), rp("rrc_gist_injection_shallow.csv"),
+            rp("gist_injection_shallow.csv"), dedup_cols=["ID", "Days"],
+        ),
+        "gist_well_deep.csv": merge_datasets(
+            rp("texnet_gist_well_deep.csv"), rp("rrc_gist_well_deep.csv"),
+            rp("gist_well_deep.csv"), dedup_cols=["ID"],
+        ),
+        "gist_injection_deep.csv": merge_datasets(
+            rp("texnet_gist_injection_deep.csv"), rp("rrc_gist_injection_deep.csv"),
+            rp("gist_injection_deep.csv"), dedup_cols=["ID", "Days"],
+        ),
+    }
 
     if errors:
         logger.warning("injection_updater_v5 completed with errors in: %s", ", ".join(errors))
     else:
         logger.info("injection_updater_v5 completed successfully.")
     logger.info("=" * 60)
+
+    if production:
+        finished = datetime.now()
+        summary_logger.info(
+            "injection_updater_v5 finished at %s (%s)",
+            finished.strftime("%Y-%m-%d %H:%M:%S"),
+            _format_elapsed((finished - run_started).total_seconds()),
+        )
+        summary_logger.info(_format_section_summary("TexNet", section_results.get("TexNet")))
+        summary_logger.info(_format_section_summary("RRC", section_results.get("RRC")))
+        summary_logger.info(_format_merged_summary(merged))
+        if errors:
+            summary_logger.info("Result: completed with errors in %s", ", ".join(errors))
+        else:
+            summary_logger.info("Result: success")
 
     if errors:
         sys.exit(1)
