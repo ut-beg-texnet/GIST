@@ -20,6 +20,7 @@ from gistStepCore import (
     DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM,
     eq_location_error_km,
     get_corrected_gist_data_paths,
+    get_proposed_rates,
     runGistCore,
 )
 from progress import report_progress
@@ -118,7 +119,18 @@ input = {
 wellcsv, injectioncsv = get_corrected_gist_data_paths(helper)
 
 report_progress("Running forecast workflow")
-smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(input, wellcsv, injectioncsv)
+try:
+    # Proposed rates from Updated Analysis apply from the end of the injection data to the forecast end date.
+    proposedRates = get_proposed_rates(helper)
+    forecastEndDate = pd.Timestamp(future_date).normalize()
+    smallPPDF, smallWellList, disaggregationDF, orderedWellList, totalPPQuantilesDF, totalPPSpaghettiDF, allPerWellPPQuantilesDF, allPerWellPPSpaghettiDF, allPerWellDisposalDF = runGistCore(
+        input, wellcsv, injectioncsv, forecast_end_date=forecastEndDate, proposed_rates=proposedRates
+    )
+except ValueError as e:
+    helper.addMessageWithStepIndex(4, str(e), 2)
+    helper.setSuccessForStepIndex(4, False)
+    helper.writeResultsFile()
+    sys.exit(1)
 
 report_progress("Preparing graph data")
 
@@ -132,7 +144,7 @@ else:
     smallWellList_r_t_plot_forecast = smallWellList[smallWellList['Distances'] <= rt_plot_cutoff].copy()
     smallWellList_r_t_plot_forecast = smallWellList_r_t_plot_forecast.dropna(subset=['YearsInjectingToEarthquake', 'Distances'])
     smallWellList_r_t_plot_forecast = filter_rt_plot_wells_future_start_date(smallWellList_r_t_plot_forecast)
-    # D3 graph datasets temporarily disabled for matplotlib-only portal performance testing.
+    # D3 graph datasets disabled since now we use matplotlib to generate the graphs
     # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "smallWellList_r_t_plot_forecast", smallWellList_r_t_plot_forecast)
 
     # helper.saveDataFrameAsParameterWithStepIndexAndParamName(4, "disaggregationDF_forecast", disaggregationDF)
