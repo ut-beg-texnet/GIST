@@ -1620,10 +1620,15 @@ class gistMC:
     timeStepsSum2 = np.empty((nwC, nReal))
     eppMin = np.inf
     eppMax = -np.inf
+    # Only the last ieq+1 time samples of epp are read below, so the well
+    # function is evaluated on just those durations. exp1 is elementwise, so the
+    # values (and the slices taken from them) are bitwise identical to slicing
+    # a full-length epp; samples after the earthquake are simply never computed.
+    usedDurations = durations[max(0, nt - (ieq + 1)):nt]
     wellBlock = max(1, PRESSURE_VEC_BLOCK_BYTES // (nReal * nt * 8))
     for lo in range(0, nwC, wellBlock):
         hi = min(lo + wellBlock, nwC)
-        eppBlock = sc.exp1(ppp[lo:hi, :, np.newaxis] / durations[np.newaxis, np.newaxis, :nt])
+        eppBlock = sc.exp1(ppp[lo:hi, :, np.newaxis] / usedDurations[np.newaxis, np.newaxis, :])
         if verbose>1:
             eppMin = min(eppMin, eppBlock.min())
             eppMax = max(eppMax, eppBlock.max())
@@ -4346,7 +4351,7 @@ def extendDisposal(injDF,startDate,endDate,rateDict,dDays=10,epoch=pd.to_datetim
   # Stop time at "startDate" or startDay
   # Isolate injection before startDate in injDF #
   ###############################################
-  pastInjDF=injDF[injDF['Days']<startDay]
+  pastInjDF=injDF[injDF['Days']<startDay].copy()
   ########################################################
   # Get last disposal value for all wells, rate and time #
   # Assume time is regularized for all wells             #
@@ -4359,48 +4364,42 @@ def extendDisposal(injDF,startDate,endDate,rateDict,dDays=10,epoch=pd.to_datetim
   # Here is where the input well rates come into play #
   #####################################################
   futureDays=np.arange(lastDay+dDays,endDay+dDays,float(dDays))
-  futureDates=[epoch+pd.to_timedelta(d,unit='day') for d in futureDays]
-  futureInjDF=pd.DataFrame(columns=['ID','Days','BPD','Date','Type'])
+  futureDates=epoch+pd.to_timedelta(futureDays,unit='day')
+  nFuture=len(futureDays)
   if verbose>0: print(' gist.extendDisposal - future time horizon: ',lastDay+dDays,endDay+dDays,float(dDays))
   #####################
   # Get list of wells #
   #####################
   wellIDList=injDF['ID'].unique()
   if verbose>0: print(' extendDisposal - wellIDList: ',wellIDList)
-  ######################################
-  # Loop over all wells in input injDF #
-  ######################################
-  for wellID in wellIDList:
-    IDs=[wellID]*len(futureDays)
-    if verbose>1: print(' gist.extendDisposal - wellID: ',wellID)
-    ##############################################
-    # If this well has a prescribed rate, set it #
-    ##############################################
-    if wellID in rateDict.keys():
-      #######################
-      # Get prescribed rate #
-      #######################
-      BPD=rateDict[wellID]
-      if verbose>1: print(' gist.extendDisposal setting ',wellID,' with ',rateDict[wellID])
-      rateType=['Set'] * len(futureDays)
-    elif len(lastInjDF[lastInjDF['ID']==wellID])>0:
-      ######################################################
-      # If the well isn't listed but has prior disposal,   #
-      # extend the disposal immediately prior to startDate #
-      ######################################################
-      BPD=lastInjDF[lastInjDF['ID']==wellID]['BPD'].to_list()[0]
-      if verbose>1: print(' gist.extendDisposal extrapolating ',wellID,' with ',BPD)
-      rateType=['Extrapolated'] * len(futureDays)
-    else:
-      ################################################
-      # If we don't have prior disposal, set to zero #
-      ################################################
-      BPD=0.
-      if verbose>1: print(' gist.extendDisposal setting ',wellID,' to zero')
-      rateType=['No Data'] * len(futureDays)
-    BPDs=np.ones(len(futureDays))*BPD
-    futureWellInjDF=pd.DataFrame({'ID':IDs,'Days':futureDays,'BPD':BPDs,'Date':futureDates,'Type':rateType})
-    futureInjDF=pd.concat([futureInjDF,futureWellInjDF])
+  ###########################################################
+  # Pick one future rate per well, in priority order:       #
+  #   'Set'          - prescribed rate from rateDict        #
+  #   'Extrapolated' - disposal immediately prior to        #
+  #                    startDate (first row on lastDay)     #
+  #   'No Data'      - no prior disposal, set to zero       #
+  # Built as whole columns rather than one small frame per  #
+  # well - concatenating per well was O(wells^2).           #
+  ###########################################################
+  wellIDs=pd.Series(wellIDList)
+  isSet=wellIDs.isin(list(rateDict.keys())).to_numpy()
+  lastRates=lastInjDF.drop_duplicates(subset='ID',keep='first').set_index('ID')['BPD']
+  hasLast=wellIDs.isin(lastRates.index).to_numpy()
+  BPDs=np.zeros(len(wellIDs))
+  BPDs[hasLast]=wellIDs[hasLast].map(lastRates).to_numpy(dtype=float)
+  BPDs[isSet]=[rateDict[wellID] for wellID in wellIDs[isSet]]
+  rateTypes=np.where(isSet,'Set',np.where(hasLast,'Extrapolated','No Data'))
+  if verbose>1: print(' gist.extendDisposal - Set:',isSet.sum(),' Extrapolated:',(hasLast&~isSet).sum(),' No Data:',(~hasLast&~isSet).sum())
+  futureWellsInjDF=pd.DataFrame({
+    'ID':np.repeat(np.asarray(wellIDList,dtype=object),nFuture),
+    'Days':np.tile(futureDays,len(wellIDs)),
+    'BPD':np.repeat(BPDs,nFuture),
+    'Date':np.tile(futureDates.to_numpy(),len(wellIDs)),
+    'Type':np.repeat(rateTypes.astype(object),nFuture),
+  },index=np.tile(np.arange(nFuture),len(wellIDs)))
+  # Concatenating onto the same empty frame the per-well loop started from
+  # keeps the column dtypes identical to the previous output.
+  futureInjDF=pd.concat([pd.DataFrame(columns=['ID','Days','BPD','Date','Type']),futureWellsInjDF])
   # Create updated dataframe with new wells
   pastInjDF['Type']='Original'
   forecastInjDF=pd.concat([pastInjDF,futureInjDF])

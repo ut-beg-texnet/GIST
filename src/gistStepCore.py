@@ -20,9 +20,14 @@ from gistMC import summarizePPResults
 from gistMC import prepTotalPressureTimeSeriesQuantilesPlot
 from gistMC import prepTotalPressureTimeSeriesSpaghettiPlot
 from gistMC import getPerWellPressureTimeSeriesSpaghettiAndQuantiles
+from gistMC import extendDisposal
+from gistMC import normalizeGistIds
 from progress import report_progress
 
 DEFAULT_REALIZATION_COUNT = 50
+# Column written by Updated Analysis (gistStep4.py) into orderedWellListWithFutureRates,
+# which the portal passes to Forecast as the ProposedFutureRates dataset.
+PROPOSED_RATE_COLUMN = 'Proposed Future Rate (BPD)'
 # Catalog earthquakes sometimes omit location error; use 1 km so checkEQ/findWellsVec get a number. For eventType 'Earthquake' we default to 1 km, 'Scenario' we default to 0 km.
 DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM = 1
 
@@ -109,6 +114,30 @@ def get_corrected_gist_data_paths(helper):
     return well_csv, injection_csv
 
 
+def load_proposed_rates(rates_csv):
+    """Return {well ID: proposed BPD} from the Updated Analysis proposed-rate table.
+
+    Blank rates are left out so those wells hold their last rate; a rate of 0 is kept.
+    """
+    rates_df = pd.read_csv(rates_csv, dtype={'ID': 'string'})
+    if 'ID' not in rates_df.columns or PROPOSED_RATE_COLUMN not in rates_df.columns:
+        raise ValueError("Proposed future rates must include 'ID' and '" + PROPOSED_RATE_COLUMN + "' columns.")
+    rates_df['ID'] = normalizeGistIds(rates_df['ID'])
+    rates = pd.to_numeric(rates_df[PROPOSED_RATE_COLUMN], errors='coerce')
+    if (rates < 0).any():
+        raise ValueError("Proposed future rates cannot be negative.")
+    keep = rates.notna()
+    return dict(zip(rates_df.loc[keep, 'ID'], rates[keep].astype(float)))
+
+
+def get_proposed_rates(helper):
+    """Return the proposed future rates passed to Forecast from Updated Analysis."""
+    rates_csv = helper.getDatasetFilePathWithStepIndexAndParamName(4, "ProposedFutureRates")
+    if rates_csv is None:
+        raise ValueError("Proposed future rates are missing. Run Updated Analysis before running Forecast.")
+    return load_proposed_rates(rates_csv)
+
+
 def _resolve_realization_count(raw_count):
     """Return a non-negative int realization count, or the portal default of 50.
 
@@ -126,9 +155,14 @@ def _resolve_realization_count(raw_count):
     return n_real
 
 
-def runGistCore(input, wellcsv, injectioncsv):
+def runGistCore(input, wellcsv, injectioncsv, forecast_end_date=None, proposed_rates=None):
     """Run well filtering and pore-pressure Monte Carlo for a portal GIST step.
+
+    With forecast_end_date (a date-only Timestamp), injection is extended from the end of
+    the data to that date - wells in proposed_rates ({ID: BPD}) take their proposed rate,
+    all other wells hold their last rate - and pressures are evaluated at that date.
     """
+    forecasting = forecast_end_date is not None
     # Initialize gistMC class
     n_real = _resolve_realization_count(input.get("realizationCount"))
     gistMC_instance = gistMC(nReal=n_real)
@@ -141,13 +175,33 @@ def runGistCore(input, wellcsv, injectioncsv):
 
     report_progress("Finding nearby wells")
 
-    considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWellsVec(eq,PE=False, responseYears=forecastYears)
+    if forecasting:
+        # Select every well whose pressure front reaches the event location by the forecast end.
+        considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWellsVec(eq,PE=False, endDate=forecast_end_date)
+    else:
+        considered_wells_df, excluded_wells_df, inj_df = gistMC_instance.findWellsVec(eq,PE=False, responseYears=forecastYears)
     if 'Date' not in inj_df.columns:
         if 'Days' not in inj_df.columns:
             raise KeyError("inj_df is missing required columns: 'Date' or 'Days'")
         inj_df['Date'] = pd.to_datetime('1970-01-01') + pd.to_timedelta(inj_df['Days'], unit='d')
     else:
         inj_df['Date'] = pd.to_datetime(inj_df['Date'])
+
+    pressure_eq = eq
+    if forecasting:
+        report_progress("Extending injection with proposed rates")
+        epoch = gistMC_instance.epoch
+        last_day = float(inj_df['Days'].max())
+        last_date = epoch + pd.to_timedelta(last_day, unit='d')
+        if forecast_end_date <= last_date:
+            raise ValueError(
+                "Forecast End Date (" + forecast_end_date.strftime("%Y-%m-%d") + ") must be after the last "
+                "injection data date (" + last_date.strftime("%Y-%m-%d") + ") for proposed rates to apply."
+            )
+        # Keep all reported history and switch to proposed/held rates on the next sample.
+        switch_date = epoch + pd.to_timedelta(last_day + gistMC_instance.injDT, unit='d')
+        inj_df = extendDisposal(inj_df, switch_date, forecast_end_date, proposed_rates or {}, dDays=gistMC_instance.injDT, epoch=epoch)
+        pressure_eq = dict(eq, **{"Origin Date": forecast_end_date.strftime("%Y-%m-%d")})
 
     report_progress("Preparing data for R-t plot")
 
@@ -157,8 +211,12 @@ def runGistCore(input, wellcsv, injectioncsv):
     report_progress("Running pressure scenarios")
 
     # disaggregationPlot plot
-    currentWellsDF=considered_wells_df[considered_wells_df['EncompassingDay']<0.].reset_index(drop=True)
-    scenarioDF = gistMC_instance.runPressureScenariosVec(eq,currentWellsDF,inj_df)
+    if forecasting:
+        # findWellsVec already limited these to fronts arriving by the forecast end date.
+        currentWellsDF=considered_wells_df.reset_index(drop=True)
+    else:
+        currentWellsDF=considered_wells_df[considered_wells_df['EncompassingDay']<0.].reset_index(drop=True)
+    scenarioDF = gistMC_instance.runPressureScenariosVec(pressure_eq,currentWellsDF,inj_df)
     nWells=50
 
     # if scenarioDF is empty then we need to abort
@@ -176,7 +234,7 @@ def runGistCore(input, wellcsv, injectioncsv):
 
     # time series plot
     winWellsDF,winInjDF = getWinWells(filteredDF,currentWellsDF,inj_df)
-    scenarioTSRDF,dPTimeSeriesR,wellIDsR,dayVecR = gistMC_instance.runPressureScenariosTimeSeriesConv(eq,winWellsDF,winInjDF, verbose=2)
+    scenarioTSRDF,dPTimeSeriesR,wellIDsR,dayVecR = gistMC_instance.runPressureScenariosTimeSeriesConv(pressure_eq,winWellsDF,winInjDF, verbose=2)
     totalPPQuantilesDF = prepTotalPressureTimeSeriesQuantilesPlot(dPTimeSeriesR,dayVecR,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'))
     totalPPSpaghettiDF = prepTotalPressureTimeSeriesSpaghettiPlot(dPTimeSeriesR,dayVecR,gistMC_instance.diffPPVec,epoch=pd.to_datetime('1970-01-01'))
     # add unix timestamp

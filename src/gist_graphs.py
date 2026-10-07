@@ -1,4 +1,5 @@
 import base64
+import copy
 import html as html_module
 import io
 import json
@@ -627,7 +628,34 @@ def _aggregate_disposal_to_monthly_bpd(disposal_df):
     return monthly
 
 
+# The per-well quantiles and spaghetti graphs are built from the same disposal
+# dataframe; remember the last payload so the (slow) monthly roll-up runs once.
+# The cache is keyed on a content hash, so an edited or different frame is rebuilt.
+_DISPOSAL_PAYLOAD_CACHE = {"key": None, "payload": None}
+
+
+def _disposal_payload_cache_key(disposal_df):
+    try:
+        content_hash = pd.util.hash_pandas_object(disposal_df, index=True).to_numpy()
+    except (TypeError, ValueError):
+        return None
+    return (tuple(disposal_df.columns), content_hash.tobytes())
+
+
 def _build_disposal_payload(disposal_df):
+    if disposal_df is None or disposal_df.empty:
+        return {}
+    cache_key = _disposal_payload_cache_key(disposal_df)
+    if cache_key is not None and _DISPOSAL_PAYLOAD_CACHE["key"] == cache_key:
+        return copy.deepcopy(_DISPOSAL_PAYLOAD_CACHE["payload"])
+    payload = _build_disposal_payload_uncached(disposal_df)
+    if cache_key is not None:
+        _DISPOSAL_PAYLOAD_CACHE["key"] = cache_key
+        _DISPOSAL_PAYLOAD_CACHE["payload"] = copy.deepcopy(payload)
+    return payload
+
+
+def _build_disposal_payload_uncached(disposal_df):
     if disposal_df is None or disposal_df.empty:
         return {}
     if not {"Date", "BPD", "subgraph"}.issubset(disposal_df.columns):
