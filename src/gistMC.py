@@ -31,8 +31,10 @@ import numpy as np
 import pandas as pd
 import math
 import gc
+import os
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 
 # A synthetic label keeps the aggregated "small wells" row distinct from
@@ -45,6 +47,32 @@ SMALL_WELLS_ID = "__GIST_SMALL_WELLS__"
 # no change to the result (see PRESSURE_VEC_BLOCK_BYTES below). This caps the
 # peak size of that temporary; it does not limit nwC or nReal themselves.
 PRESSURE_VEC_BLOCK_BYTES = 256 * 1024 * 1024
+
+# Well-axis blocks are independent, and sc.exp1 releases the GIL, so
+# runPressureScenariosVec evaluates blocks on a small thread pool. Each thread
+# gets PRESSURE_VEC_BLOCK_BYTES / threads, keeping total peak memory unchanged.
+# Results are bitwise identical to the serial loop. GIST_PRESSURE_THREADS can
+# override the default on a given server.
+PRESSURE_VEC_THREADS = 4
+PRESSURE_VEC_THREADS_ENV = "GIST_PRESSURE_THREADS"
+
+
+def resolvePressureVecThreads():
+  """Return the number of worker threads runPressureScenariosVec should use."""
+  # An explicit "1" forces the serial path, useful for debugging.
+  raw = os.environ.get(PRESSURE_VEC_THREADS_ENV)
+  if raw is None or raw.strip() == "":
+    threads = PRESSURE_VEC_THREADS
+  else:
+    try:
+      threads = int(raw)
+    except ValueError:
+      threads = 0
+    if threads < 1:
+      warnings.warn(PRESSURE_VEC_THREADS_ENV + '="' + raw + '" is not a positive integer; using '
+                    + str(PRESSURE_VEC_THREADS) + ' threads.', UserWarning, stacklevel=2)
+      threads = PRESSURE_VEC_THREADS
+  return max(1, min(threads, os.cpu_count() or 1))
 
 
 def normalizeGistIds(values, field_name="ID"):
@@ -1618,20 +1646,18 @@ class gistMC:
     # sampling noise.
     timeStepsSum1 = np.empty((nwC, nReal))
     timeStepsSum2 = np.empty((nwC, nReal))
-    eppMin = np.inf
-    eppMax = -np.inf
     # Only the last ieq+1 time samples of epp are read below, so the well
     # function is evaluated on just those durations. exp1 is elementwise, so the
     # values (and the slices taken from them) are bitwise identical to slicing
     # a full-length epp; samples after the earthquake are simply never computed.
     usedDurations = durations[max(0, nt - (ieq + 1)):nt]
-    wellBlock = max(1, PRESSURE_VEC_BLOCK_BYTES // (nReal * nt * 8))
-    for lo in range(0, nwC, wellBlock):
+    nThreads = resolvePressureVecThreads()
+    wellBlock = max(1, PRESSURE_VEC_BLOCK_BYTES // (nThreads * nReal * nt * 8))
+
+    def runWellBlock(lo):
+        # Each block writes a disjoint [lo:hi] slice, so no locking is needed.
         hi = min(lo + wellBlock, nwC)
         eppBlock = sc.exp1(ppp[lo:hi, :, np.newaxis] / usedDurations[np.newaxis, np.newaxis, :])
-        if verbose>1:
-            eppMin = min(eppMin, eppBlock.min())
-            eppMax = max(eppMax, eppBlock.max())
         timeStepsSum1[lo:hi, :] = np.einsum(
             'ijk,ik->ij',
             eppBlock[:, :, -ieq:],
@@ -1644,7 +1670,19 @@ class gistMC:
             dQdtArray[lo:hi, : ieq + 1],
             optimize=True,
         )
-    if verbose>1: print('runPressureScenariosVectorized epp min/max: ',eppMin,eppMax)
+        if verbose>1: return eppBlock.min(), eppBlock.max()
+        return None
+
+    blockStarts = range(0, nwC, wellBlock)
+    if nThreads > 1 and len(blockStarts) > 1:
+        with ThreadPoolExecutor(max_workers=nThreads) as executor:
+            blockRanges = list(executor.map(runWellBlock, blockStarts))
+    else:
+        blockRanges = [runWellBlock(lo) for lo in blockStarts]
+    if verbose>1:
+        eppMin = min(r[0] for r in blockRanges)
+        eppMax = max(r[1] for r in blockRanges)
+        print('runPressureScenariosVectorized epp min/max: ',eppMin,eppMax)
     ########################################################################
     # Multiply the sum of the time steps with gRhoOverT and convert to PSI #
     # dP is the change in pressure from the first time step [nw,nReal,nt]  #
