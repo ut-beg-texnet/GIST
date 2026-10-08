@@ -458,8 +458,13 @@ def _downsample_time_series_points(points, max_points):
     return trimmed_points
 
 
-def _build_time_series_payload(df, group_column, color_column=None, max_groups=None, max_points_per_group=None):
-    payload_df = _coerce_time_series_df(df, ["Date", "DeltaPressure", group_column])
+def _build_time_series_payload(df, group_column, color_column=None, max_groups=None, max_points_per_group=None, coerced=False):
+    # coerced=True: df is a slice of a frame already passed through
+    # _coerce_time_series_df (parsed, dropna'd, sorted), so skip redoing it per well.
+    if coerced:
+        payload_df = df if df is not None and group_column in df.columns else pd.DataFrame()
+    else:
+        payload_df = _coerce_time_series_df(df, ["Date", "DeltaPressure", group_column])
     if payload_df.empty:
         return []
 
@@ -510,40 +515,45 @@ def _build_time_series_payload(df, group_column, color_column=None, max_groups=N
     return series
 
 
-def _split_interval_volume_across_months(subgraph, interval_end, interval_start, volume_bbl, interval_days):
+def _split_intervals_across_months(boundary_df):
     """
-    Allocate interval volume and coverage days across calendar months when the window crosses a boundary.
+    Allocate interval volume and coverage days across calendar months for intervals crossing a boundary.
 
     Each row represents a backward-averaged rate over ``interval_days`` ending at
-    ``interval_end``. Volume and days are split in proportion to calendar-day overlap per month.
+    ``Date``. Volume and days are split in proportion to calendar-day overlap per month.
+    Rows are expanded to one row per touched month, in input-row then month order,
+    so the downstream groupby sums accumulate in the same order as a per-row loop.
     """
-    allocations = []
-    start_period = interval_start.to_period("M")
-    end_period = interval_end.to_period("M")
-    total_days = float(interval_days)
-    if total_days <= 0:
-        return allocations
+    start_ord = boundary_df["start_month"].array.asi8
+    end_ord = boundary_df["end_month"].array.asi8
+    total_days = boundary_df["interval_days"].to_numpy(dtype=float)
+    valid = total_days > 0
+    n_months = np.where(valid, end_ord - start_ord + 1, 0)
 
-    for period in pd.period_range(start_period, end_period, freq="M"):
-        month_start = period.to_timestamp()
-        month_end_exclusive = (period + 1).to_timestamp()
-        overlap_start = max(interval_start, month_start)
-        overlap_end = min(interval_end, month_end_exclusive)
-        if overlap_end <= overlap_start:
-            continue
-        overlap_days = (overlap_end - overlap_start).total_seconds() / 86400.0
-        if overlap_days <= 0:
-            continue
-        allocated_volume = volume_bbl * (overlap_days / total_days)
-        allocations.append(
-            {
-                "subgraph": subgraph,
-                "month": period,
-                "volume_bbl": allocated_volume,
-                "coverage_days": overlap_days,
-            }
-        )
-    return allocations
+    row_idx = np.repeat(np.arange(len(boundary_df)), n_months)
+    month_offset = np.arange(len(row_idx)) - np.repeat(np.cumsum(n_months) - n_months, n_months)
+    month_ord = start_ord[row_idx] + month_offset
+    months = pd.arrays.PeriodArray(month_ord, freq="M")
+    month_start = months.to_timestamp().asi8
+    month_end_exclusive = (months + 1).to_timestamp().asi8
+
+    interval_start = boundary_df["interval_start"].to_numpy(dtype="datetime64[ns]").view("int64")[row_idx]
+    interval_end = boundary_df["Date"].to_numpy(dtype="datetime64[ns]").view("int64")[row_idx]
+    overlap_ns = np.minimum(interval_end, month_end_exclusive) - np.maximum(interval_start, month_start)
+    keep = overlap_ns > 0
+    # Match Timedelta.total_seconds() (ns / 1e9) so results are bitwise identical.
+    overlap_days = overlap_ns[keep] / 1e9 / 86400.0
+    row_idx = row_idx[keep]
+    volume = boundary_df["volume_bbl"].to_numpy(dtype=float)[row_idx]
+
+    return pd.DataFrame(
+        {
+            "subgraph": boundary_df["subgraph"].to_numpy()[row_idx],
+            "month": months[keep],
+            "volume_bbl": volume * (overlap_days / total_days[row_idx]),
+            "coverage_days": overlap_days,
+        }
+    )
 
 
 def _aggregate_disposal_to_monthly_bpd(disposal_df):
@@ -599,19 +609,9 @@ def _aggregate_disposal_to_monthly_bpd(disposal_df):
         monthly_chunks.append(same_month)
 
     if crosses_boundary.any():
-        boundary_rows = []
-        for row in plot_df.loc[crosses_boundary].itertuples(index=False):
-            boundary_rows.extend(
-                _split_interval_volume_across_months(
-                    row.subgraph,
-                    row.Date,
-                    row.interval_start,
-                    row.volume_bbl,
-                    row.interval_days,
-                )
-            )
-        if boundary_rows:
-            monthly_chunks.append(pd.DataFrame(boundary_rows))
+        boundary_df = _split_intervals_across_months(plot_df.loc[crosses_boundary])
+        if not boundary_df.empty:
+            monthly_chunks.append(boundary_df)
 
     if not monthly_chunks:
         return pd.DataFrame(columns=list(disposal_df.columns))
@@ -1505,6 +1505,7 @@ def _save_per_well_time_series_graph_artifact(
             color_column=color_column,
             max_groups=max_groups,
             max_points_per_group=max_points,
+            coerced=True,
         )
         if not series:
             continue
