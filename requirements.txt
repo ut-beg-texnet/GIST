@@ -1,15 +1,16 @@
-matplotlib==3.8.4
-numpy==1.21.4
-pandas==1.3.5
-Pillow==11.3.0
-scipy==1.7.3
+# Python 3.14.8 — direct runtime/test dependencies (exact pins).
+# For an exact, fully reproducible install (incl. transitive deps) use requirements-lock.txt.
+# Notebook-only packages (seaborn, geopandas, contextily) live in requirements-notebooks.txt.
+numpy==2.3.5
+pandas==2.3.3
+scipy==1.16.3
+matplotlib==3.10.9
+Pillow==12.3.0
+requests==2.34.2
+urllib3==2.8.0
+# Injection pipeline (src/injection)
 sodapy==2.2.0
-requests
-urllib3
-seaborn
-# Pinned for numpy 1.21.4 + pandas 1.3.5 (geopandas>=1.0 requires pandas>=1.4, numpy>=1.22).
-# Injection permian_subbasin.py does not import geopandas; notebooks / maps may use it.
-geopandas==0.13.2
-contextily
-pyshp
-shapely
+pyshp==3.1.6
+shapely==2.2.0
+# Tests (src/tests)
+pytest==9.1.1

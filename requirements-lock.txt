@@ -1,0 +1,31 @@
+# Exact lock of gist_python_14_venv (Python 3.14.8, Windows x64). Regenerate with:
+#   .\gist_python_14_venv\Scripts\python.exe -m pip freeze > requirements-lock.txt
+certifi==2026.7.22
+charset-normalizer==3.5.2
+colorama==0.4.6
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.66.1
+idna==3.20
+iniconfig==2.3.1
+kiwisolver==1.5.1
+matplotlib==3.10.9
+numpy==2.3.5
+packaging==26.3
+pandas==2.3.3
+pillow==12.3.0
+pluggy==1.6.0
+Pygments==2.21.0
+pyparsing==3.3.3
+pyshp==3.1.6
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+pytz==2026.5
+requests==2.34.2
+scipy==1.16.3
+shapely==2.2.0
+six==1.17.0
+sodapy==2.2.0
+tzdata==2026.5
+urllib3==2.8.0
+

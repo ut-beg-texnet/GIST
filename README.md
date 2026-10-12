@@ -6,27 +6,44 @@ Plan and forecast injection scenarios with a comprehensive toolkit for analyzing
 
 ### Prerequisites
 
-- **Python:** 3.9.10
-- **Core Dependencies:** `numpy` (1.21.4), `scipy` (1.7.3), `pandas` (1.3.5)
-- **Plotting Dependencies:** `seaborn`, `matplotlib`, `geopandas`, `contextily`
+- **Python:** 3.14.8
+- **Core Dependencies:** `numpy` (2.3.5), `scipy` (1.16.3), `pandas` (2.3.3), `matplotlib` (3.10.9)
+- **Notebook-only Dependencies:** `seaborn`, `geopandas`, `contextily` (see `requirements-notebooks.txt`)
 
-### Installation & Setup
+### Dependency files
 
-It is recommended to use a Python virtual environment to manage dependencies:
+| File | Purpose |
+|---|---|
+| `requirements.txt` | Direct runtime/test dependencies, exact pins. Edit this when changing a dependency. |
+| `requirements-lock.txt` | Full `pip freeze` of the working venv, including transitive dependencies. Install from this file for a reproducible environment. |
+| `requirements-notebooks.txt` | Optional extras used only by the Jupyter notebooks. |
+
+### Installation & Setup (development and production)
+
+The venv is named `gist_python_14_venv` and lives at the repo root (it is git-ignored).
 
 ```powershell
-# Create a virtual environment
-python -m venv venv
+# 1. Install Python 3.14.8 (python.org Windows x64 installer); confirm with:
+py -3.14 --version
 
-# Activate the virtual environment
-# On Windows:
-.\venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
+# 2. Create the virtual environment
+py -3.14 -m venv gist_python_14_venv
 
-# Install dependencies from requirements.txt
-pip install -r requirements.txt
+# 3. Install the locked dependencies
+.\gist_python_14_venv\Scripts\python.exe -m pip install --upgrade pip
+.\gist_python_14_venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+
+# 4. (Optional) notebook extras
+.\gist_python_14_venv\Scripts\python.exe -m pip install -r requirements-lock.txt -r requirements-notebooks.txt
+
+# 5. Sanity check
+.\gist_python_14_venv\Scripts\python.exe -c "import sys, numpy, pandas, scipy, matplotlib; print(sys.version, numpy.__version__, pandas.__version__, scipy.__version__, matplotlib.__version__)"
+cd src; ..\gist_python_14_venv\Scripts\python.exe -m pytest tests -q
 ```
+
+To upgrade a dependency: change its pin in `requirements.txt`, reinstall into a fresh venv,
+run the tests, then regenerate the lock with
+`.\gist_python_14_venv\Scripts\python.exe -m pip freeze > requirements-lock.txt`.
 
 ## Project Structure
 

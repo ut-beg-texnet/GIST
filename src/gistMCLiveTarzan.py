@@ -190,12 +190,12 @@ for iQ in range(nQ):
   dWellPPScenarios.to_csv(RunDir+'pressure_deep_live_eq'+str(iQ)+'.csv')
   dWellPEScenarios.to_csv(RunDir+'poroelastic_deep_live_eq'+str(iQ)+'.csv')
   # Append to dataframes
-  sDFw=sDFw.append(shallowWells)
-  dDFw=dDFw.append(deepWells)
-  sDFpp=sDFpp.append(sWellPPScenarios)
-  dDFpp=dDFpp.append(dWellPPScenarios)
-  sDFpe=sDFpe.append(sWellPEScenarios)
-  dDFpe=dDFpe.append(dWellPEScenarios)
+  sDFw=pd.concat([sDFw,shallowWells])
+  dDFw=pd.concat([dDFw,deepWells])
+  sDFpp=pd.concat([sDFpp,sWellPPScenarios])
+  dDFpp=pd.concat([dDFpp,dWellPPScenarios])
+  sDFpe=pd.concat([sDFpe,sWellPEScenarios])
+  dDFpe=pd.concat([dDFpe,dWellPEScenarios])
 
 # Write out lists
 sDFw.to_csv(RunDir+'wells_shallow_live.csv')

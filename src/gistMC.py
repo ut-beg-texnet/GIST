@@ -1099,8 +1099,10 @@ class gistMC:
     #####################################################################
     
     # Compare dates of wells to earthquake date
-    firstWellStartDate=pd.to_datetime(self.wellDF['StartDate']).min()
-    lastWellStartDate=pd.to_datetime(self.wellDF['StartDate']).max()
+    # format='mixed' parses each value independently (pandas>=2 otherwise infers one format from the first row)
+    wellStartDates=pd.to_datetime(self.wellDF['StartDate'],format='mixed')
+    firstWellStartDate=wellStartDates.min()
+    lastWellStartDate=wellStartDates.max()
     if verbose>1:
       print(' gistMC.findWellsVec: ',self.nw,'wells start date range is ',firstWellStartDate,lastWellStartDate)
       print(' gistMC.findWellsVec: ',pd.to_datetime(eq['Origin Date']))
@@ -1109,7 +1111,7 @@ class gistMC:
     ####################################
     if firstWellStartDate>pd.to_datetime(eq['Origin Date']): raise ValueError('gistMC.findWellsVec ERROR: All wells started injecting after the earthquake.')
     # Should I fill NaT values with something?
-    injectionDuration=(pd.to_datetime(eq['Origin Date'])-pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)).dt
+    injectionDuration=(pd.to_datetime(eq['Origin Date'])-wellStartDates.fillna(self.epoch)).dt
     injectionDays=injectionDuration.days
     # This is still returning NaNs and I don't know why
     #if verbose>1: print(' gistMC.findWellsVec injectionDays',pd.to_datetime(eq['Origin Date']),pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch))
@@ -1167,7 +1169,7 @@ class gistMC:
     injWellDaysToEpicenterClipTD=pd.to_timedelta(injWellDaysToEpicenterClip,unit='day')
     if verbose>1: print(' gistMC.findWellsVec injWellDaysToEpicenterClipTD',min(injWellDaysToEpicenterClipTD),max(injWellDaysToEpicenterClipTD),injWellDaysToEpicenterClipTD.isna().sum(),' nans')
     injWellDaysToEpicenterClipTD.index=self.wellDF.index
-    injWellDateAtEpicenter = pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)+injWellDaysToEpicenterClipTD
+    injWellDateAtEpicenter = wellStartDates.fillna(self.epoch)+injWellDaysToEpicenterClipTD
     if verbose>1: print(' gistMC.findWellsVec injWellDateAtEpicenter',min(injWellDateAtEpicenter),max(injWellDateAtEpicenter),injWellDateAtEpicenter.isna().sum(),' nans')
     ###################################################
     # Then subtract off the date of the earthquake to #
@@ -3960,7 +3962,7 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,eq,clipYear=False,
   wellDF=pd.concat([sWells,iWells],ignore_index=True)
   wellDF['MMBBL']=wellDF['TotalBBL']/1000000.
   wellDF['YearsInjectingToEarthquake']=-wellDF['YearsInjecting']
-  wellDF['Date']=pd.to_datetime(wellDF['StartDate'])
+  wellDF['Date']=pd.to_datetime(wellDF['StartDate'],format='mixed')
   if clipYear:
     wellDF['Clipped']=False
     wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'YearsInjectingToEarthquake']=minYearFloat
@@ -3976,7 +3978,7 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,eq,clipYear=False,
   d=np.concatenate([np.ones(len(rMin))*diffRange[0],np.ones(len(rMax))*diffRange[1]])
   label=np.concatenate([['Minimum',]*len(rMin),['Maximum',] * len(rMax)])
   rtDF = pd.DataFrame(data={'Distance':r,'d':d,'Years Before Earthquake':t,'Diffusivity':label})
-  rtDF['Date']=pd.to_datetime(eq['Origin Date'])+(365.25*rtDF['Years Before Earthquake']).astype('timedelta64[D]')
+  rtDF['Date']=pd.to_datetime(eq['Origin Date'])+pd.to_timedelta(np.trunc(365.25*rtDF['Years Before Earthquake']),unit='D')
   return rtDF,wellDF
 
 def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
@@ -4397,9 +4399,9 @@ def extendDisposal(injDF,startDate,endDate,rateDict,dDays=10,epoch=pd.to_datetim
     'Date':np.tile(futureDates.to_numpy(),len(wellIDs)),
     'Type':np.repeat(rateTypes.astype(object),nFuture),
   },index=np.tile(np.arange(nFuture),len(wellIDs)))
-  # Concatenating onto the same empty frame the per-well loop started from
-  # keeps the column dtypes identical to the previous output.
-  futureInjDF=pd.concat([pd.DataFrame(columns=['ID','Days','BPD','Date','Type']),futureWellsInjDF])
+  # The per-well loop concatenated onto an empty frame with these columns; pandas
+  # ignores empty frames when picking dtypes, so the result is futureWellsInjDF itself.
+  futureInjDF=futureWellsInjDF
   # Create updated dataframe with new wells
   pastInjDF['Type']='Original'
   forecastInjDF=pd.concat([pastInjDF,futureInjDF])
@@ -4610,7 +4612,7 @@ def checkWellFile(wellFile,boundsDictionary=None,verbose=0):
   if len(missingColumns)>0:
     errorText=errorText+' missing columns: '+str(missingColumns)
     return wellDF,errorText,warningText,infoText
-  wellDF['StartDate']=pd.to_datetime(wellDF['StartDate'])
+  wellDF['StartDate']=pd.to_datetime(wellDF['StartDate'],format='mixed')
   for column in usedStringColumns:
     if verbose>0: print('column: ',column)
     # Number of unique values is broken
@@ -4688,7 +4690,7 @@ def checkInjFile(injFile,wellDF=None,boundsDictionary=None,epoch=pd.to_datetime(
     for i in range(len(daysVector)):
       if daysVector[i]!=days[i]: warningText=warningText+' ID '+str(ID)+' expected '+str(daysVector[i])+' days but found '+str(days[i])+' days\n'
   if warningText=='': infoText=infoText+'All injection data are evenly sampled in time\n'
-  injDF['Date']=pd.to_datetime(injDF['Date'])
+  injDF['Date']=pd.to_datetime(injDF['Date'],format='mixed')
   errorText=''
   dayLowerBound=(pd.to_datetime('1900-01-01')-epoch).days
   dayUpperBound=(pd.to_datetime('2050-12-31')-epoch).days

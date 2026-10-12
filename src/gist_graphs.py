@@ -45,7 +45,7 @@ _TIME_SERIES_DIVERGING_CMAP = mcolors.LinearSegmentedColormap.from_list(
     "texnet_time_series_ramp",
     ["#5BB8DC", "#000000", "#E52327"],
 )
-_PRESSURE_RANGES_CMAP = plt.get_cmap("viridis")
+_PRESSURE_RANGES_CMAP = matplotlib.colormaps["viridis"]
 
 
 # Interactive R-t plot: marker area scales with MMBBL (Matplotlib-equivalent clip); hover tooltips.
@@ -317,7 +317,7 @@ def _coerce_time_series_df(df, required_columns):
     if "timestamp" in plot_df.columns:
         plot_df["timestamp"] = pd.to_numeric(plot_df["timestamp"], errors="coerce")
     else:
-        plot_df["timestamp"] = pd.to_datetime(plot_df["Date"], errors="coerce").view("int64") // 10**6
+        plot_df["timestamp"] = pd.to_datetime(plot_df["Date"], errors="coerce").dt.as_unit("ns").to_numpy().view("int64") // 10**6
     plot_df["Date"] = pd.to_datetime(plot_df["Date"], errors="coerce")
     plot_df["DeltaPressure"] = pd.to_numeric(plot_df["DeltaPressure"], errors="coerce")
     plot_df = plot_df.dropna(subset=["Date", "DeltaPressure", "timestamp"])
@@ -667,7 +667,7 @@ def _build_disposal_payload_uncached(disposal_df):
     if "timestamp" in plot_df.columns:
         plot_df["timestamp"] = pd.to_numeric(plot_df["timestamp"], errors="coerce")
     else:
-        plot_df["timestamp"] = pd.to_datetime(plot_df["Date"], errors="coerce").view("int64") // 10**6
+        plot_df["timestamp"] = pd.to_datetime(plot_df["Date"], errors="coerce").dt.as_unit("ns").to_numpy().view("int64") // 10**6
     plot_df["Date"] = pd.to_datetime(plot_df["Date"], errors="coerce")
     plot_df["BPD"] = pd.to_numeric(plot_df["BPD"], errors="coerce")
     plot_df = plot_df.dropna(subset=["Date", "BPD", "subgraph", "timestamp"]).sort_values("timestamp")
@@ -740,7 +740,7 @@ def filter_rt_plot_wells_future_start_date(
 
     ref = reference_date or datetime.now()
     ref_day = pd.Timestamp(ref.date())
-    parsed = pd.to_datetime(well_df["StartDate"], errors="coerce")
+    parsed = pd.to_datetime(well_df["StartDate"], format="mixed", errors="coerce")
     future_mask = parsed.notna() & (parsed.dt.normalize() > ref_day)
 
     before = len(well_df)
