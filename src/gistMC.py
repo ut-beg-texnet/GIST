@@ -1978,7 +1978,7 @@ class gistMC:
     # There are some very small negative numbers due to  #
     # rounding in fftconvolve, so make it a bit <-eps    #
     ######################################################
-    if np.any(dP<-0.000000001): print('gistMC.runPressureScenariosTimeSeriesConv WARNING: negative pressure values found in dP: '+str(np.argmin(dP,axis=None))+' '+np.min(dP),UserWarning,stacklevel=2)
+    if np.any(dP<-0.000000001): warnings.warn('gistMC.runPressureScenariosTimeSeriesConv WARNING: negative pressure values found in dP: '+str(np.argmin(dP,axis=None))+' '+str(np.min(dP)),UserWarning,stacklevel=2)
     ###################################################
     # Linear interpolation between the two time steps #
     # bounding the EQ time dPatEQ [nw,nReal]          #

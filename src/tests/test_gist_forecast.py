@@ -151,6 +151,28 @@ class PressureScenariosVecTests(unittest.TestCase):
         self.assertTrue(np.array_equal(actual['Pressures'].to_numpy(dtype=float), expected))
 
 
+class PressureTimeSeriesNegativeRateTests(unittest.TestCase):
+    """Negative disposal rates give negative dP; that must warn, not crash."""
+
+    def test_negative_rates_warn(self):
+        gist = gistMC(nReal=5)
+        gist.initPP()
+        gist.injDT = 10.0
+        inj = make_injection()
+        inj.loc[(inj['ID'] == "A") & (inj['Days'] < 18100), 'BPD'] = -500.0
+        wells = pd.DataFrame({
+            "ID": pd.array(["A", "B", "C"], dtype="string"), "WellName": ["A", "B", "C"],
+            "APINumber": [1, 2, 3], "SurfaceHoleLatitude": [31.0, 31.1, 31.2],
+            "SurfaceHoleLongitude": [-102.0, -102.1, -102.2], "StartDate": ["2019-04-14"] * 3,
+            "Distances": [2.0, 5.0, 9.0], "DXs": [1.0, 3.0, 6.0], "DYs": [1.7, 4.0, 6.7],
+        })
+        eq = {"Latitude": 31.0, "Longitude": -102.0, "LatitudeError": 0.0, "LongitudeError": 0.0,
+              "Origin Date": (EPOCH + pd.Timedelta(days=18203)).strftime("%Y-%m-%d"), "EventID": "test"}
+
+        with self.assertWarnsRegex(UserWarning, "negative pressure values found in dP"):
+            gist.runPressureScenariosTimeSeriesConv(eq, wells, inj)
+
+
 class DisposalPayloadCacheTests(unittest.TestCase):
     """The per-well graphs reuse one disposal payload without changing its content."""
 

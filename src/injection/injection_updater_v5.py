@@ -416,7 +416,9 @@ def _parse_date_to_b3(
     raw = _coerce_to_series(series)
     stripped = raw.astype("object").astype(str).str.strip()
     missing_mask = raw.isna() | stripped.eq("") | stripped.str.lower().eq("nan")
-    parsed = pd.to_datetime(raw, errors="coerce")
+    # format="mixed" parses each value on its own; pandas>=2 otherwise infers one
+    # format from the first value and turns rows in any other format into NaT.
+    parsed = pd.to_datetime(raw, errors="coerce", format="mixed")
     invalid_mask = parsed.isna() & ~missing_mask
 
     _log_masked_samples(
@@ -483,7 +485,7 @@ def _filter_critical_columns(
             continue
         raw = df[col]
         if is_date:
-            parsed = pd.to_datetime(raw, errors="coerce")
+            parsed = pd.to_datetime(raw, errors="coerce", format="mixed")
             bad = parsed.isna()
         else:
             parsed = pd.to_numeric(raw, errors="coerce")
@@ -535,7 +537,7 @@ def _exclude_wells_with_future_start_date(
     parsed = pd.to_datetime(raw, format="%m-%d-%Y", errors="coerce")
     still_na = parsed.isna()
     if still_na.any():
-        parsed = parsed.fillna(pd.to_datetime(raw.loc[still_na], errors="coerce"))
+        parsed = parsed.fillna(pd.to_datetime(raw.loc[still_na], errors="coerce", format="mixed"))
 
     future_mask = parsed.notna() & (parsed.dt.normalize() > ref_day)
     _log_masked_samples(
@@ -574,7 +576,7 @@ def _filter_dates_on_or_after(
         raise ValueError(f"{context} missing required date column: {date_col}")
 
     raw_dates = df[date_col]
-    parsed_dates = pd.to_datetime(raw_dates, errors="coerce")
+    parsed_dates = pd.to_datetime(raw_dates, errors="coerce", format="mixed")
     cutoff = pd.Timestamp(min_date.date())
     excluded_mask = parsed_dates.isna() | (parsed_dates < cutoff)
     excluded_count = int(excluded_mask.sum())
