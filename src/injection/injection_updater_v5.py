@@ -657,6 +657,104 @@ def _drop_injection_before_well_start(
     return inj_df.loc[~drop_mask].copy()
 
 
+def _apply_permit_cancellation(
+    inj_df: pd.DataFrame,
+    well_df: pd.DataFrame,
+    *,
+    reference_date: datetime,
+    context: str,
+    thresh: float = 200_000.0,
+) -> pd.DataFrame:
+    """
+    Shut wells in at their RRC permit cancel date.
+
+    injectionV3.regularize() gives each day the NEXT record's rate and holds
+    the last record's rate until the end date. For each well whose
+    PermitCanceledDate parses and falls on or before reference_date:
+      1. injection dated after the cancel date is dropped,
+      2. the last valid rate is added on the cancel date, so it is held up to it,
+      3. a 0 is added the day after, so the rate stays 0 through the end date.
+    A valid rate is non-NaN and within [0, thresh], matching filterBPDs.
+    No-op when well_df has no PermitCanceledDate column (TexNet wells).
+    """
+    required_inj = ("InjectionWellId", "Date", "InjectedLiquidBBL")
+    required_well = ("InjectionWellId", "PermitCanceledDate")
+    if inj_df.empty or any(col not in inj_df.columns for col in required_inj):
+        return inj_df
+    if well_df.empty or any(col not in well_df.columns for col in required_well):
+        return inj_df
+
+    ref_day = pd.Timestamp(reference_date.date())
+    wells = well_df.loc[:, ["InjectionWellId", "PermitCanceledDate"]].copy()
+    # well_df is read without a str dtype; normalize so 6166.0 matches "6166".
+    wells["InjectionWellId"] = wells["InjectionWellId"].map(normalize_uic_string)
+    wells = wells.drop_duplicates(subset=["InjectionWellId"], keep="first")
+    cancel_parsed = pd.to_datetime(
+        wells["PermitCanceledDate"], format="%m-%d-%Y", errors="coerce"
+    )
+    # A cancel date in the future means the permit is still active today.
+    usable = cancel_parsed.notna() & (cancel_parsed <= ref_day)
+    cancel_map = pd.Series(
+        cancel_parsed.loc[usable].to_numpy(),
+        index=wells.loc[usable, "InjectionWellId"],
+        dtype="datetime64[ns]",
+    )
+    if cancel_map.empty:
+        return inj_df
+
+    join_ids = inj_df["InjectionWellId"].astype(str)
+    cancel_aligned = join_ids.map(cancel_map)
+    cancelled = cancel_aligned.notna()
+    if not cancelled.any():
+        return inj_df
+
+    inj_dates = pd.to_datetime(inj_df["Date"], format="%m-%d-%Y", errors="coerce")
+    drop_mask = cancelled & inj_dates.notna() & (inj_dates > cancel_aligned)
+
+    rates = pd.to_numeric(inj_df["InjectedLiquidBBL"], errors="coerce")
+    valid = cancelled & ~drop_mask & inj_dates.notna() & rates.between(0.0, thresh)
+    last = (
+        pd.DataFrame({
+            "InjectionWellId": join_ids[valid],
+            "Date": inj_dates[valid],
+            "Rate": rates[valid],
+            "Cancel": cancel_aligned[valid],
+        })
+        .sort_values("Date", kind="stable")
+        .drop_duplicates(subset=["InjectionWellId"], keep="last")
+    )
+    dropped = int(drop_mask.sum())
+    if not dropped and last.empty:
+        return inj_df
+
+    carry = last[last["Date"] < last["Cancel"]]
+    carry_rows = pd.DataFrame({
+        "InjectionWellId": carry["InjectionWellId"],
+        "Date": carry["Cancel"].dt.strftime("%m-%d-%Y"),
+        "InjectedLiquidBBL": carry["Rate"],
+    })
+    zero_rows = pd.DataFrame({
+        "InjectionWellId": last["InjectionWellId"],
+        "Date": (last["Cancel"] + pd.Timedelta(days=1)).dt.strftime("%m-%d-%Y"),
+        "InjectedLiquidBBL": 0.0,
+    })
+    logger.info(
+        "%s: %d wells shut in at their permit cancel date "
+        "(%d injection records after the cancel date excluded from %d wells; "
+        "last rate held to the cancel date for %d wells).",
+        context,
+        len(zero_rows),
+        dropped,
+        join_ids.loc[drop_mask].nunique(),
+        len(carry_rows),
+    )
+    # Synthetic rows go last so each well's 0 is its final record, which
+    # regularize() then holds to the end date.
+    return pd.concat(
+        [inj_df.loc[~drop_mask], carry_rows, zero_rows], ignore_index=True
+    )
+
+
 def _filter_gist_days_on_or_after(
     df: pd.DataFrame,
     *,
@@ -1146,6 +1244,7 @@ def rrc_map_wells_to_b3(df: pd.DataFrame, *, reference_date: datetime) -> pd.Dat
     latitude_nad83  → SurfaceHoleLatitude
     longitude_nad83 → SurfaceHoleLongitude
     h1_date         → WellActivatedDate
+    permit_canceled_date → PermitCanceledDate  (blank when not cancelled)
     top_inj_zone    → PermittedIntervalTopFt
     bot_inj_zone    → PermittedIntervalBottomFt
     (derived)       → CompletedWellDepthClassification
@@ -1217,6 +1316,22 @@ def rrc_map_wells_to_b3(df: pd.DataFrame, *, reference_date: datetime) -> pd.Dat
         context="RRC wells",
         row_labels=row_labels,
     )
+    # Most wells have no cancel date, so blanks stay NaN instead of going
+    # through _parse_date_to_b3 (which would default them to 01-01-1970).
+    raw_cancel = _coerce_to_series(
+        df.get("permit_canceled_date", pd.Series(index=df.index, dtype="object")),
+        index=df.index,
+    )
+    parsed_cancel = pd.to_datetime(raw_cancel, errors="coerce", format="mixed")
+    _log_masked_samples(
+        context="RRC wells",
+        field_name="permit_canceled_date",
+        row_labels=row_labels,
+        raw_series=raw_cancel,
+        mask=parsed_cancel.isna() & raw_cancel.notna() & raw_cancel.astype(str).str.strip().ne(""),
+        issue_label="invalid date (treated as not cancelled)",
+    )
+    out["PermitCanceledDate"] = parsed_cancel.dt.strftime("%m-%d-%Y")
     out = _exclude_wells_with_future_start_date(
         out,
         reference_date=reference_date,
@@ -1375,8 +1490,16 @@ def run_gist_pipeline(
         filtered_well_df,
         context=f"{depth_label} GIST pipeline injection",
     )
+    clipped_inj_df = _apply_permit_cancellation(
+        clipped_inj_df,
+        filtered_well_df,
+        reference_date=reference_date,
+        context=f"{depth_label} GIST pipeline injection",
+    )
     effective_inj_file = b3_inj_file
-    if len(clipped_inj_df) < len(inj_df):
+    # Both helpers return inj_df itself when they change nothing; the
+    # cancellation step can add rows, so a length check is not enough.
+    if clipped_inj_df is not inj_df:
         filtered_inj_path = b3_inj_file.with_name(f"{b3_inj_file.stem}_filtered.csv")
         clipped_inj_df.to_csv(filtered_inj_path, index=False)
         effective_inj_file = filtered_inj_path
