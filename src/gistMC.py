@@ -826,7 +826,7 @@ class gistMC:
     # Number of time samples in injeciton file #
     ############################################
     if self.injNT<1: raise ValueError('gistMC.addWells ERROR: no time samples in injection file')
-    if self.injNT<100: warnings.warn('gistMC.addWells WARNING: injection file has only ',self.injNT,' time samples', UserWarning, stacklevel=2)
+    if self.injNT<100: warnings.warn('gistMC.addWells WARNING: injection file has only '+str(self.injNT)+' time samples', UserWarning, stacklevel=2)
     self.runAddWells=True
     return
 
