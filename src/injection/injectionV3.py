@@ -767,7 +767,9 @@ def regularize(wellDF,endDay,interval=1,verbose=0):
   days=wellDF['Days'].to_list()
   bpds=wellDF['BPD'].to_list()
   ids=wellDF['ID'].to_list()
-  lastBPD=bpds[-1]
+  # Carry forward the rate at the latest date, not the last row: input rows
+  # are not guaranteed to be in date order (e.g. RRC Socrata paging order)
+  lastBPD=bpds[int(np.nanargmax(days))]
   ############################
   # Find starting output day #
   ############################
