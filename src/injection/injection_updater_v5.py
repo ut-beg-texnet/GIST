@@ -1093,6 +1093,100 @@ def texnet_well_to_b3(
     logger.info("TexNet B3 well file written: %d rows -> %s", len(df), output_path)
 
 
+TEXNET_INJ_END_DATE_COL = "Injection End Date"
+
+
+def _expand_texnet_period_records(df: pd.DataFrame, row_labels: pd.Series) -> pd.DataFrame:
+    """
+    Convert TexNet injection records to one row per well per day.
+
+    Each TexNet record covers [Date of Injection, Injection End Date]. Daily
+    submissions have the same start and end day; "Submit Monthly" submissions
+    span the whole calendar month and carry the month's total volume. This is
+    the same rule the TexNet application uses (ExportGapFill.IsDailyInjection).
+
+    A record covering N days is expanded into N daily rows, each carrying
+    volume / N, so InjectedLiquidBBL is always a daily rate (bbl/day) as
+    injectionV3 expects.
+
+    Expects the raw (un-renamed) columns plus a numeric "InjectedLiquidBBL".
+    Rows with a missing end date, or an end date before the start date, are
+    treated as single-day records. If a daily record and an expanded period
+    day fall on the same well/date (e.g. a stale period record still in the
+    accumulated raw CSV), the daily record wins.
+    """
+    start = pd.to_datetime(df["Date"], errors="coerce", format="mixed").dt.normalize()
+
+    if TEXNET_INJ_END_DATE_COL not in df.columns:
+        logger.warning(
+            "TexNet injection: '%s' column missing; treating every record as daily.",
+            TEXNET_INJ_END_DATE_COL,
+        )
+        span = pd.Series(1, index=df.index)
+    else:
+        end = pd.to_datetime(
+            df[TEXNET_INJ_END_DATE_COL], errors="coerce", format="mixed"
+        ).dt.normalize()
+        span = (end - start).dt.days + 1
+        bad_span = start.notna() & (span.isna() | (span < 1))
+        _log_masked_samples(
+            context="TexNet injection",
+            field_name=TEXNET_INJ_END_DATE_COL,
+            row_labels=row_labels,
+            raw_series=df[TEXNET_INJ_END_DATE_COL],
+            mask=bad_span,
+            issue_label="missing or before start date",
+            default_value="treated as a single-day record",
+        )
+        if bad_span.any():
+            logger.info(
+                "TexNet injection: %d records with a missing/invalid end date treated as daily.",
+                int(bad_span.sum()),
+            )
+        span = span.where(~bad_span & span.notna(), 1).astype(int)
+
+    period_mask = span > 1
+    if period_mask.any():
+        period_wells = df.loc[period_mask, "InjectionWellId"].nunique()
+        span_counts = span[period_mask].value_counts().sort_index()
+        logger.info(
+            "TexNet injection: %d multi-day (period) records across %d wells; "
+            "span distribution (days: records) %s. Expanding to daily rates.",
+            int(period_mask.sum()),
+            period_wells,
+            ", ".join(f"{d}: {n}" for d, n in span_counts.items()),
+        )
+    else:
+        logger.info("TexNet injection: all records are daily; no period expansion needed.")
+
+    out = pd.DataFrame({
+        "InjectionWellId": df["InjectionWellId"],
+        "StartDate": start,
+        "Span": span,
+        "InjectedLiquidBBL": df["InjectedLiquidBBL"] / span,
+    })
+    out = out.loc[out.index.repeat(out["Span"])].copy()
+    day_offset = out.groupby(level=0).cumcount()
+    out["DateValue"] = out["StartDate"] + pd.to_timedelta(day_offset, unit="D")
+    out["IsPeriod"] = out["Span"] > 1
+
+    # Daily records sort last so keep="last" prefers them over expanded period days.
+    out.sort_values(["InjectionWellId", "DateValue", "IsPeriod"],
+                    ascending=[True, True, False], inplace=True)
+    has_date = out["DateValue"].notna()
+    dup_mask = has_date & out.duplicated(subset=["InjectionWellId", "DateValue"], keep="last")
+    if dup_mask.any():
+        logger.warning(
+            "TexNet injection: %d overlapping well/day rows dropped (daily records kept over "
+            "expanded period records).",
+            int(dup_mask.sum()),
+        )
+        out = out[~dup_mask]
+
+    out["Date"] = out["DateValue"].dt.strftime("%m-%d-%Y").fillna("01-01-1970")
+    return out[["InjectionWellId", "Date", "InjectedLiquidBBL"]].reset_index(drop=True)
+
+
 def texnet_inj_to_b3(input_path: Path, output_path: Path) -> None:
     """
     Transform raw TexNet injection CSV to B3 format.
@@ -1100,17 +1194,20 @@ def texnet_inj_to_b3(input_path: Path, output_path: Path) -> None:
     Steps:
       1. Rename columns via _TEXNET_INJ_B3_MAP.
       2. Normalize UIC well IDs.
-      3. Reformat Date to MM-DD-YYYY (same as RRC path) so both sources are
+      3. Convert every record to daily rows (see _expand_texnet_period_records):
+         daily submissions pass through, monthly/period submissions are spread
+         evenly over the days they cover.
+      4. Reformat Date to MM-DD-YYYY (same as RRC path) so both sources are
          consistent in the B3 injection files.
-      4. Write only the three required B3 columns to keep the file compact.
+      5. Write only the three required B3 columns to keep the file compact.
 
-    TexNet data is already daily (one row per well per day), so no rate
-    conversion is applied to InjectedLiquidBBL.
+    TexNet accepts both daily and monthly ("Submit Monthly") submissions; the
+    record's [Date of Injection, Injection End Date] range tells them apart.
     """
     df = pd.read_csv(input_path, dtype={"Uicnumber": str, "Id": int}, low_memory=False)
     _log_missing_required_columns(
         df,
-        ["Uicnumber", "Date of Injection", "Volume Injected (BBLs)"],
+        ["Uicnumber", "Date of Injection", TEXNET_INJ_END_DATE_COL, "Volume Injected (BBLs)"],
         "TexNet injection CSV",
     )
     row_labels = _build_record_labels(df, ["Uicnumber", "Id"])
@@ -1132,9 +1229,9 @@ def texnet_inj_to_b3(input_path: Path, output_path: Path) -> None:
         row_labels=row_labels,
     )
 
-    # Standardize to MM-DD-YYYY so TexNet and RRC injection files share the
-    # same date format (TexNet raw dates arrive as YYYY-MM-DD ISO strings).
-    df["Date"] = _parse_date_to_b3(
+    # Log unparseable/missing start dates (the parsed values are recomputed in
+    # the expansion step, where such rows default to 01-01-1970 as before).
+    _parse_date_to_b3(
         df["Date"],
         field_name="Date of Injection",
         context="TexNet injection",
@@ -1148,10 +1245,16 @@ def texnet_inj_to_b3(input_path: Path, output_path: Path) -> None:
         row_labels=row_labels,
     )
 
-    # Keep only the three B3 columns; the raw file carries 50+ extra columns
-    # (pressure, operator, lat/lon, etc.) that are never used downstream.
-    df[["InjectionWellId", "Date", "InjectedLiquidBBL"]].to_csv(output_path, index=False)
-    logger.info("TexNet B3 injection file written: %d rows -> %s", len(df), output_path)
+    raw_rows = len(df)
+    # Daily rates on a one-row-per-day grid, Date standardized to MM-DD-YYYY so
+    # TexNet and RRC injection files share the same format. Only the three B3
+    # columns are kept; the raw file's 50+ other columns are unused downstream.
+    out = _expand_texnet_period_records(df, row_labels)
+    out.to_csv(output_path, index=False)
+    logger.info(
+        "TexNet B3 injection file written: %d raw records -> %d daily rows -> %s",
+        raw_rows, len(out), output_path,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
