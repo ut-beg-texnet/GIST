@@ -446,7 +446,7 @@ class gistMC:
     if not isinstance(self.cppMS_max, float): raise ValueError("gistMC.initPP ERROR: Maximum unloading pore compressibility "+str(self.cppMS_max)+" is not a float.")
     if not isinstance(self.cppMS_min, float): raise ValueError("gistMC.initPP ERROR: Minimum unloading pore compressibility "+str(self.cppMS_min)+" is not a float.")
     if self.cppMS_max<self.cppMS_min: raise ValueError("gistMC.initPP ERROR: Maximum unloading pore compressibility "+str(self.cppMS_max)+" microsips < Minimum unloading pore compressibility "+str(self.cppMS_min)+" microsips")
-    if self.cppMS_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum unloading pore compressibility must be positive, not "+str(self.microsips_min)+" microsips")
+    if self.cppMS_min<=0.: raise ValueError("gistMC.initPP ERROR: Minimum unloading pore compressibility must be positive, not "+str(self.cppMS_min)+" microsips")
     if self.cppMS_max>=110.: raise ValueError("gistMC.initPP ERROR: Maximum unloading pore compressibility must be less than clay (110. microsips), not "+str(self.cppMS_max)+" microsips")
     ##############
     #  Warnings  #
@@ -813,7 +813,7 @@ class gistMC:
     ######################
     requiredWellColumns=['StartDate','SurfaceHoleLatitude','SurfaceHoleLongitude','ID','WellName']
     for col in requiredWellColumns:
-      if col not in self.wellDF.columns:  raise ValueError(' gistMC.addWells: ERROR: ',col,' not in well file')
+      if col not in self.wellDF.columns:  raise ValueError('gistMC.addWells ERROR: '+col+' not in well file')
     ################################
     # Number of wells in well file #
     ################################
@@ -1099,8 +1099,10 @@ class gistMC:
     #####################################################################
     
     # Compare dates of wells to earthquake date
-    firstWellStartDate=pd.to_datetime(self.wellDF['StartDate']).min()
-    lastWellStartDate=pd.to_datetime(self.wellDF['StartDate']).max()
+    # format='mixed' parses each value independently (pandas>=2 otherwise infers one format from the first row)
+    wellStartDates=pd.to_datetime(self.wellDF['StartDate'],format='mixed')
+    firstWellStartDate=wellStartDates.min()
+    lastWellStartDate=wellStartDates.max()
     if verbose>1:
       print(' gistMC.findWellsVec: ',self.nw,'wells start date range is ',firstWellStartDate,lastWellStartDate)
       print(' gistMC.findWellsVec: ',pd.to_datetime(eq['Origin Date']))
@@ -1109,7 +1111,7 @@ class gistMC:
     ####################################
     if firstWellStartDate>pd.to_datetime(eq['Origin Date']): raise ValueError('gistMC.findWellsVec ERROR: All wells started injecting after the earthquake.')
     # Should I fill NaT values with something?
-    injectionDuration=(pd.to_datetime(eq['Origin Date'])-pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)).dt
+    injectionDuration=(pd.to_datetime(eq['Origin Date'])-wellStartDates.fillna(self.epoch)).dt
     injectionDays=injectionDuration.days
     # This is still returning NaNs and I don't know why
     #if verbose>1: print(' gistMC.findWellsVec injectionDays',pd.to_datetime(eq['Origin Date']),pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch))
@@ -1119,7 +1121,7 @@ class gistMC:
     ##############################
     # Warn if wells seem too old #
     ##############################
-    if wellDurationsMax>40.: warnings.warn('gistMC.findWellsVec WARNING: Maximum well duration is '+str(wellDurationsMax)+' years, likely extrapolation error.', UserWarning, stacklevel=2)
+    if wellDurationsMax>40.: warnings.warn('gistMC.findWellsVec WARNING: Maximum well duration is '+f'{wellDurationsMax:.0f}'+' years, likely extrapolation error.', UserWarning, stacklevel=2)
     ###########################################################################
     # Find diffusion distance for each well at that date                      #
     # Equation 2.13 in documentation - take maximum pore pressure diffusivity #
@@ -1139,8 +1141,8 @@ class gistMC:
     #######################################################
     # Sanity check for minimum and maximum well distances #
     #######################################################
-    if min(wellDistances)>30.: warnings.warn('gistMC.findWellsVec WARNING: closest input well is '+str(min(wellDistances))+' km away. Results may be unreliable.', UserWarning, stacklevel=2)
-    if min(wellDistances)<1.: warnings.warn('gistMC.findWellsVec WARNING: closest input well is '+str(min(wellDistances))+' km away. Results may be unreliable.', UserWarning, stacklevel=2)
+    if min(wellDistances)>30.: warnings.warn('gistMC.findWellsVec WARNING: closest input well is '+f'{min(wellDistances):.2f}'+' km away. Results may be unreliable.', UserWarning, stacklevel=2)
+    if min(wellDistances)<1.: warnings.warn('gistMC.findWellsVec WARNING: closest input well is '+f'{min(wellDistances):.2f}'+' km away. Results may be unreliable.', UserWarning, stacklevel=2)
     ######################################################
     # Compute encompassing dates - what time will the    #
     # diffusion front from this well pass the epicenter? #
@@ -1167,7 +1169,7 @@ class gistMC:
     injWellDaysToEpicenterClipTD=pd.to_timedelta(injWellDaysToEpicenterClip,unit='day')
     if verbose>1: print(' gistMC.findWellsVec injWellDaysToEpicenterClipTD',min(injWellDaysToEpicenterClipTD),max(injWellDaysToEpicenterClipTD),injWellDaysToEpicenterClipTD.isna().sum(),' nans')
     injWellDaysToEpicenterClipTD.index=self.wellDF.index
-    injWellDateAtEpicenter = pd.to_datetime(self.wellDF['StartDate']).fillna(self.epoch)+injWellDaysToEpicenterClipTD
+    injWellDateAtEpicenter = wellStartDates.fillna(self.epoch)+injWellDaysToEpicenterClipTD
     if verbose>1: print(' gistMC.findWellsVec injWellDateAtEpicenter',min(injWellDateAtEpicenter),max(injWellDateAtEpicenter),injWellDateAtEpicenter.isna().sum(),' nans')
     ###################################################
     # Then subtract off the date of the earthquake to #
@@ -1291,11 +1293,11 @@ class gistMC:
     ###################################
     # Throw error if numDataWells = 0 #
     ###################################
-    if numDataWells==0: raise ValueError('gistMC.findWellsVec ERROR: No rates for selected '+str(nw)+' wells are present in the injection file.')
-    #######################################
-    # Throw warning if numDataWells ~= nw #
-    #######################################
-    if numDataWells!=self.nw: warnings.warn('gistMC.findWellsVec WARNING: '+str(self.nw)+' wells were selected but '+str(numDataWells)+' wells have rates in the injection file.',UserWarning,stacklevel=2)
+    if numDataWells==0: raise ValueError('gistMC.findWellsVec ERROR: No rates for selected '+str(len(ids_set))+' wells are present in the injection file.')
+    #################################################
+    # Throw warning if numDataWells ~= len(ids_set) #
+    #################################################
+    if numDataWells!=len(ids_set): warnings.warn('gistMC.findWellsVec WARNING: '+str(len(ids_set))+' wells were selected but '+str(numDataWells)+' wells have rates in the injection file.',UserWarning,stacklevel=2)
     numExcludedWells=len(_allVolumesByIDSeries.index.intersection(excludedIDs_set))
     ########################################
     # Throw warning if numExcludedWells==0 #
@@ -1537,8 +1539,8 @@ class gistMC:
     # regardless of blocking. >100GB-equivalent: Error, >10GB: Warning  #
     #####################################################################
     computeSizeGB=nwC*nt*nReal*8/(1024*1024*1024)
-    if computeSizeGB>10.: warnings.warn(' gistMC.runPressureScenariosVec WARNING: estimated computation size is '+str(computeSizeGB)+'GB-equivalent ('+str(nwC)+' wells x '+str(nReal)+' realizations x '+str(nt)+' time steps). This may take a while. Consider reducing nReal or the well search radius',UserWarning,stacklevel=2)
-    if computeSizeGB>100.: raise ValueError('gistMC.runPressureScenariosVec ERROR: estimated computation size is '+str(computeSizeGB)+'GB-equivalent ('+str(nwC)+' wells x '+str(nReal)+' realizations x '+str(nt)+' time steps), which is likely a configuration error. Consider reducing nReal or the well search radius')
+    if computeSizeGB>10.: warnings.warn(' gistMC.runPressureScenariosVec WARNING: estimated computation size is '+f'{computeSizeGB:.2f}'+'GB-equivalent ('+str(nwC)+' wells x '+str(nReal)+' realizations x '+str(nt)+' time steps). This may take a while. Consider reducing nReal or the well search radius',UserWarning,stacklevel=2)
+    if computeSizeGB>100.: raise ValueError('gistMC.runPressureScenariosVec ERROR: estimated computation size is '+f'{computeSizeGB:.2f}'+'GB-equivalent ('+str(nwC)+' wells x '+str(nReal)+' realizations x '+str(nt)+' time steps), which is likely a configuration error. Consider reducing nReal or the well search radius')
     ###########################################
     # Convert bpdArray to Q - m3/s [nt+1,nwC] #
     ###########################################
@@ -1908,8 +1910,8 @@ class gistMC:
     # >10GB: Error, >2GB: Warning        # 
     ######################################
     arraySizeGB=nwC*nt*nReal*8/(1024*1024*1024)
-    if arraySizeGB>2.0: warnings.warn(' gistMC.runPressureScenariosTimeSeriesConv WARNING: array size for calculating pressures is '+str(arraySizeGB)+'GB. Consider reducing nReal',UserWarning,stacklevel=2)
-    if arraySizeGB>10.: raise ValueError('gistMC.runPressureScenariosTimeSeriesConv ERROR: array size for calculating pressures is '+str(arraySizeGB)+'GB. Consider reducing nReal')
+    if arraySizeGB>2.0: warnings.warn(' gistMC.runPressureScenariosTimeSeriesConv WARNING: array size for calculating pressures is '+f'{arraySizeGB:.2f}'+'GB. Consider reducing nReal',UserWarning,stacklevel=2)
+    if arraySizeGB>10.: raise ValueError('gistMC.runPressureScenariosTimeSeriesConv ERROR: array size for calculating pressures is '+f'{arraySizeGB:.2f}'+'GB. Consider reducing nReal')
     ###########################################
     # Convert bpdArray to Q - m3/s [nwC,nt+1] #
     ###########################################
@@ -1976,7 +1978,7 @@ class gistMC:
     # There are some very small negative numbers due to  #
     # rounding in fftconvolve, so make it a bit <-eps    #
     ######################################################
-    if np.any(dP<-0.000000001): print('gistMC.runPressureScenariosTimeSeriesConv WARNING: negative pressure values found in dP: '+str(np.argmin(dP,axis=None))+' '+np.min(dP),UserWarning,stacklevel=2)
+    if np.any(dP<-0.000000001): warnings.warn('gistMC.runPressureScenariosTimeSeriesConv WARNING: negative pressure values found in dP: '+str(np.argmin(dP,axis=None))+' '+str(np.min(dP)),UserWarning,stacklevel=2)
     ###################################################
     # Linear interpolation between the two time steps #
     # bounding the EQ time dPatEQ [nw,nReal]          #
@@ -3960,7 +3962,7 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,eq,clipYear=False,
   wellDF=pd.concat([sWells,iWells],ignore_index=True)
   wellDF['MMBBL']=wellDF['TotalBBL']/1000000.
   wellDF['YearsInjectingToEarthquake']=-wellDF['YearsInjecting']
-  wellDF['Date']=pd.to_datetime(wellDF['StartDate'])
+  wellDF['Date']=pd.to_datetime(wellDF['StartDate'],format='mixed')
   if clipYear:
     wellDF['Clipped']=False
     wellDF.loc[wellDF['YearsInjectingToEarthquake']<minYearFloat,'YearsInjectingToEarthquake']=minYearFloat
@@ -3976,7 +3978,7 @@ def prepRTPlot(selectedWellDF,ignoredWellDF,minYear,diffRange,eq,clipYear=False,
   d=np.concatenate([np.ones(len(rMin))*diffRange[0],np.ones(len(rMax))*diffRange[1]])
   label=np.concatenate([['Minimum',]*len(rMin),['Maximum',] * len(rMax)])
   rtDF = pd.DataFrame(data={'Distance':r,'d':d,'Years Before Earthquake':t,'Diffusivity':label})
-  rtDF['Date']=pd.to_datetime(eq['Origin Date'])+(365.25*rtDF['Years Before Earthquake']).astype('timedelta64[D]')
+  rtDF['Date']=pd.to_datetime(eq['Origin Date'])+pd.to_timedelta(np.trunc(365.25*rtDF['Years Before Earthquake']),unit='D')
   return rtDF,wellDF
 
 def summarizePPResults(ppDF,wells,threshold=0.1,nOrder=20,verbose=0):
@@ -4397,9 +4399,9 @@ def extendDisposal(injDF,startDate,endDate,rateDict,dDays=10,epoch=pd.to_datetim
     'Date':np.tile(futureDates.to_numpy(),len(wellIDs)),
     'Type':np.repeat(rateTypes.astype(object),nFuture),
   },index=np.tile(np.arange(nFuture),len(wellIDs)))
-  # Concatenating onto the same empty frame the per-well loop started from
-  # keeps the column dtypes identical to the previous output.
-  futureInjDF=pd.concat([pd.DataFrame(columns=['ID','Days','BPD','Date','Type']),futureWellsInjDF])
+  # The per-well loop concatenated onto an empty frame with these columns; pandas
+  # ignores empty frames when picking dtypes, so the result is futureWellsInjDF itself.
+  futureInjDF=futureWellsInjDF
   # Create updated dataframe with new wells
   pastInjDF['Type']='Original'
   forecastInjDF=pd.concat([pastInjDF,futureInjDF])
@@ -4465,11 +4467,11 @@ def checkEQ(eqDict,verbose=0):
   if 'Longitude' not in eqDict:                       raise ValueError('gistMC.checkEQ ERROR: Longitude not in eqDict')
   if 'LatitudeError' not in eqDict:                   raise ValueError('gistMC.checkEQ ERROR: LatitudeError not in eqDict')
   if 'LongitudeError' not in eqDict:                  raise ValueError('gistMC.checkEQ ERROR: LongitudeError not in eqDict')
-  if eqDict['Latitude']>90 or eqDict['Latitude']<-90: raise ValueError('gistMC.checkEQ ERROR: Latitude '+eqDFict['Latitude']+' not in range [-90,90]')
-  if eqDict['Longitude']>180 or eqDict['Longitude']<-180: raise ValueError('gistMC.checkEQ ERROR: Longitude '+eqDict['Longitude']+' not in range [-180,180]')
-  if eqDict['Latitude']>80. or eqDict['Latitude']<-80: warnings.warn('gistMC.checkEQ WARNING: Latitude '+eqDict['Latitude']+' close to poles, distances will be inaccurate.',UserWarning,stacklevel=2)
-  if eqDict['LongitudeError']>100.:                        warnings.warn('gistMC.checkEQ WARNING: LongitudeError '+eqDict['LongitudeError']+' is very large, should be in km.',UserWarning,stacklevel=2)
-  if eqDict['LatitudeError']>100.:                         warnings.warn('gistMC.checkEQ WARNING: LongitudeError '+eqDict['LongitudeError']+' is very large, should be in km.',UserWarning,stacklevel=2)
+  if eqDict['Latitude']>90 or eqDict['Latitude']<-90: raise ValueError('gistMC.checkEQ ERROR: Latitude '+str(eqDict['Latitude'])+' not in range [-90,90]')
+  if eqDict['Longitude']>180 or eqDict['Longitude']<-180: raise ValueError('gistMC.checkEQ ERROR: Longitude '+str(eqDict['Longitude'])+' not in range [-180,180]')
+  if eqDict['Latitude']>80. or eqDict['Latitude']<-80: warnings.warn('gistMC.checkEQ WARNING: Latitude '+str(eqDict['Latitude'])+' close to poles, distances will be inaccurate.',UserWarning,stacklevel=2)
+  if eqDict['LongitudeError']>100.:                        warnings.warn('gistMC.checkEQ WARNING: LongitudeError '+str(eqDict['LongitudeError'])+' is very large, should be in km.',UserWarning,stacklevel=2)
+  if eqDict['LatitudeError']>100.:                         warnings.warn('gistMC.checkEQ WARNING: LatitudeError '+str(eqDict['LatitudeError'])+' is very large, should be in km.',UserWarning,stacklevel=2)
   return
 
 def checkWellDF(wellDF,verbose=0):
@@ -4509,15 +4511,15 @@ def checkWellDF(wellDF,verbose=0):
   #############################
   # Warn if distances >100km? #
   #############################
-  if np.max(wellDistances)>100000.: warnings.warn(' gistMC.checkWellDF WARNING: Maximum well distance is '+str(np.max(wellDistances))+' m', UserWarning, stacklevel=2)
-  if np.min(wellDistances)>30000.: warnings.warn(' gistMC.checkWellDF WARNING: closest well is '+str(np.min(wellDistances))+' m away', UserWarning, stacklevel=2)
+  if np.max(wellDistances)>100000.: warnings.warn(' gistMC.checkWellDF WARNING: Maximum well distance is '+f'{np.max(wellDistances):.2f}'+' m', UserWarning, stacklevel=2)
+  if np.min(wellDistances)>30000.: warnings.warn(' gistMC.checkWellDF WARNING: closest well is '+f'{np.min(wellDistances):.2f}'+' m away', UserWarning, stacklevel=2)
   ###################################
   # Warnings for large dx/dy values #
   ###################################
-  if np.max(dx)>100000.: warnings.warn(' gistMC.checkWellDF WARNING: Maximum dx is '+str(np.max(dx))+' m', UserWarning, stacklevel=2)
-  if np.max(dy)>100000.: warnings.warn(' gistMC.checkWellDF WARNING: Maximum dy is '+str(np.max(dy))+' m', UserWarning, stacklevel=2)
-  if np.min(dx)<-100000.: warnings.warn(' gistMC.checkWellDF WARNING: Minimum dx is '+str(np.min(dx))+' m', UserWarning, stacklevel=2)
-  if np.min(dy)<-100000.: warnings.warn(' gistMC.checkWellDF WARNING: Minimum dy is '+str(np.min(dy))+' m', UserWarning, stacklevel=2)
+  if np.max(dx)>100000.: warnings.warn(' gistMC.checkWellDF WARNING: Maximum dx is '+f'{np.max(dx):.2f}'+' m', UserWarning, stacklevel=2)
+  if np.max(dy)>100000.: warnings.warn(' gistMC.checkWellDF WARNING: Maximum dy is '+f'{np.max(dy):.2f}'+' m', UserWarning, stacklevel=2)
+  if np.min(dx)<-100000.: warnings.warn(' gistMC.checkWellDF WARNING: Minimum dx is '+f'{np.min(dx):.2f}'+' m', UserWarning, stacklevel=2)
+  if np.min(dy)<-100000.: warnings.warn(' gistMC.checkWellDF WARNING: Minimum dy is '+f'{np.min(dy):.2f}'+' m', UserWarning, stacklevel=2)
   return
 
 def checkParameters(gist,verbose=0):
@@ -4610,7 +4612,7 @@ def checkWellFile(wellFile,boundsDictionary=None,verbose=0):
   if len(missingColumns)>0:
     errorText=errorText+' missing columns: '+str(missingColumns)
     return wellDF,errorText,warningText,infoText
-  wellDF['StartDate']=pd.to_datetime(wellDF['StartDate'])
+  wellDF['StartDate']=pd.to_datetime(wellDF['StartDate'],format='mixed')
   for column in usedStringColumns:
     if verbose>0: print('column: ',column)
     # Number of unique values is broken
@@ -4688,7 +4690,7 @@ def checkInjFile(injFile,wellDF=None,boundsDictionary=None,epoch=pd.to_datetime(
     for i in range(len(daysVector)):
       if daysVector[i]!=days[i]: warningText=warningText+' ID '+str(ID)+' expected '+str(daysVector[i])+' days but found '+str(days[i])+' days\n'
   if warningText=='': infoText=infoText+'All injection data are evenly sampled in time\n'
-  injDF['Date']=pd.to_datetime(injDF['Date'])
+  injDF['Date']=pd.to_datetime(injDF['Date'],format='mixed')
   errorText=''
   dayLowerBound=(pd.to_datetime('1900-01-01')-epoch).days
   dayUpperBound=(pd.to_datetime('2050-12-31')-epoch).days

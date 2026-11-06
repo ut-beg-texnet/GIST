@@ -416,7 +416,9 @@ def _parse_date_to_b3(
     raw = _coerce_to_series(series)
     stripped = raw.astype("object").astype(str).str.strip()
     missing_mask = raw.isna() | stripped.eq("") | stripped.str.lower().eq("nan")
-    parsed = pd.to_datetime(raw, errors="coerce")
+    # format="mixed" parses each value on its own; pandas>=2 otherwise infers one
+    # format from the first value and turns rows in any other format into NaT.
+    parsed = pd.to_datetime(raw, errors="coerce", format="mixed")
     invalid_mask = parsed.isna() & ~missing_mask
 
     _log_masked_samples(
@@ -483,7 +485,7 @@ def _filter_critical_columns(
             continue
         raw = df[col]
         if is_date:
-            parsed = pd.to_datetime(raw, errors="coerce")
+            parsed = pd.to_datetime(raw, errors="coerce", format="mixed")
             bad = parsed.isna()
         else:
             parsed = pd.to_numeric(raw, errors="coerce")
@@ -535,7 +537,7 @@ def _exclude_wells_with_future_start_date(
     parsed = pd.to_datetime(raw, format="%m-%d-%Y", errors="coerce")
     still_na = parsed.isna()
     if still_na.any():
-        parsed = parsed.fillna(pd.to_datetime(raw.loc[still_na], errors="coerce"))
+        parsed = parsed.fillna(pd.to_datetime(raw.loc[still_na], errors="coerce", format="mixed"))
 
     future_mask = parsed.notna() & (parsed.dt.normalize() > ref_day)
     _log_masked_samples(
@@ -574,7 +576,7 @@ def _filter_dates_on_or_after(
         raise ValueError(f"{context} missing required date column: {date_col}")
 
     raw_dates = df[date_col]
-    parsed_dates = pd.to_datetime(raw_dates, errors="coerce")
+    parsed_dates = pd.to_datetime(raw_dates, errors="coerce", format="mixed")
     cutoff = pd.Timestamp(min_date.date())
     excluded_mask = parsed_dates.isna() | (parsed_dates < cutoff)
     excluded_count = int(excluded_mask.sum())
@@ -653,6 +655,104 @@ def _drop_injection_before_well_start(
         cutoff.strftime("%Y-%m-%d"),
     )
     return inj_df.loc[~drop_mask].copy()
+
+
+def _apply_permit_cancellation(
+    inj_df: pd.DataFrame,
+    well_df: pd.DataFrame,
+    *,
+    reference_date: datetime,
+    context: str,
+    thresh: float = 200_000.0,
+) -> pd.DataFrame:
+    """
+    Shut wells in at their RRC permit cancel date.
+
+    injectionV3.regularize() gives each day the NEXT record's rate and holds
+    the last record's rate until the end date. For each well whose
+    PermitCanceledDate parses and falls on or before reference_date:
+      1. injection dated after the cancel date is dropped,
+      2. the last valid rate is added on the cancel date, so it is held up to it,
+      3. a 0 is added the day after, so the rate stays 0 through the end date.
+    A valid rate is non-NaN and within [0, thresh], matching filterBPDs.
+    No-op when well_df has no PermitCanceledDate column (TexNet wells).
+    """
+    required_inj = ("InjectionWellId", "Date", "InjectedLiquidBBL")
+    required_well = ("InjectionWellId", "PermitCanceledDate")
+    if inj_df.empty or any(col not in inj_df.columns for col in required_inj):
+        return inj_df
+    if well_df.empty or any(col not in well_df.columns for col in required_well):
+        return inj_df
+
+    ref_day = pd.Timestamp(reference_date.date())
+    wells = well_df.loc[:, ["InjectionWellId", "PermitCanceledDate"]].copy()
+    # well_df is read without a str dtype; normalize so 6166.0 matches "6166".
+    wells["InjectionWellId"] = wells["InjectionWellId"].map(normalize_uic_string)
+    wells = wells.drop_duplicates(subset=["InjectionWellId"], keep="first")
+    cancel_parsed = pd.to_datetime(
+        wells["PermitCanceledDate"], format="%m-%d-%Y", errors="coerce"
+    )
+    # A cancel date in the future means the permit is still active today.
+    usable = cancel_parsed.notna() & (cancel_parsed <= ref_day)
+    cancel_map = pd.Series(
+        cancel_parsed.loc[usable].to_numpy(),
+        index=wells.loc[usable, "InjectionWellId"],
+        dtype="datetime64[ns]",
+    )
+    if cancel_map.empty:
+        return inj_df
+
+    join_ids = inj_df["InjectionWellId"].astype(str)
+    cancel_aligned = join_ids.map(cancel_map)
+    cancelled = cancel_aligned.notna()
+    if not cancelled.any():
+        return inj_df
+
+    inj_dates = pd.to_datetime(inj_df["Date"], format="%m-%d-%Y", errors="coerce")
+    drop_mask = cancelled & inj_dates.notna() & (inj_dates > cancel_aligned)
+
+    rates = pd.to_numeric(inj_df["InjectedLiquidBBL"], errors="coerce")
+    valid = cancelled & ~drop_mask & inj_dates.notna() & rates.between(0.0, thresh)
+    last = (
+        pd.DataFrame({
+            "InjectionWellId": join_ids[valid],
+            "Date": inj_dates[valid],
+            "Rate": rates[valid],
+            "Cancel": cancel_aligned[valid],
+        })
+        .sort_values("Date", kind="stable")
+        .drop_duplicates(subset=["InjectionWellId"], keep="last")
+    )
+    dropped = int(drop_mask.sum())
+    if not dropped and last.empty:
+        return inj_df
+
+    carry = last[last["Date"] < last["Cancel"]]
+    carry_rows = pd.DataFrame({
+        "InjectionWellId": carry["InjectionWellId"],
+        "Date": carry["Cancel"].dt.strftime("%m-%d-%Y"),
+        "InjectedLiquidBBL": carry["Rate"],
+    })
+    zero_rows = pd.DataFrame({
+        "InjectionWellId": last["InjectionWellId"],
+        "Date": (last["Cancel"] + pd.Timedelta(days=1)).dt.strftime("%m-%d-%Y"),
+        "InjectedLiquidBBL": 0.0,
+    })
+    logger.info(
+        "%s: %d wells shut in at their permit cancel date "
+        "(%d injection records after the cancel date excluded from %d wells; "
+        "last rate held to the cancel date for %d wells).",
+        context,
+        len(zero_rows),
+        dropped,
+        join_ids.loc[drop_mask].nunique(),
+        len(carry_rows),
+    )
+    # Synthetic rows go last so each well's 0 is its final record, which
+    # regularize() then holds to the end date.
+    return pd.concat(
+        [inj_df.loc[~drop_mask], carry_rows, zero_rows], ignore_index=True
+    )
 
 
 def _filter_gist_days_on_or_after(
@@ -993,6 +1093,100 @@ def texnet_well_to_b3(
     logger.info("TexNet B3 well file written: %d rows -> %s", len(df), output_path)
 
 
+TEXNET_INJ_END_DATE_COL = "Injection End Date"
+
+
+def _expand_texnet_period_records(df: pd.DataFrame, row_labels: pd.Series) -> pd.DataFrame:
+    """
+    Convert TexNet injection records to one row per well per day.
+
+    Each TexNet record covers [Date of Injection, Injection End Date]. Daily
+    submissions have the same start and end day; "Submit Monthly" submissions
+    span the whole calendar month and carry the month's total volume. This is
+    the same rule the TexNet application uses (ExportGapFill.IsDailyInjection).
+
+    A record covering N days is expanded into N daily rows, each carrying
+    volume / N, so InjectedLiquidBBL is always a daily rate (bbl/day) as
+    injectionV3 expects.
+
+    Expects the raw (un-renamed) columns plus a numeric "InjectedLiquidBBL".
+    Rows with a missing end date, or an end date before the start date, are
+    treated as single-day records. If a daily record and an expanded period
+    day fall on the same well/date (e.g. a stale period record still in the
+    accumulated raw CSV), the daily record wins.
+    """
+    start = pd.to_datetime(df["Date"], errors="coerce", format="mixed").dt.normalize()
+
+    if TEXNET_INJ_END_DATE_COL not in df.columns:
+        logger.warning(
+            "TexNet injection: '%s' column missing; treating every record as daily.",
+            TEXNET_INJ_END_DATE_COL,
+        )
+        span = pd.Series(1, index=df.index)
+    else:
+        end = pd.to_datetime(
+            df[TEXNET_INJ_END_DATE_COL], errors="coerce", format="mixed"
+        ).dt.normalize()
+        span = (end - start).dt.days + 1
+        bad_span = start.notna() & (span.isna() | (span < 1))
+        _log_masked_samples(
+            context="TexNet injection",
+            field_name=TEXNET_INJ_END_DATE_COL,
+            row_labels=row_labels,
+            raw_series=df[TEXNET_INJ_END_DATE_COL],
+            mask=bad_span,
+            issue_label="missing or before start date",
+            default_value="treated as a single-day record",
+        )
+        if bad_span.any():
+            logger.info(
+                "TexNet injection: %d records with a missing/invalid end date treated as daily.",
+                int(bad_span.sum()),
+            )
+        span = span.where(~bad_span & span.notna(), 1).astype(int)
+
+    period_mask = span > 1
+    if period_mask.any():
+        period_wells = df.loc[period_mask, "InjectionWellId"].nunique()
+        span_counts = span[period_mask].value_counts().sort_index()
+        logger.info(
+            "TexNet injection: %d multi-day (period) records across %d wells; "
+            "span distribution (days: records) %s. Expanding to daily rates.",
+            int(period_mask.sum()),
+            period_wells,
+            ", ".join(f"{d}: {n}" for d, n in span_counts.items()),
+        )
+    else:
+        logger.info("TexNet injection: all records are daily; no period expansion needed.")
+
+    out = pd.DataFrame({
+        "InjectionWellId": df["InjectionWellId"],
+        "StartDate": start,
+        "Span": span,
+        "InjectedLiquidBBL": df["InjectedLiquidBBL"] / span,
+    })
+    out = out.loc[out.index.repeat(out["Span"])].copy()
+    day_offset = out.groupby(level=0).cumcount()
+    out["DateValue"] = out["StartDate"] + pd.to_timedelta(day_offset, unit="D")
+    out["IsPeriod"] = out["Span"] > 1
+
+    # Daily records sort last so keep="last" prefers them over expanded period days.
+    out.sort_values(["InjectionWellId", "DateValue", "IsPeriod"],
+                    ascending=[True, True, False], inplace=True)
+    has_date = out["DateValue"].notna()
+    dup_mask = has_date & out.duplicated(subset=["InjectionWellId", "DateValue"], keep="last")
+    if dup_mask.any():
+        logger.warning(
+            "TexNet injection: %d overlapping well/day rows dropped (daily records kept over "
+            "expanded period records).",
+            int(dup_mask.sum()),
+        )
+        out = out[~dup_mask]
+
+    out["Date"] = out["DateValue"].dt.strftime("%m-%d-%Y").fillna("01-01-1970")
+    return out[["InjectionWellId", "Date", "InjectedLiquidBBL"]].reset_index(drop=True)
+
+
 def texnet_inj_to_b3(input_path: Path, output_path: Path) -> None:
     """
     Transform raw TexNet injection CSV to B3 format.
@@ -1000,17 +1194,20 @@ def texnet_inj_to_b3(input_path: Path, output_path: Path) -> None:
     Steps:
       1. Rename columns via _TEXNET_INJ_B3_MAP.
       2. Normalize UIC well IDs.
-      3. Reformat Date to MM-DD-YYYY (same as RRC path) so both sources are
+      3. Convert every record to daily rows (see _expand_texnet_period_records):
+         daily submissions pass through, monthly/period submissions are spread
+         evenly over the days they cover.
+      4. Reformat Date to MM-DD-YYYY (same as RRC path) so both sources are
          consistent in the B3 injection files.
-      4. Write only the three required B3 columns to keep the file compact.
+      5. Write only the three required B3 columns to keep the file compact.
 
-    TexNet data is already daily (one row per well per day), so no rate
-    conversion is applied to InjectedLiquidBBL.
+    TexNet accepts both daily and monthly ("Submit Monthly") submissions; the
+    record's [Date of Injection, Injection End Date] range tells them apart.
     """
     df = pd.read_csv(input_path, dtype={"Uicnumber": str, "Id": int}, low_memory=False)
     _log_missing_required_columns(
         df,
-        ["Uicnumber", "Date of Injection", "Volume Injected (BBLs)"],
+        ["Uicnumber", "Date of Injection", TEXNET_INJ_END_DATE_COL, "Volume Injected (BBLs)"],
         "TexNet injection CSV",
     )
     row_labels = _build_record_labels(df, ["Uicnumber", "Id"])
@@ -1032,9 +1229,9 @@ def texnet_inj_to_b3(input_path: Path, output_path: Path) -> None:
         row_labels=row_labels,
     )
 
-    # Standardize to MM-DD-YYYY so TexNet and RRC injection files share the
-    # same date format (TexNet raw dates arrive as YYYY-MM-DD ISO strings).
-    df["Date"] = _parse_date_to_b3(
+    # Log unparseable/missing start dates (the parsed values are recomputed in
+    # the expansion step, where such rows default to 01-01-1970 as before).
+    _parse_date_to_b3(
         df["Date"],
         field_name="Date of Injection",
         context="TexNet injection",
@@ -1048,10 +1245,16 @@ def texnet_inj_to_b3(input_path: Path, output_path: Path) -> None:
         row_labels=row_labels,
     )
 
-    # Keep only the three B3 columns; the raw file carries 50+ extra columns
-    # (pressure, operator, lat/lon, etc.) that are never used downstream.
-    df[["InjectionWellId", "Date", "InjectedLiquidBBL"]].to_csv(output_path, index=False)
-    logger.info("TexNet B3 injection file written: %d rows -> %s", len(df), output_path)
+    raw_rows = len(df)
+    # Daily rates on a one-row-per-day grid, Date standardized to MM-DD-YYYY so
+    # TexNet and RRC injection files share the same format. Only the three B3
+    # columns are kept; the raw file's 50+ other columns are unused downstream.
+    out = _expand_texnet_period_records(df, row_labels)
+    out.to_csv(output_path, index=False)
+    logger.info(
+        "TexNet B3 injection file written: %d raw records -> %d daily rows -> %s",
+        raw_rows, len(out), output_path,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1144,6 +1347,7 @@ def rrc_map_wells_to_b3(df: pd.DataFrame, *, reference_date: datetime) -> pd.Dat
     latitude_nad83  → SurfaceHoleLatitude
     longitude_nad83 → SurfaceHoleLongitude
     h1_date         → WellActivatedDate
+    permit_canceled_date → PermitCanceledDate  (blank when not cancelled)
     top_inj_zone    → PermittedIntervalTopFt
     bot_inj_zone    → PermittedIntervalBottomFt
     (derived)       → CompletedWellDepthClassification
@@ -1215,6 +1419,22 @@ def rrc_map_wells_to_b3(df: pd.DataFrame, *, reference_date: datetime) -> pd.Dat
         context="RRC wells",
         row_labels=row_labels,
     )
+    # Most wells have no cancel date, so blanks stay NaN instead of going
+    # through _parse_date_to_b3 (which would default them to 01-01-1970).
+    raw_cancel = _coerce_to_series(
+        df.get("permit_canceled_date", pd.Series(index=df.index, dtype="object")),
+        index=df.index,
+    )
+    parsed_cancel = pd.to_datetime(raw_cancel, errors="coerce", format="mixed")
+    _log_masked_samples(
+        context="RRC wells",
+        field_name="permit_canceled_date",
+        row_labels=row_labels,
+        raw_series=raw_cancel,
+        mask=parsed_cancel.isna() & raw_cancel.notna() & raw_cancel.astype(str).str.strip().ne(""),
+        issue_label="invalid date (treated as not cancelled)",
+    )
+    out["PermitCanceledDate"] = parsed_cancel.dt.strftime("%m-%d-%Y")
     out = _exclude_wells_with_future_start_date(
         out,
         reference_date=reference_date,
@@ -1373,8 +1593,16 @@ def run_gist_pipeline(
         filtered_well_df,
         context=f"{depth_label} GIST pipeline injection",
     )
+    clipped_inj_df = _apply_permit_cancellation(
+        clipped_inj_df,
+        filtered_well_df,
+        reference_date=reference_date,
+        context=f"{depth_label} GIST pipeline injection",
+    )
     effective_inj_file = b3_inj_file
-    if len(clipped_inj_df) < len(inj_df):
+    # Both helpers return inj_df itself when they change nothing; the
+    # cancellation step can add rows, so a length check is not enough.
+    if clipped_inj_df is not inj_df:
         filtered_inj_path = b3_inj_file.with_name(f"{b3_inj_file.stem}_filtered.csv")
         clipped_inj_df.to_csv(filtered_inj_path, index=False)
         effective_inj_file = filtered_inj_path

@@ -23,6 +23,7 @@ CLAUDE.md
 # any .venv directories
 **/venv/
 gist_venv/
+gist_python_14_venv/
 
 /src/data/disposal_inj.csv
 /src/data/disposal_well.csv

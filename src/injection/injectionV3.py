@@ -655,18 +655,20 @@ def filterBPDs(wellDF,thresh,keepModeled,verbose=0):
     ####################
     # Check if a spike #
     ####################
+    # The output frames are still empty here, so "appending" wellDF is just
+    # a re-indexed copy (concat with an empty frame is deprecated in pandas 2)
     if (np.isnan(wellDF['BPD'].to_list()[0])):
-      nanDF=pd.concat([nanDF, wellDF], ignore_index=True)
+      nanDF=wellDF.reset_index(drop=True)
       nNan=1
     elif (wellDF['BPD'].to_list()[0]>thresh):
-      spikeDF=pd.concat([spikeDF, wellDF], ignore_index=True)
+      spikeDF=wellDF.reset_index(drop=True)
       nSpike=1
     ##################
     # Check if a NaN #
     # If valid append to output data frame #
     ########################################
     else:
-      keepDF=pd.concat([keepDF, wellDF], ignore_index=True)
+      keepDF=wellDF.reset_index(drop=True)
       nKeep=1
   else:
     #############################
@@ -702,7 +704,7 @@ def filterBPDs(wellDF,thresh,keepModeled,verbose=0):
       ############################################
       # If all values are good append everything #
       ############################################
-      keepDF=pd.concat([keepDF, wellDF], ignore_index=True)
+      keepDF=wellDF.reset_index(drop=True)
     else:
       #########################################
       # Else split into different data frames #
@@ -747,7 +749,7 @@ def getDays(inDF,epoch):
   #    outDF - Dataframe with added Days column #
   ###############################################
   outDF=inDF.copy()
-  outDF['Days'] = (pd.to_datetime(outDF['Date']) - epoch).dt.days
+  outDF['Days'] = (pd.to_datetime(outDF['Date'],format='mixed') - epoch).dt.days
   return outDF
 
 def regularize(wellDF,endDay,interval=1,verbose=0):

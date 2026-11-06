@@ -32,6 +32,11 @@ PROPOSED_RATE_COLUMN = 'Proposed Future Rate (BPD)'
 DEFAULT_EARTHQUAKE_LOCATION_ERROR_KM = 1
 
 
+def epoch_ms(dates):
+    """Return Unix-epoch milliseconds for a datetime Series (replaces the removed Series.view('int64'))."""
+    return dates.dt.as_unit('ns').to_numpy().view('int64') // 10**6
+
+
 def eq_location_error_km(value, missing_default=0):
     """Return a numeric location error in km; use missing_default when the catalog value is absent."""
     if value is None or value == "":
@@ -238,10 +243,10 @@ def runGistCore(input, wellcsv, injectioncsv, forecast_end_date=None, proposed_r
     totalPPQuantilesDF = prepTotalPressureTimeSeriesQuantilesPlot(dPTimeSeriesR,dayVecR,nQuantiles=11,epoch=pd.to_datetime('1970-01-01'))
     totalPPSpaghettiDF = prepTotalPressureTimeSeriesSpaghettiPlot(dPTimeSeriesR,dayVecR,gistMC_instance.diffPPVec,epoch=pd.to_datetime('1970-01-01'))
     # add unix timestamp
-    totalPPQuantilesDF['timestamp'] = pd.to_datetime(totalPPQuantilesDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
+    totalPPQuantilesDF['timestamp'] = epoch_ms(pd.to_datetime(totalPPQuantilesDF['Date'], format='%m/%d/%Y'))
     totalPPQuantilesDF = totalPPQuantilesDF.sort_values('timestamp').reset_index(drop=True)
 
-    totalPPSpaghettiDF['timestamp'] = pd.to_datetime(totalPPSpaghettiDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
+    totalPPSpaghettiDF['timestamp'] = epoch_ms(pd.to_datetime(totalPPSpaghettiDF['Date'], format='%m/%d/%Y'))
     totalPPSpaghettiDF = totalPPSpaghettiDF.sort_values('timestamp').reset_index(drop=True)
 
     allPerWellPPQuantilesDF,allPerWellPPSpaghettiDF = getPerWellPressureTimeSeriesSpaghettiAndQuantiles(dPTimeSeriesR,dayVecR,gistMC_instance.diffPPVec,wellIDsR,nQuantiles=11,epoch=pd.to_datetime('01-01-1970'))
@@ -298,13 +303,13 @@ def runGistCore(input, wellcsv, injectioncsv, forecast_end_date=None, proposed_r
         allPerWellPPSpaghettiDF = pd.DataFrame(columns=['DeltaPressure', 'Days', 'Realization', 'WellID', 'Diffusivity', 'Date', 'subgraph'])
         allPerWellDisposalDF = pd.DataFrame(columns=['ID', 'Days', 'BPD', 'Date', 'subgraph'])
     
-    allPerWellPPQuantilesDF['timestamp'] = pd.to_datetime(allPerWellPPQuantilesDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
+    allPerWellPPQuantilesDF['timestamp'] = epoch_ms(pd.to_datetime(allPerWellPPQuantilesDF['Date'], format='%m/%d/%Y'))
     allPerWellPPQuantilesDF = allPerWellPPQuantilesDF.sort_values('timestamp').reset_index(drop=True)
 
-    allPerWellPPSpaghettiDF['timestamp'] = pd.to_datetime(allPerWellPPSpaghettiDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
+    allPerWellPPSpaghettiDF['timestamp'] = epoch_ms(pd.to_datetime(allPerWellPPSpaghettiDF['Date'], format='%m/%d/%Y'))
     allPerWellPPSpaghettiDF = allPerWellPPSpaghettiDF.sort_values('timestamp').reset_index(drop=True)
 
-    allPerWellDisposalDF['timestamp'] = pd.to_datetime(allPerWellDisposalDF['Date'], format='%m/%d/%Y').view('int64') // 10**6
+    allPerWellDisposalDF['timestamp'] = epoch_ms(pd.to_datetime(allPerWellDisposalDF['Date'], format='%m/%d/%Y'))
     allPerWellDisposalDF = allPerWellDisposalDF.sort_values('timestamp').reset_index(drop=True)
      
 

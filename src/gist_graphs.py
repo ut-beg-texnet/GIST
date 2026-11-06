@@ -5,6 +5,7 @@ import io
 import json
 import math
 import pathlib
+import warnings
 from datetime import datetime
 from typing import Optional
 
@@ -13,8 +14,6 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.colors as mcolors
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -41,11 +40,282 @@ _RT_CURVE_STYLES = {
     "Minimum": {"color": "#FF2B2B", "dash": "solid"},
     "Maximum": {"color": "#FFA22B", "dash": "solid"},
 }
-_TIME_SERIES_DIVERGING_CMAP = mcolors.LinearSegmentedColormap.from_list(
-    "texnet_time_series_ramp",
-    ["#5BB8DC", "#000000", "#E52327"],
-)
-_PRESSURE_RANGES_CMAP = plt.get_cmap("viridis")
+_PRESSURE_RANGES_CMAP = matplotlib.colormaps["viridis"]
+
+# Total (all-well) time series HTML limits; min-max downsampling keeps each line's envelope.
+_TOTAL_QUANTILES_MAX_POINTS_PER_GROUP = 400
+_TOTAL_SPAGHETTI_MAX_REALIZATIONS = 100
+_TOTAL_SPAGHETTI_MAX_POINTS_PER_GROUP = 200
+
+
+# Shared zoom controls injected into every GIST HTML graph (portal iframe is sandboxed: no CDN).
+# Drag = box zoom, Shift+drag = pan, double-click = reset, +/-/Reset buttons.
+# There is deliberately no wheel handler so scrolling the results page never zooms a graph.
+_ZOOM_CSS = """
+  .gz-toolbar { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+  .gz-hint { color: #777; font-size: 11px; margin-right: 4px; }
+  .gz-btn { font: inherit; font-size: 12px; min-width: 26px; height: 24px; padding: 0 8px; color: #222;
+            border: 1px solid #bbb; border-radius: 4px; background: #f7f7f7; cursor: pointer; }
+  .gz-btn:hover { background: #ececec; }
+  .gz-btn:disabled { color: #aaa; cursor: default; background: #fafafa; }
+"""
+
+_ZOOM_JS = """
+var GistZoom = (function () {
+  var NS = 'http://www.w3.org/2000/svg';
+  var MIN_FRACTION = 0.001;
+  var DRAG_THRESHOLD = 5;
+
+  function copy(d) { return { xmin: d.xmin, xmax: d.xmax, ymin: d.ymin, ymax: d.ymax }; }
+
+  function svgPoint(svg, ev) {
+    var ctm = svg.getScreenCTM();
+    if (!ctm || !ctm.inverse) return null;
+    var pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    return pt.matrixTransform(ctm.inverse());
+  }
+
+  function clampAxis(lo, hi, flo, fhi) {
+    var fspan = fhi - flo;
+    var minSpan = fspan * MIN_FRACTION;
+    if (hi - lo < minSpan) {
+      var c = (lo + hi) / 2;
+      lo = c - minSpan / 2; hi = c + minSpan / 2;
+    }
+    if (hi - lo >= fspan) return [flo, fhi];
+    if (lo < flo) { hi += flo - lo; lo = flo; }
+    if (hi > fhi) { lo -= hi - fhi; hi = fhi; }
+    return [lo, hi];
+  }
+
+  function attach(opts) {
+    var svg = opts.svg, plot = opts.plot, axes = opts.axes || 'xy';
+    var full = copy(opts.full), view = copy(opts.full);
+    var listeners = [];
+
+    function isZoomed() {
+      return view.xmin !== full.xmin || view.xmax !== full.xmax || view.ymin !== full.ymin || view.ymax !== full.ymax;
+    }
+    function emit() {
+      listeners.forEach(function (fn) { fn(); });
+      opts.onChange(copy(view));
+    }
+    function setView(v) {
+      var xs = clampAxis(v.xmin, v.xmax, full.xmin, full.xmax);
+      view.xmin = xs[0]; view.xmax = xs[1];
+      if (axes === 'xy') {
+        var ys = clampAxis(v.ymin, v.ymax, full.ymin, full.ymax);
+        view.ymin = ys[0]; view.ymax = ys[1];
+      } else {
+        view.ymin = full.ymin; view.ymax = full.ymax;
+      }
+      emit();
+    }
+    function toData(p) {
+      return {
+        x: view.xmin + (p.x - plot.x0) / (plot.x1 - plot.x0) * (view.xmax - view.xmin),
+        y: view.ymax - (p.y - plot.y0) / (plot.y1 - plot.y0) * (view.ymax - view.ymin)
+      };
+    }
+    var EDGE = 3; /* tolerance so a drag started right on the plot frame still counts */
+    function inPlot(p) {
+      return p && p.x >= plot.x0 - EDGE && p.x <= plot.x1 + EDGE && p.y >= plot.y0 - EDGE && p.y <= plot.y1 + EDGE;
+    }
+    function clampPt(p) {
+      return { x: Math.max(plot.x0, Math.min(plot.x1, p.x)), y: Math.max(plot.y0, Math.min(plot.y1, p.y)) };
+    }
+
+    var start = null, mode = null, startView = null, box = null;
+
+    function removeBox() {
+      if (box && box.parentNode) box.parentNode.removeChild(box);
+      box = null;
+    }
+    function onMove(ev) {
+      var p = svgPoint(svg, ev);
+      if (!p || !start) return;
+      if (mode === 'pan') {
+        var dx = (p.x - start.x) / (plot.x1 - plot.x0) * (startView.xmax - startView.xmin);
+        var dy = (p.y - start.y) / (plot.y1 - plot.y0) * (startView.ymax - startView.ymin);
+        setView({ xmin: startView.xmin - dx, xmax: startView.xmax - dx, ymin: startView.ymin + dy, ymax: startView.ymax + dy });
+        return;
+      }
+      var q = clampPt(p);
+      if (!box) {
+        box = document.createElementNS(NS, 'rect');
+        box.setAttribute('fill', 'rgba(23, 71, 158, 0.12)');
+        box.setAttribute('stroke', '#17479E');
+        box.setAttribute('stroke-dasharray', '4 3');
+        box.setAttribute('pointer-events', 'none');
+        svg.appendChild(box);
+      }
+      var bx = Math.min(start.x, q.x), bw = Math.abs(q.x - start.x);
+      var by = axes === 'xy' ? Math.min(start.y, q.y) : plot.y0;
+      var bh = axes === 'xy' ? Math.abs(q.y - start.y) : plot.y1 - plot.y0;
+      box.setAttribute('x', bx); box.setAttribute('y', by);
+      box.setAttribute('width', bw); box.setAttribute('height', bh);
+    }
+    function onUp(ev) {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      var wasBox = mode === 'box';
+      removeBox();
+      var p = svgPoint(svg, ev);
+      var s = start;
+      start = null; mode = null;
+      if (!wasBox || !p || !s) return;
+      var q = clampPt(p);
+      var bigX = Math.abs(q.x - s.x) >= DRAG_THRESHOLD;
+      var bigY = axes === 'xy' && Math.abs(q.y - s.y) >= DRAG_THRESHOLD;
+      if (!bigX && !bigY) return;
+      var a = toData(s), b = toData(q);
+      var next = copy(view);
+      if (bigX) { next.xmin = Math.min(a.x, b.x); next.xmax = Math.max(a.x, b.x); }
+      if (bigY) { next.ymin = Math.min(a.y, b.y); next.ymax = Math.max(a.y, b.y); }
+      setView(next);
+    }
+
+    svg.addEventListener('mousedown', function (ev) {
+      if (ev.button !== 0) return;
+      var p = svgPoint(svg, ev);
+      if (!inPlot(p)) return;
+      ev.preventDefault();
+      start = clampPt(p);
+      mode = ev.shiftKey ? 'pan' : 'box';
+      startView = copy(view);
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+    svg.addEventListener('dblclick', function (ev) {
+      if (inPlot(svgPoint(svg, ev))) ctrl.reset();
+    });
+
+    var ctrl = {
+      reset: function () { view = copy(full); emit(); },
+      setFull: function (d) { full = copy(d); view = copy(d); emit(); },
+      zoomBy: function (factor) {
+        var cx = (view.xmin + view.xmax) / 2, hx = (view.xmax - view.xmin) * factor / 2;
+        var cy = (view.ymin + view.ymax) / 2, hy = (view.ymax - view.ymin) * factor / 2;
+        setView({ xmin: cx - hx, xmax: cx + hx, ymin: cy - hy, ymax: cy + hy });
+      },
+      view: function () { return copy(view); },
+      isZoomed: isZoomed,
+      onState: function (fn) { listeners.push(fn); }
+    };
+    return ctrl;
+  }
+
+  function addButtons(host, ctrl) {
+    var wrap = document.createElement('span');
+    wrap.className = 'gz-toolbar';
+    var hint = document.createElement('span');
+    hint.className = 'gz-hint';
+    hint.textContent = 'Drag to zoom \\u00b7 Shift+drag to pan';
+    wrap.appendChild(hint);
+    function button(label, title, fn) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'gz-btn'; b.textContent = label; b.title = title;
+      b.setAttribute('aria-label', title);
+      b.addEventListener('click', fn);
+      wrap.appendChild(b);
+      return b;
+    }
+    button('+', 'Zoom in', function () { ctrl.zoomBy(1 / 1.5); });
+    var out = button('\\u2212', 'Zoom out', function () { ctrl.zoomBy(1.5); });
+    var reset = button('Reset', 'Reset zoom (or double-click the graph)', function () { ctrl.reset(); });
+    function sync() { out.disabled = !ctrl.isZoomed(); reset.disabled = !ctrl.isZoomed(); }
+    ctrl.onState(sync);
+    sync();
+    host.appendChild(wrap);
+  }
+
+  function niceStep(span, count) {
+    var raw = span / Math.max(1, count);
+    var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var n = raw / mag;
+    var s = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+    return s * mag;
+  }
+  function ticks(min, max, count) {
+    if (!(max > min) || !isFinite(min) || !isFinite(max)) return { values: [min], step: 1 };
+    var step = niceStep(max - min, count);
+    var values = [];
+    var first = Math.ceil(min / step - 1e-9);
+    for (var i = 0; i < 200; i++) {
+      var v = (first + i) * step;
+      if (v > max + step * 1e-9) break;
+      values.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+    }
+    return { values: values, step: step };
+  }
+  function fmtTick(v, step) {
+    var d = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+    var scaled = step * Math.pow(10, d);
+    if (Math.abs(scaled - Math.round(scaled)) > 1e-6) d += 1;
+    return v.toFixed(Math.min(d, 6));
+  }
+
+  return { attach: attach, addButtons: addButtons, ticks: ticks, fmtTick: fmtTick };
+})();
+"""
+
+# Pressure Ranges zooms the PSI (x) axis only: rows are wells and already scroll vertically.
+# The server-rendered markup is the unzoomed view; this script repositions it on zoom.
+_PRESSURE_RANGES_ZOOM_SCRIPT = """
+(function () {
+  var cfg = JSON.parse(document.getElementById('pr-zoom-config').textContent);
+  var NS = 'http://www.w3.org/2000/svg';
+  var plotSvg = document.getElementById('prPlot');
+  var gridG = document.getElementById('prGrid');
+  var tickG = document.getElementById('prTicks');
+  var W = cfg.plotWidth;
+  var circles = Array.prototype.map.call(plotSvg.querySelectorAll('circle'), function (el) {
+    return { el: el, psi: parseFloat(el.getAttribute('cx')) / W * cfg.xMax };
+  });
+  function makeEl(name, attrs) {
+    var el = document.createElementNS(NS, name);
+    Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+  function rebuildTicks(values, step, sx) {
+    clear(gridG); clear(tickG);
+    values.forEach(function (v) {
+      var label = step === null ? String(v) : GistZoom.fmtTick(v, step);
+      var tx = sx(v).toFixed(1);
+      gridG.appendChild(makeEl('line', {
+        'class': 'gridline', 'data-tick': label, x1: tx, y1: 0, x2: tx, y2: cfg.gridY2,
+        stroke: '#e5e5e5', 'stroke-width': 1
+      }));
+      var t = makeEl('text', { 'class': 'x-tick', 'data-tick': label, x: tx, y: 16, 'text-anchor': 'middle' });
+      t.textContent = label;
+      tickG.appendChild(t);
+    });
+  }
+  function draw(v) {
+    var span = v.xmax - v.xmin;
+    function sx(p) { return (p - v.xmin) / span * W; }
+    var zoomed = v.xmin > 0 || v.xmax < cfg.xMax;
+    plotSvg.classList.toggle('pr-zoomed', zoomed);
+    circles.forEach(function (c) { c.el.setAttribute('cx', sx(c.psi).toFixed(2)); });
+    if (zoomed) {
+      var t = GistZoom.ticks(v.xmin, v.xmax, 9);
+      rebuildTicks(t.values, t.step, sx);
+    } else {
+      rebuildTicks(cfg.ticks, null, sx);
+    }
+  }
+  var zoom = GistZoom.attach({
+    svg: plotSvg,
+    plot: { x0: 0, y0: 0, x1: W, y1: cfg.svgHeight },
+    full: { xmin: 0, xmax: cfg.xMax, ymin: 0, ymax: 1 },
+    axes: 'x',
+    onChange: draw
+  });
+  GistZoom.addButtons(document.getElementById('prZoomBar'), zoom);
+})();
+"""
 
 
 # Interactive R-t plot: marker area scales with MMBBL (Matplotlib-equivalent clip); hover tooltips.
@@ -58,23 +328,29 @@ _RT_PLOT_HTML_TEMPLATE = """<!DOCTYPE html>
 <style>
   html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #fff; }
   #wrap { box-sizing: border-box; height: 100%; padding: 8px 10px 10px; display: flex; flex-direction: column; }
-  #legend { display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: center; align-items: center; font-size: 11px; margin-bottom: 6px; }
+  #head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  #legend { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: center; align-items: center; font-size: 11px; }
   #legend .item { display: inline-flex; align-items: center; gap: 4px; }
   #legend .sw { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(0,0,0,.75); flex-shrink: 0; }
   #legend .line-swatch { width: 22px; height: 0; flex-shrink: 0; border-top-width: 2px; border-top-style: solid; display: inline-block; vertical-align: middle; }
+  #zoomBar { flex: 0 0 auto; }
   #svgHost { flex: 1; min-height: 200px; position: relative; }
-  svg { display: block; width: 100%; height: 100%; }
+  svg { display: block; width: 100%; height: 100%; user-select: none; }
   #tip {
     position: absolute; display: none; pointer-events: none; z-index: 10;
     background: rgba(30, 30, 35, 0.94); color: #f5f5f5; padding: 8px 10px; border-radius: 6px;
     font-size: 12px; line-height: 1.45; max-width: 280px; box-shadow: 0 2px 10px rgba(0,0,0,.2);
   }
   #tip .k { color: #aaa; }
+___ZOOM_CSS___
 </style>
 </head>
 <body>
 <div id="wrap">
-  <div id="legend"></div>
+  <div id="head">
+    <div id="legend"></div>
+    <div id="zoomBar"></div>
+  </div>
   <div id="svgHost">
     <svg id="chart" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
       <rect id="hitLayer" x="0" y="0" width="1000" height="560" fill="transparent" cursor="crosshair"/>
@@ -83,6 +359,9 @@ _RT_PLOT_HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
 </div>
 <script type="application/json" id="rt-payload">___PAYLOAD___</script>
+<script>
+___ZOOM_JS___
+</script>
 <script>
 (function () {
   const payload = JSON.parse(document.getElementById('rt-payload').textContent);
@@ -122,117 +401,89 @@ _RT_PLOT_HTML_TEMPLATE = """<!DOCTYPE html>
   xmin -= xpad; xmax += xpad;
   ymin = Math.max(0, ymin - ypad);
   ymax += ypad;
-
-  function xScale(x) { return x0 + (x - xmin) / (xmax - xmin) * plotW; }
-  function yScale(y) { return y1 - (y - ymin) / (ymax - ymin) * plotH; }
+  const full = { xmin: xmin, xmax: xmax, ymin: ymin, ymax: ymax };
 
   const svg = document.getElementById('chart');
+  const hitLayer = document.getElementById('hitLayer');
   const NS = 'http://www.w3.org/2000/svg';
-  const gridG = document.createElementNS(NS, 'g');
-  gridG.setAttribute('class', 'grid');
-  const nGridX = 10, nGridY = 8;
-  for (var gi = 0; gi <= nGridX; gi++) {
-    var gx = x0 + (gi / nGridX) * plotW;
-    var line = document.createElementNS(NS, 'line');
-    line.setAttribute('x1', gx); line.setAttribute('x2', gx);
-    line.setAttribute('y1', y0); line.setAttribute('y2', y1);
-    line.setAttribute('stroke', '#e8e8e8'); line.setAttribute('stroke-width', '1');
-    gridG.appendChild(line);
+  function makeEl(name, attrs) {
+    var el = document.createElementNS(NS, name);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
   }
-  for (var gj = 0; gj <= nGridY; gj++) {
-    var gy = y0 + (gj / nGridY) * plotH;
-    var line2 = document.createElementNS(NS, 'line');
-    line2.setAttribute('x1', x0); line2.setAttribute('x2', x1);
-    line2.setAttribute('y1', gy); line2.setAttribute('y2', gy);
-    line2.setAttribute('stroke', '#e8e8e8'); line2.setAttribute('stroke-width', '1');
-    gridG.appendChild(line2);
-  }
-  svg.insertBefore(gridG, document.getElementById('hitLayer'));
+  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
 
-  const axisG = document.createElementNS(NS, 'g');
-  const border = document.createElementNS(NS, 'rect');
-  border.setAttribute('x', x0); border.setAttribute('y', y0);
-  border.setAttribute('width', plotW); border.setAttribute('height', plotH);
-  border.setAttribute('fill', 'none'); border.setAttribute('stroke', '#333');
-  border.setAttribute('stroke-width', '1.2');
-  axisG.appendChild(border);
+  /* Static layers: clip region, axis frame and axis titles. Grid, ticks and data redraw on zoom. */
+  const defs = makeEl('defs');
+  const clip = makeEl('clipPath', { id: 'rtPlotClip' });
+  clip.appendChild(makeEl('rect', { x: x0, y: y0, width: plotW, height: plotH }));
+  defs.appendChild(clip);
+  svg.insertBefore(defs, hitLayer);
+  const gridG = makeEl('g', { class: 'grid' });
+  const dataG = makeEl('g', { 'clip-path': 'url(#rtPlotClip)' });
+  const axisG = makeEl('g');
+  const tickG = makeEl('g');
+  [gridG, dataG, axisG, tickG].forEach(function (g) { svg.insertBefore(g, hitLayer); });
 
-  function fmtAxisTick(val) {
-    if (!isFinite(val)) return '';
-    if (Math.abs(val - Math.round(val)) < 1e-5) return String(Math.round(val));
-    var r = Math.round(val * 10) / 10;
-    return String(r);
-  }
-  function makeTickText(val) {
-    var t = document.createElementNS(NS, 'text');
-    t.setAttribute('fill', '#333');
-    t.setAttribute('font-size', '11');
-    t.textContent = fmtAxisTick(val);
-    return t;
-  }
-  var nx = 6;
-  for (var ti = 0; ti <= nx; ti++) {
-    var xv = xmin + (ti / nx) * (xmax - xmin);
-    var tx = makeTickText(xv);
-    tx.setAttribute('x', xScale(xv));
-    tx.setAttribute('y', y1 + 18);
-    tx.setAttribute('text-anchor', 'middle');
-    axisG.appendChild(tx);
-  }
-  var ny = 6;
-  for (var tj = 0; tj <= ny; tj++) {
-    var yv = ymin + (tj / ny) * (ymax - ymin);
-    var ty = makeTickText(yv);
-    ty.setAttribute('x', x0 - 8);
-    ty.setAttribute('y', yScale(yv) + 4);
-    ty.setAttribute('text-anchor', 'end');
-    axisG.appendChild(ty);
-  }
-  var xl = document.createElementNS(NS, 'text');
-  xl.setAttribute('x', (x0 + x1) / 2); xl.setAttribute('y', H - 10);
-  xl.setAttribute('text-anchor', 'middle'); xl.setAttribute('fill', '#111');
-  xl.setAttribute('font-size', '13'); xl.setAttribute('font-weight', '600');
+  axisG.appendChild(makeEl('rect', { x: x0, y: y0, width: plotW, height: plotH, fill: 'none', stroke: '#333', 'stroke-width': '1.2' }));
+  var xl = makeEl('text', { x: (x0 + x1) / 2, y: H - 10, 'text-anchor': 'middle', fill: '#111', 'font-size': '13', 'font-weight': '600' });
   xl.textContent = xLabel;
   axisG.appendChild(xl);
-  var yl = document.createElementNS(NS, 'text');
-  yl.setAttribute('transform', 'rotate(-90 ' + (x0 - 46) + ' ' + ((y0 + y1) / 2) + ')');
-  yl.setAttribute('x', x0 - 46); yl.setAttribute('y', (y0 + y1) / 2);
-  yl.setAttribute('text-anchor', 'middle'); yl.setAttribute('fill', '#111');
-  yl.setAttribute('font-size', '13'); yl.setAttribute('font-weight', '600');
+  var yl = makeEl('text', {
+    transform: 'rotate(-90 ' + (x0 - 46) + ' ' + ((y0 + y1) / 2) + ')',
+    x: x0 - 46, y: (y0 + y1) / 2, 'text-anchor': 'middle', fill: '#111', 'font-size': '13', 'font-weight': '600'
+  });
   yl.textContent = yLabel;
   axisG.appendChild(yl);
-  svg.insertBefore(axisG, document.getElementById('hitLayer'));
 
-  /* Circles first, then diffusivity curves, so lines stay in the foreground. */
   const defaultR = (typeof payload.pointRadius === 'number' && isFinite(payload.pointRadius)) ? payload.pointRadius : 5;
   const plotPts = [];
-  pts.forEach(function (p) {
-    var cx = xScale(p.x), cy = yScale(p.y);
-    var pr = (typeof p.r === 'number' && isFinite(p.r) && p.r > 0) ? p.r : defaultR;
-    plotPts.push({ cx: cx, cy: cy, r: pr, p: p });
-    var c = document.createElementNS(NS, 'circle');
-    c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', String(pr));
-    c.setAttribute('fill', p.color || '#333');
-    c.setAttribute('stroke', p.stroke || '#000'); c.setAttribute('stroke-width', '1');
-    c.setAttribute('opacity', '0.88');
-    c.setAttribute('pointer-events', 'none');
-    svg.insertBefore(c, document.getElementById('hitLayer'));
-  });
 
-  curves.forEach(function (curve) {
-    var d = '';
-    (curve.points || []).forEach(function (pt, i) {
-      var sx = xScale(pt[0]), sy = yScale(pt[1]);
-      d += (i ? ' L ' : 'M ') + sx.toFixed(2) + ' ' + sy.toFixed(2) + ' ';
+  function draw(v) {
+    clear(gridG); clear(dataG); clear(tickG);
+    plotPts.length = 0;
+    function xScale(x) { return x0 + (x - v.xmin) / (v.xmax - v.xmin) * plotW; }
+    function yScale(y) { return y1 - (y - v.ymin) / (v.ymax - v.ymin) * plotH; }
+
+    var xt = GistZoom.ticks(v.xmin, v.xmax, 7);
+    xt.values.forEach(function (xv) {
+      var gx = xScale(xv);
+      gridG.appendChild(makeEl('line', { x1: gx, x2: gx, y1: y0, y2: y1, stroke: '#e8e8e8', 'stroke-width': '1' }));
+      var t = makeEl('text', { x: gx, y: y1 + 18, 'text-anchor': 'middle', fill: '#333', 'font-size': '11' });
+      t.textContent = GistZoom.fmtTick(xv, xt.step);
+      tickG.appendChild(t);
     });
-    var path = document.createElementNS(NS, 'path');
-    path.setAttribute('d', d.trim());
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', curve.color || '#222');
-    path.setAttribute('stroke-width', '2');
-    if (curve.dash === 'dash') path.setAttribute('stroke-dasharray', '7 5');
-    svg.insertBefore(path, document.getElementById('hitLayer'));
-  });
+    var yt = GistZoom.ticks(v.ymin, v.ymax, 7);
+    yt.values.forEach(function (yv) {
+      var gy = yScale(yv);
+      gridG.appendChild(makeEl('line', { x1: x0, x2: x1, y1: gy, y2: gy, stroke: '#e8e8e8', 'stroke-width': '1' }));
+      var t = makeEl('text', { x: x0 - 8, y: gy + 4, 'text-anchor': 'end', fill: '#333', 'font-size': '11' });
+      t.textContent = GistZoom.fmtTick(yv, yt.step);
+      tickG.appendChild(t);
+    });
+
+    /* Circles first, then diffusivity curves, so lines stay in the foreground. */
+    pts.forEach(function (p) {
+      var cx = xScale(p.x), cy = yScale(p.y);
+      var pr = (typeof p.r === 'number' && isFinite(p.r) && p.r > 0) ? p.r : defaultR;
+      if (cx < x0 - pr || cx > x1 + pr || cy < y0 - pr || cy > y1 + pr) return;
+      plotPts.push({ cx: cx, cy: cy, r: pr, p: p });
+      dataG.appendChild(makeEl('circle', {
+        cx: cx, cy: cy, r: String(pr), fill: p.color || '#333', stroke: p.stroke || '#000',
+        'stroke-width': '1', opacity: '0.88', 'pointer-events': 'none'
+      }));
+    });
+
+    curves.forEach(function (curve) {
+      var d = '';
+      (curve.points || []).forEach(function (pt, i) {
+        d += (i ? ' L ' : 'M ') + xScale(pt[0]).toFixed(2) + ' ' + yScale(pt[1]).toFixed(2) + ' ';
+      });
+      var path = makeEl('path', { d: d.trim(), fill: 'none', stroke: curve.color || '#222', 'stroke-width': '2' });
+      if (curve.dash === 'dash') path.setAttribute('stroke-dasharray', '7 5');
+      dataG.appendChild(path);
+    });
+  }
 
   const leg = document.getElementById('legend');
   (payload.legendItems || []).forEach(function (item) {
@@ -256,6 +507,10 @@ _RT_PLOT_HTML_TEMPLATE = """<!DOCTYPE html>
 
   function showTip(clientX, clientY, p) {
     var uicShow = (p.uic !== undefined && p.uic !== null && String(p.uic).length) ? escapeHtml(String(p.uic)) : 'N/A';
+    var nameLine = '';
+    if (p.wellName !== undefined && p.wellName !== null && String(p.wellName).length) {
+      nameLine = '<div><span class="k">Well Name</span> ' + escapeHtml(String(p.wellName)) + '</div>';
+    }
     var xv = (typeof p.x === 'number' && isFinite(p.x)) ? p.x.toFixed(3) : String(p.x);
     var yv = (typeof p.y === 'number' && isFinite(p.y)) ? p.y.toFixed(2) : String(p.y);
     var mmbblLine = '';
@@ -264,6 +519,7 @@ _RT_PLOT_HTML_TEMPLATE = """<!DOCTYPE html>
     }
     tip.innerHTML =
       '<div><span class="k">UIC Number</span> ' + uicShow + '</div>' +
+      nameLine +
       mmbblLine +
       '<div><span class="k">' + escapeHtml(xLabel) + '</span> ' + xv + '</div>' +
       '<div><span class="k">' + escapeHtml(yLabel) + '</span> ' + yv + '</div>';
@@ -271,12 +527,13 @@ _RT_PLOT_HTML_TEMPLATE = """<!DOCTYPE html>
     var rect = host.getBoundingClientRect();
     var tx = clientX - rect.left + 12, ty = clientY - rect.top + 12;
     tip.style.left = Math.min(tx, rect.width - 200) + 'px';
-    tip.style.top = Math.min(ty, rect.height - 80) + 'px';
+    tip.style.top = Math.min(ty, rect.height - 100) + 'px';
   }
 
   function hideTip() { tip.style.display = 'none'; }
 
   svg.addEventListener('mousemove', function (ev) {
+    if (ev.buttons & 1) { hideTip(); return; }
     var pt = svg.createSVGPoint();
     pt.x = ev.clientX; pt.y = ev.clientY;
     var ctm = svg.getScreenCTM();
@@ -294,13 +551,34 @@ _RT_PLOT_HTML_TEMPLATE = """<!DOCTYPE html>
     else hideTip();
   });
   svg.addEventListener('mouseleave', hideTip);
+  svg.addEventListener('mousedown', hideTip);
 
-  document.getElementById('hitLayer').setAttribute('pointer-events', 'none');
+  hitLayer.setAttribute('pointer-events', 'none');
+
+  const zoom = GistZoom.attach({
+    svg: svg,
+    plot: { x0: x0, y0: y0, x1: x1, y1: y1 },
+    full: full,
+    axes: 'xy',
+    onChange: draw
+  });
+  GistZoom.addButtons(document.getElementById('zoomBar'), zoom);
+  draw(zoom.view());
 })();
 </script>
 </body>
 </html>
 """
+
+
+def _with_zoom(template):
+    """Fill the shared zoom CSS/JS placeholders of an HTML graph template."""
+    return template.replace("___ZOOM_CSS___", _ZOOM_CSS).replace("___ZOOM_JS___", _ZOOM_JS)
+
+
+def _json_for_script(payload):
+    """Serialize a payload for an inline <script> block (a '</' in data must not close the tag)."""
+    return json.dumps(payload, separators=(",", ":"), allow_nan=False).replace("</", "<\\/")
 
 
 def _graphs_dir(helper):
@@ -317,7 +595,7 @@ def _coerce_time_series_df(df, required_columns):
     if "timestamp" in plot_df.columns:
         plot_df["timestamp"] = pd.to_numeric(plot_df["timestamp"], errors="coerce")
     else:
-        plot_df["timestamp"] = pd.to_datetime(plot_df["Date"], errors="coerce").view("int64") // 10**6
+        plot_df["timestamp"] = pd.to_datetime(plot_df["Date"], errors="coerce").dt.as_unit("ns").to_numpy().view("int64") // 10**6
     plot_df["Date"] = pd.to_datetime(plot_df["Date"], errors="coerce")
     plot_df["DeltaPressure"] = pd.to_numeric(plot_df["DeltaPressure"], errors="coerce")
     plot_df = plot_df.dropna(subset=["Date", "DeltaPressure", "timestamp"])
@@ -325,43 +603,6 @@ def _coerce_time_series_df(df, required_columns):
         return pd.DataFrame()
     plot_df["timestamp"] = plot_df["timestamp"].astype("int64")
     return plot_df.sort_values("timestamp").reset_index(drop=True)
-
-
-def _write_matplotlib_png(fig, artifact_path, tight=True):
-    save_kwargs = {"format": "png", "dpi": 145, "facecolor": "white"}
-    if tight:
-        save_kwargs["bbox_inches"] = "tight"
-    fig.savefig(artifact_path, **save_kwargs)
-    plt.close(fig)
-
-
-def _configure_time_series_datetime_axis(ax, plot_df):
-    locator = mdates.AutoDateLocator()
-    ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d\n%H:%M"))
-    ax.set_xlabel("Date / Time")
-    ax.tick_params(axis="x", labelbottom=True, pad=8, labelsize=9)
-    for label in ax.get_xticklabels():
-        label.set_rotation(0)
-        label.set_horizontalalignment("center")
-
-
-def _configure_time_series_y_axis(ax, plot_df):
-    y_max = plot_df["DeltaPressure"].max()
-    if pd.isna(y_max):
-        return
-
-    top_pad = max(y_max * 0.04, 1.0) if y_max > 0 else 1.0
-    ax.set_ylim(bottom=0.0, top=y_max + top_pad)
-    ax.margins(x=0.02, y=0.0)
-
-
-def _create_time_series_figure():
-    fig = plt.figure(figsize=(11.4, 5.8))
-    grid = fig.add_gridspec(nrows=1, ncols=2, width_ratios=[24, 1.5], wspace=0.12)
-    ax = fig.add_subplot(grid[0])
-    cax = fig.add_subplot(grid[1])
-    return fig, ax, cax
 
 
 def _date_to_ms(value):
@@ -381,10 +622,6 @@ def _safe_float(value):
     return None
 
 
-def _hex_color(color_value):
-    return mcolors.to_hex(color_value, keep_alpha=False)
-
-
 def _build_time_series_norm(values, default_min=0.0, default_max=1.0):
     finite_values = []
     for value in values:
@@ -398,12 +635,6 @@ def _build_time_series_norm(values, default_min=0.0, default_max=1.0):
     if math.isclose(min_value, max_value):
         max_value = min_value + 1.0
     return mcolors.Normalize(vmin=min_value, vmax=max_value)
-
-
-def _time_series_color_for_value(value, color_norm):
-    if value is None or color_norm is None:
-        return "#5BB8DC"
-    return _hex_color(_TIME_SERIES_DIVERGING_CMAP(color_norm(float(value))))
 
 
 def _rounded_float(value, digits):
@@ -667,7 +898,7 @@ def _build_disposal_payload_uncached(disposal_df):
     if "timestamp" in plot_df.columns:
         plot_df["timestamp"] = pd.to_numeric(plot_df["timestamp"], errors="coerce")
     else:
-        plot_df["timestamp"] = pd.to_datetime(plot_df["Date"], errors="coerce").view("int64") // 10**6
+        plot_df["timestamp"] = pd.to_datetime(plot_df["Date"], errors="coerce").dt.as_unit("ns").to_numpy().view("int64") // 10**6
     plot_df["Date"] = pd.to_datetime(plot_df["Date"], errors="coerce")
     plot_df["BPD"] = pd.to_numeric(plot_df["BPD"], errors="coerce")
     plot_df = plot_df.dropna(subset=["Date", "BPD", "subgraph", "timestamp"]).sort_values("timestamp")
@@ -709,6 +940,14 @@ def _uic_number_for_rt_tooltip(row):
     return ""
 
 
+def _well_name_for_rt_tooltip(row):
+    """Well name for the R-t plot tooltip; empty string when the well has no name on file."""
+    value = row["WellName"]
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
 def _rt_marker_area_from_mmbbl(mmbbl):
     """Matplotlib scatter `s` equivalent: marker area = clip(MMBBL * 18, 30, 240)."""
     try:
@@ -740,16 +979,17 @@ def filter_rt_plot_wells_future_start_date(
 
     ref = reference_date or datetime.now()
     ref_day = pd.Timestamp(ref.date())
-    parsed = pd.to_datetime(well_df["StartDate"], errors="coerce")
+    parsed = pd.to_datetime(well_df["StartDate"], format="mixed", errors="coerce")
     future_mask = parsed.notna() & (parsed.dt.normalize() > ref_day)
 
     before = len(well_df)
     filtered = well_df[~future_mask].copy()
     if len(filtered) < before:
-        print(
+        warnings.warn(
             f"R-t plot excluded {before - len(filtered)}/{before} wells "
             f"with StartDate after {ref_day.strftime('%Y-%m-%d')}.",
-            flush=True,
+            UserWarning,
+            stacklevel=2,
         )
     return filtered
 
@@ -782,10 +1022,11 @@ def save_rt_plot_graph_artifact(helper, small_pp_df, well_df, artifact_key, disp
         points.append(
             {
                 "uic": _uic_number_for_rt_tooltip(row),
-                "x": float(row["YearsInjectingToEarthquake"]),
-                "y": float(row["Distances"]),
-                "mmbbl": mmb_f,
-                "r": _rt_svg_radius_from_mmbbl(mmb_f),
+                "wellName": _well_name_for_rt_tooltip(row),
+                "x": round(float(row["YearsInjectingToEarthquake"]), 4),
+                "y": round(float(row["Distances"]), 4),
+                "mmbbl": round(mmb_f, 4),
+                "r": round(_rt_svg_radius_from_mmbbl(mmb_f), 2),
                 "color": _RT_SELECTION_STYLES.get(sel, fallback_style)["fill"],
                 "stroke": _RT_SELECTION_STYLES.get(sel, fallback_style)["stroke"],
             }
@@ -795,7 +1036,7 @@ def save_rt_plot_graph_artifact(helper, small_pp_df, well_df, artifact_key, disp
     for diffusivity, curve_df in small_pp_df.groupby("Diffusivity", sort=False):
         curve_df = curve_df.sort_values("Years Before Earthquake")
         curve_style = _RT_CURVE_STYLES.get(diffusivity, {"color": "#444444", "dash": "solid"})
-        xy_pairs = curve_df[["Years Before Earthquake", "Distance"]].to_numpy(dtype=float).tolist()
+        xy_pairs = np.round(curve_df[["Years Before Earthquake", "Distance"]].to_numpy(dtype=float), 4).tolist()
         curves.append(
             {
                 "label": f"{diffusivity} diffusivity",
@@ -842,14 +1083,16 @@ def save_rt_plot_graph_artifact(helper, small_pp_df, well_df, artifact_key, disp
         "curves": curves,
         "legendItems": legend_items,
     }
-    payload_json = json.dumps(payload, separators=(",", ":"), allow_nan=False)
-    html_out = _RT_PLOT_HTML_TEMPLATE.replace("___PAYLOAD___", payload_json)
+    html_out = _with_zoom(_RT_PLOT_HTML_TEMPLATE).replace("___PAYLOAD___", _json_for_script(payload))
     artifact_path.write_text(html_out, encoding="utf-8")
 
     helper.saveGraphArtifact(
         key=artifact_key,
         title=title,
-        caption="Interactive R-t plot: marker size reflects MMBBL; hover for UIC number, MMBBL, and axis values.",
+        caption=(
+            "Interactive R-t plot: marker size reflects MMBBL; hover for UIC number, well name, MMBBL, "
+            "and axis values. Drag to zoom, Shift+drag to pan, double-click to reset."
+        ),
         renderer="html",
         path=str(artifact_path),
         contentType="text/html",
@@ -954,9 +1197,18 @@ def save_pressure_ranges_graph_artifact(
     for _, row in plot_df.iterrows():
         x = plot_x(row["Pressures"])
         y = float(row["Y"]) * row_height + row_height / 2
+        # cx carries 2 decimals: the zoom script recovers each point's PSI from it.
         points.append(
-            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.3" fill="{color_for_order(row["Order"])}" opacity="0.82" />'
+            f'<circle cx="{x:.2f}" cy="{y:.1f}" r="4.3" fill="{color_for_order(row["Order"])}" opacity="0.82" />'
         )
+
+    zoom_config = {
+        "plotWidth": plot_width,
+        "svgHeight": svg_height,
+        "gridY2": svg_height - 16,
+        "xMax": x_max,
+        "ticks": ticks,
+    }
 
     legend_stops = []
     for pct in range(0, 101, 5):
@@ -1021,6 +1273,19 @@ def save_pressure_ranges_graph_artifact(
     height: 100%;
     overflow: visible;
   }}
+  .chart-grid svg.pr-zoomed {{
+    overflow: hidden;
+  }}
+  #prPlot {{
+    user-select: none;
+  }}
+  .pr-toolbar {{
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 6px;
+  }}
+{_ZOOM_CSS}
   text {{
     fill: #1f1f1f;
     font-size: 12px;
@@ -1055,13 +1320,14 @@ def save_pressure_ranges_graph_artifact(
 </style>
 </head>
 <body>
+  <div class="pr-toolbar" id="prZoomBar"></div>
   <div class="plot-scroll" aria-label="{html_module.escape(title)} plot body">
     <div class="chart-grid plot-grid">
       <svg viewBox="0 0 {label_width} {svg_height}" preserveAspectRatio="xMaxYMin meet" aria-hidden="true">
         {"".join(y_labels)}
       </svg>
-      <svg viewBox="0 0 {plot_width} {svg_height}" preserveAspectRatio="none" role="img" aria-label="{html_module.escape(title)}">
-        {"".join(grid_lines)}
+      <svg id="prPlot" viewBox="0 0 {plot_width} {svg_height}" preserveAspectRatio="none" role="img" aria-label="{html_module.escape(title)}">
+        <g id="prGrid">{"".join(grid_lines)}</g>
         <line x1="0" y1="0" x2="0" y2="{svg_height}" stroke="#888" stroke-width="1" />
         {"".join(points)}
       </svg>
@@ -1071,7 +1337,7 @@ def save_pressure_ranges_graph_artifact(
   <div class="chart-grid axis-row">
     <div></div>
     <svg viewBox="0 0 {plot_width} {axis_height}" preserveAspectRatio="none" aria-hidden="true">
-      {"".join(x_tick_labels)}
+      <g id="prTicks">{"".join(x_tick_labels)}</g>
       <text class="x-label" x="{plot_width}" y="42" text-anchor="end">Pressure Increase (PSI)</text>
     </svg>
     <div></div>
@@ -1081,6 +1347,13 @@ def save_pressure_ranges_graph_artifact(
     {"".join(legend_ticks)}
     <div class="legend-label">Order within Realization</div>
   </div>
+<script type="application/json" id="pr-zoom-config">{_json_for_script(zoom_config)}</script>
+<script>
+{_ZOOM_JS}
+</script>
+<script>
+{_PRESSURE_RANGES_ZOOM_SCRIPT}
+</script>
 </body>
 </html>
 """
@@ -1091,7 +1364,7 @@ def save_pressure_ranges_graph_artifact(
     helper.saveGraphArtifact(
         key=artifact_key,
         title=title,
-        caption="Static Pressure Ranges plot generated by GIST.",
+        caption="Pressure Ranges plot generated by GIST. Drag across the plot to zoom the pressure axis; double-click to reset.",
         renderer="html",
         path=str(artifact_path),
         contentType="text/html",
@@ -1107,46 +1380,20 @@ def save_time_series_quantiles_graph_artifact(
     display_order,
     title=_TIME_SERIES_QUANTILES_TITLE,
 ):
-    """Write total pressure quantiles as a static PNG graph artifact."""
-    plot_df = _coerce_time_series_df(quantiles_df, ["Date", "DeltaPressure", "Percentile"])
-    if plot_df.empty:
-        return
-
-    artifact_path = _graphs_dir(helper) / f"{artifact_key}.png"
-    fig, ax, cax = _create_time_series_figure()
-    percentiles = sorted(plot_df["Percentile"].dropna().unique())
-    percentile_norm = _build_time_series_norm(percentiles, default_min=0.0, default_max=100.0)
-    for idx, percentile in enumerate(percentiles):
-        series_df = plot_df[plot_df["Percentile"] == percentile].sort_values("Date")
-        percentile_value = _safe_float(percentile)
-        ax.plot(
-            series_df["Date"],
-            series_df["DeltaPressure"],
-            linewidth=1.7 if float(percentile) == 50.0 else 1.0,
-            color=_time_series_color_for_value(percentile_value, percentile_norm),
-            alpha=0.95,
-        )
-
-    _configure_time_series_datetime_axis(ax, plot_df)
-    _configure_time_series_y_axis(ax, plot_df)
-    ax.set_ylabel("Delta Pressure (PSI)")
-    ax.grid(True, color="#e5e5e5", linewidth=0.8)
-    sm = plt.cm.ScalarMappable(cmap=_TIME_SERIES_DIVERGING_CMAP, norm=percentile_norm)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, cax=cax, orientation="vertical")
-    cbar.set_label("Percentile")
-    fig.subplots_adjust(left=0.09, right=0.92, bottom=0.2, top=0.98)
-    _write_matplotlib_png(fig, artifact_path, tight=False)
-
-    helper.saveGraphArtifact(
-        key=artifact_key,
-        title=title,
-        caption="Static total pressure quantiles generated by GIST.",
-        renderer="image",
-        path=str(artifact_path),
-        contentType="image/png",
-        displayOrder=display_order,
-        preferredHeight=520,
+    """Write total pressure quantiles as an interactive (zoomable) HTML graph artifact."""
+    _save_total_time_series_graph_artifact(
+        helper,
+        quantiles_df,
+        artifact_key,
+        display_order,
+        title,
+        group_column="Percentile",
+        mode="quantiles",
+        color_column=None,
+        color_label="Percentile",
+        max_groups=None,
+        max_points_per_group=_TOTAL_QUANTILES_MAX_POINTS_PER_GROUP,
+        caption="Total pressure quantiles generated by GIST. Drag to zoom, Shift+drag to pan, double-click to reset.",
     )
 
 
@@ -1157,58 +1404,99 @@ def save_time_series_spaghetti_graph_artifact(
     display_order,
     title=_TIME_SERIES_SPAGHETTI_TITLE,
 ):
-    """Write total pressure spaghetti realizations as a static PNG graph artifact."""
-    plot_df = _coerce_time_series_df(spaghetti_df, ["Date", "DeltaPressure", "Realization"])
-    if plot_df.empty:
+    """Write total pressure spaghetti realizations as an interactive (zoomable) HTML graph artifact."""
+    _save_total_time_series_graph_artifact(
+        helper,
+        spaghetti_df,
+        artifact_key,
+        display_order,
+        title,
+        group_column="Realization",
+        mode="spaghetti",
+        color_column="Diffusivity",
+        color_label="Diffusivity",
+        max_groups=_TOTAL_SPAGHETTI_MAX_REALIZATIONS,
+        max_points_per_group=_TOTAL_SPAGHETTI_MAX_POINTS_PER_GROUP,
+        caption="Total pressure spaghetti plot generated by GIST. Drag to zoom, Shift+drag to pan, double-click to reset.",
+    )
+
+
+def _save_total_time_series_graph_artifact(
+    helper,
+    df,
+    artifact_key,
+    display_order,
+    title,
+    group_column,
+    mode,
+    color_column,
+    color_label,
+    max_groups,
+    max_points_per_group,
+    caption,
+):
+    """Render an all-well time series with the shared time series template (no selector, no disposal)."""
+    series = _build_time_series_payload(
+        df,
+        group_column=group_column,
+        color_column=color_column,
+        max_groups=max_groups,
+        max_points_per_group=max_points_per_group,
+    )
+    if not series:
         return
 
-    artifact_path = _graphs_dir(helper) / f"{artifact_key}.png"
-    fig, ax, cax = _create_time_series_figure()
+    color_values = [s["colorValue"] for s in series if s["colorValue"] is not None]
+    default_max = 100.0 if mode == "quantiles" else 1.0
+    color_norm = _build_time_series_norm(color_values, default_min=0.0, default_max=default_max)
 
-    if "Diffusivity" in plot_df.columns:
-        diffusivity_values = pd.to_numeric(plot_df["Diffusivity"], errors="coerce")
+    if mode == "quantiles":
+        # The middle percentile is not always exactly 50 (e.g. 49.0 with 11 quantiles), so
+        # emphasize the one closest to the median rather than requiring an exact match.
+        ranked = [s for s in series if s["colorValue"] is not None]
+        if ranked:
+            min(ranked, key=lambda s: abs(s["colorValue"] - 50.0))["emphasis"] = True
+        line_width, line_opacity = 1.0, 0.95
     else:
-        diffusivity_values = pd.Series(dtype="float64")
-    finite_diffusivity = diffusivity_values.dropna()
-    if finite_diffusivity.empty:
-        norm = _build_time_series_norm([], default_min=0.0, default_max=1.0)
-    else:
-        norm = _build_time_series_norm(finite_diffusivity.tolist(), default_min=finite_diffusivity.min(), default_max=finite_diffusivity.max())
+        line_width, line_opacity = 0.7, 0.38
 
-    for _, series_df in plot_df.groupby("Realization", sort=True):
-        series_df = series_df.sort_values("Date")
-        color_value = None
-        if "Diffusivity" in series_df.columns:
-            diff_value = pd.to_numeric(series_df["Diffusivity"], errors="coerce").dropna()
-            if not diff_value.empty:
-                color_value = float(diff_value.iloc[0])
-        color = _time_series_color_for_value(color_value, norm)
-        ax.plot(series_df["Date"], series_df["DeltaPressure"], linewidth=0.7, color=color, alpha=0.38)
+    payload = {
+        "mode": mode,
+        "colorDomain": [float(color_norm.vmin), float(color_norm.vmax)],
+        "colorLabel": color_label,
+        "showSelector": False,
+        "showDisposal": False,
+        "yStartAtZero": True,
+        "lineWidth": line_width,
+        "lineOpacity": line_opacity,
+        "wells": [{"key": "total", "label": title, "series": series, "disposal": []}],
+    }
+    _write_time_series_html_artifact(helper, payload, artifact_key, display_order, title, caption)
 
-    _configure_time_series_datetime_axis(ax, plot_df)
-    _configure_time_series_y_axis(ax, plot_df)
-    ax.set_ylabel("Delta Pressure (PSI)")
-    ax.grid(True, color="#e5e5e5", linewidth=0.8)
-    sm = plt.cm.ScalarMappable(cmap=_TIME_SERIES_DIVERGING_CMAP, norm=norm)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, cax=cax, orientation="vertical")
-    cbar.set_label("Diffusivity")
-    fig.subplots_adjust(left=0.09, right=0.92, bottom=0.2, top=0.98)
-    _write_matplotlib_png(fig, artifact_path, tight=False)
+
+def _write_time_series_html_artifact(helper, payload, artifact_key, display_order, title, caption):
+    artifact_html = (
+        _with_zoom(_TIME_SERIES_HTML_TEMPLATE)
+        .replace("___HTML_TITLE___", html_module.escape(title))
+        .replace("___PAYLOAD___", _json_for_script(payload))
+    )
+
+    artifact_path = _graphs_dir(helper) / f"{artifact_key}.html"
+    artifact_path.write_text(artifact_html, encoding="utf-8")
 
     helper.saveGraphArtifact(
         key=artifact_key,
         title=title,
-        caption="Static total pressure spaghetti plot generated by GIST.",
-        renderer="image",
+        caption=caption,
+        renderer="html",
         path=str(artifact_path),
-        contentType="image/png",
+        contentType="text/html",
         displayOrder=display_order,
-        preferredHeight=520,
+        preferredHeight=560,
     )
 
 
-_PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
+_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
@@ -1217,20 +1505,29 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
 <style>
   html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #fff; overflow: hidden; }
   #wrap { box-sizing: border-box; height: 100%; padding: 10px 12px 12px; display: flex; flex-direction: column; }
-  #toolbar { flex: 0 0 auto; display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+  #toolbar { flex: 0 0 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 14px; margin-bottom: 8px; font-size: 13px; }
+  #colorbar { display: none; align-items: center; gap: 6px; font-size: 12px; margin-right: auto; }
+  #colorbar .cb-bar { width: 160px; height: 12px; border: 1px solid #555; background: linear-gradient(to right, #5BB8DC, #000000, #E52327); }
+  #colorbar .cb-label { font-weight: 600; }
+  #wellPicker { display: inline-flex; align-items: center; gap: 8px; }
   #wellSelect { max-width: min(520px, 78vw); padding: 4px 8px; font: inherit; }
   #svgHost { flex: 1 1 auto; min-height: 240px; position: relative; }
-  svg { display: block; width: 100%; height: 100%; }
+  svg { display: block; width: 100%; height: 100%; user-select: none; }
   .axis-label { font-size: 13px; font-weight: 600; fill: #111; }
   .tick { fill: #333; font-size: 11px; }
   #empty { display: none; padding: 30px; text-align: center; color: #555; }
+___ZOOM_CSS___
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="toolbar">
-    <label for="wellSelect">Well</label>
-    <select id="wellSelect"></select>
+    <div id="colorbar"><span class="cb-label"></span><span class="cb-min"></span><span class="cb-bar"></span><span class="cb-max"></span></div>
+    <div id="wellPicker">
+      <label for="wellSelect">Well</label>
+      <select id="wellSelect"></select>
+    </div>
+    <div id="zoomBar"></div>
   </div>
   <div id="svgHost">
     <svg id="chart" viewBox="0 0 1000 520" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -1239,20 +1536,23 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
 </div>
 <script type="application/json" id="payload">___PAYLOAD___</script>
 <script>
+___ZOOM_JS___
+</script>
+<script>
 (function () {
   const payload = JSON.parse(document.getElementById('payload').textContent);
   const select = document.getElementById('wellSelect');
   const svg = document.getElementById('chart');
   const empty = document.getElementById('empty');
   const NS = 'http://www.w3.org/2000/svg';
+  const showSelector = payload.showSelector !== false;
+  const showDisposal = payload.showDisposal !== false;
   const W = 1000, H = 520;
-  const ml = 78, mr = 78, mt = 18, mb = 58;
+  const ml = 78, mr = showDisposal ? 78 : 24, mt = 18, mb = 58;
   const plotW = W - ml - mr, plotH = H - mt - mb;
   const x0 = ml, x1 = ml + plotW, y0 = mt, y1 = mt + plotH;
+  const DAY_MS = 86400000;
 
-  function esc(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
   function clearSvg() {
     while (svg.firstChild) svg.removeChild(svg.firstChild);
   }
@@ -1261,14 +1561,20 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
     Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
     return el;
   }
-  function fmtDate(ms) {
-    return new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short' });
+  function fmtDate(ms, spanMs) {
+    /* 6 tick intervals: once they are shorter than a month, month labels would repeat, so show days. */
+    const opts = spanMs / 6 < 32 * DAY_MS ?{ year: 'numeric', month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short' };
+    return new Date(ms).toLocaleDateString(undefined, opts);
   }
   function fmtNum(v) {
     if (!isFinite(v)) return '';
     if (Math.abs(v) >= 100) return Math.round(v).toString();
     if (Math.abs(v) >= 10) return v.toFixed(1);
     return v.toFixed(2);
+  }
+  function fmtLegendValue(v) {
+    if (!isFinite(v)) return '';
+    return String(Number(v.toPrecision(3)));
   }
   function hexToRgb(hex) {
     const normalized = String(hex || '').replace('#', '');
@@ -1307,17 +1613,14 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
     }
     return lerpColor('#000000', '#E52327', (t - 0.5) / 0.5);
   }
-  function render(wellKey) {
-    const well = (payload.wells || []).find(function (w) { return w.key === wellKey; });
-    clearSvg();
-    if (!well || !well.series || !well.series.length) {
-      empty.style.display = 'block';
-      svg.style.display = 'none';
-      return;
-    }
-    empty.style.display = 'none';
-    svg.style.display = 'block';
+  function roundedBpdAxisMax(maxValue) {
+    const increment = maxValue <= 50000 ? 5000 : 10000;
+    if (!isFinite(maxValue) || maxValue <= 0) return increment;
+    return Math.max(increment, Math.ceil(maxValue / increment) * increment);
+  }
 
+  /* Full (unzoomed) extent of a well's pressure series and disposal dates. */
+  function computeFull(well) {
     let xmin = Infinity, xmax = -Infinity, ymin = 0, ymax = -Infinity, bpdMax = 0;
     well.series.forEach(function (s) {
       (s.points || []).forEach(function (p) {
@@ -1332,27 +1635,38 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
       if (p[0] > xmax) xmax = p[0];
       if (p[1] > bpdMax) bpdMax = p[1];
     });
-    if (!isFinite(xmin) || !isFinite(xmax) || xmin === xmax) { xmin = Date.now() - 86400000; xmax = Date.now(); }
+    if (!isFinite(xmin) || !isFinite(xmax) || xmin === xmax) { xmin = Date.now() - DAY_MS; xmax = Date.now(); }
     if (!isFinite(ymax) || ymin === ymax) { ymin = 0; ymax = 1; }
     if (!isFinite(bpdMax) || bpdMax <= 0) { bpdMax = 0; }
     const ypad = (ymax - ymin) * 0.06 || 1;
-    ymin = Math.min(0, ymin - ypad);
+    ymin = payload.yStartAtZero ? Math.min(0, ymin) : Math.min(0, ymin - ypad);
     ymax = ymax + ypad;
+    return { xmin: xmin, xmax: xmax, ymin: ymin, ymax: ymax, bpdMax: bpdMax };
+  }
 
-    function roundedBpdAxisMax(maxValue) {
-      const increment = maxValue <= 50000 ? 5000 : 10000;
-      if (!isFinite(maxValue) || maxValue <= 0) return increment;
-      return Math.max(increment, Math.ceil(maxValue / increment) * increment);
-    }
-    const bpdAxisMax = roundedBpdAxisMax(bpdMax);
+  let current = null;
+
+  function draw(v) {
+    if (!current) return;
+    const well = current.well;
+    clearSvg();
+
+    const bpdAxisMax = roundedBpdAxisMax(current.full.bpdMax);
     const bpdIncrement = bpdAxisMax <= 50000 ? 5000 : 10000;
     const bpdTickCount = Math.max(1, Math.round(bpdAxisMax / bpdIncrement));
 
-    function sx(v) { return x0 + (v - xmin) / (xmax - xmin) * plotW; }
-    function sy(v) { return y1 - (v - ymin) / (ymax - ymin) * plotH; }
-    function syBpd(v) { return y1 - (v / bpdAxisMax) * plotH; }
+    function sx(t) { return x0 + (t - v.xmin) / (v.xmax - v.xmin) * plotW; }
+    function sy(p) { return y1 - (p - v.ymin) / (v.ymax - v.ymin) * plotH; }
+    function syBpd(b) { return y1 - (b / bpdAxisMax) * plotH; }
 
-    const disposal = well.disposal || [];
+    const defs = makeEl('defs', {});
+    const clip = makeEl('clipPath', { id: 'tsPlotClip' });
+    clip.appendChild(makeEl('rect', { x: x0, y: y0, width: plotW, height: plotH }));
+    defs.appendChild(clip);
+    svg.appendChild(defs);
+    const dataG = makeEl('g', { 'clip-path': 'url(#tsPlotClip)' });
+
+    const disposal = showDisposal ? (well.disposal || []) : [];
     if (disposal.length) {
       const sortedDisposal = disposal.slice().sort(function (a, b) { return a[0] - b[0]; });
       let barW = plotW / Math.max(80, sortedDisposal.length);
@@ -1365,8 +1679,9 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
       }
       sortedDisposal.forEach(function (p) {
         const x = sx(p[0]) - barW / 2;
+        if (x + barW < x0 || x > x1) return;
         const y = syBpd(p[1]);
-        svg.appendChild(makeEl('rect', {
+        dataG.appendChild(makeEl('rect', {
           x: x.toFixed(2),
           y: y.toFixed(2),
           width: barW.toFixed(2),
@@ -1377,45 +1692,52 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
       });
     }
 
+    const spanMs = v.xmax - v.xmin;
     for (let i = 0; i <= 6; i++) {
       const x = x0 + i / 6 * plotW;
       svg.appendChild(makeEl('line', { x1: x, x2: x, y1: y0, y2: y1, stroke: '#e7e7e7', 'stroke-width': 1 }));
       const t = makeEl('text', { x: x, y: y1 + 20, 'text-anchor': 'middle', class: 'tick' });
-      t.textContent = fmtDate(xmin + i / 6 * (xmax - xmin));
+      t.textContent = fmtDate(v.xmin + i / 6 * spanMs, spanMs);
       svg.appendChild(t);
     }
-    for (let j = 0; j <= 5; j++) {
-      const y = y0 + j / 5 * plotH;
+    const yTicks = GistZoom.ticks(v.ymin, v.ymax, 6);
+    yTicks.values.forEach(function (val) {
+      const y = sy(val);
       svg.appendChild(makeEl('line', { x1: x0, x2: x1, y1: y, y2: y, stroke: '#e7e7e7', 'stroke-width': 1 }));
-      const v = ymax - j / 5 * (ymax - ymin);
       const t = makeEl('text', { x: x0 - 8, y: y + 4, 'text-anchor': 'end', class: 'tick' });
-      t.textContent = fmtNum(v);
+      t.textContent = GistZoom.fmtTick(val, yTicks.step);
       svg.appendChild(t);
+    });
+    if (showDisposal) {
+      for (let k = 0; k <= bpdTickCount; k++) {
+        const val = k * bpdIncrement;
+        const y = syBpd(val);
+        svg.appendChild(makeEl('line', { x1: x0, x2: x1, y1: y, y2: y, stroke: '#dce8f5', 'stroke-width': 1 }));
+        const t = makeEl('text', { x: x1 + 8, y: y + 4, 'text-anchor': 'start', class: 'tick' });
+        t.textContent = fmtNum(val);
+        svg.appendChild(t);
+      }
     }
-    for (let k = 0; k <= bpdTickCount; k++) {
-      const v = k * bpdIncrement;
-      const y = syBpd(v);
-      svg.appendChild(makeEl('line', { x1: x0, x2: x1, y1: y, y2: y, stroke: '#dce8f5', 'stroke-width': 1 }));
-      const t = makeEl('text', { x: x1 + 8, y: y + 4, 'text-anchor': 'start', class: 'tick' });
-      t.textContent = fmtNum(v);
-      svg.appendChild(t);
-    }
-    svg.appendChild(makeEl('rect', { x: x0, y: y0, width: plotW, height: plotH, fill: 'none', stroke: '#333', 'stroke-width': 1.1 }));
 
+    const isSpaghetti = payload.mode === 'spaghetti';
+    const baseWidth = typeof payload.lineWidth === 'number' ? payload.lineWidth : (isSpaghetti ? 0.9 : 1.8);
+    const baseOpacity = typeof payload.lineOpacity === 'number' ? payload.lineOpacity : (isSpaghetti ? 0.34 : 0.94);
     const seriesCount = well.series.length;
     well.series.forEach(function (s, idx) {
       let d = '';
       (s.points || []).forEach(function (p, pointIdx) {
         d += (pointIdx ? ' L ' : 'M ') + sx(p[0]).toFixed(2) + ' ' + sy(p[1]).toFixed(2);
       });
-      svg.appendChild(makeEl('path', {
+      dataG.appendChild(makeEl('path', {
         d: d,
         fill: 'none',
         stroke: colorForValue(s.colorValue, idx, seriesCount),
-        'stroke-width': payload.mode === 'spaghetti' ? 0.9 : 1.8,
-        opacity: payload.mode === 'spaghetti' ? 0.34 : 0.94
+        'stroke-width': s.emphasis ? 1.8 : baseWidth,
+        opacity: baseOpacity
       }));
     });
+    svg.appendChild(dataG);
+    svg.appendChild(makeEl('rect', { x: x0, y: y0, width: plotW, height: plotH, fill: 'none', stroke: '#333', 'stroke-width': 1.1 }));
 
     const xl = makeEl('text', { x: (x0 + x1) / 2, y: H - 14, 'text-anchor': 'middle', class: 'axis-label' });
     xl.textContent = 'Date';
@@ -1423,11 +1745,13 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
     const yl = makeEl('text', { x: x0 - 50, y: (y0 + y1) / 2, 'text-anchor': 'middle', class: 'axis-label', transform: 'rotate(-90 ' + (x0 - 50) + ' ' + ((y0 + y1) / 2) + ')' });
     yl.textContent = 'Delta Pressure (PSI)';
     svg.appendChild(yl);
-    const yr = makeEl('text', { x: x1 + 58, y: (y0 + y1) / 2, 'text-anchor': 'middle', class: 'axis-label', transform: 'rotate(90 ' + (x1 + 58) + ' ' + ((y0 + y1) / 2) + ')' });
-    yr.textContent = 'BBL/day';
-    svg.appendChild(yr);
+    if (showDisposal) {
+      const yr = makeEl('text', { x: x1 + 58, y: (y0 + y1) / 2, 'text-anchor': 'middle', class: 'axis-label', transform: 'rotate(90 ' + (x1 + 58) + ' ' + ((y0 + y1) / 2) + ')' });
+      yr.textContent = 'BBL/day';
+      svg.appendChild(yr);
+    }
 
-    if (payload.mode === 'quantiles') {
+    if (payload.mode === 'quantiles' && !payload.colorLabel) {
       const legend = makeEl('g', {});
       const maxItems = Math.min(6, well.series.length);
       for (let i = 0; i < maxItems; i++) {
@@ -1442,6 +1766,41 @@ _PER_WELL_TIME_SERIES_HTML_TEMPLATE = """<!DOCTYPE html>
       svg.appendChild(legend);
     }
   }
+
+  const zoom = GistZoom.attach({
+    svg: svg,
+    plot: { x0: x0, y0: y0, x1: x1, y1: y1 },
+    full: { xmin: 0, xmax: 1, ymin: 0, ymax: 1 },
+    axes: 'xy',
+    onChange: draw
+  });
+  GistZoom.addButtons(document.getElementById('zoomBar'), zoom);
+
+  function render(wellKey) {
+    const well = (payload.wells || []).find(function (w) { return w.key === wellKey; });
+    if (!well || !well.series || !well.series.length) {
+      current = null;
+      clearSvg();
+      empty.style.display = 'block';
+      svg.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+    svg.style.display = 'block';
+    const full = computeFull(well);
+    current = { well: well, full: full };
+    zoom.setFull(full);
+  }
+
+  if (payload.colorLabel) {
+    const cb = document.getElementById('colorbar');
+    const domain = payload.colorDomain || [0, 1];
+    cb.querySelector('.cb-label').textContent = payload.colorLabel;
+    cb.querySelector('.cb-min').textContent = fmtLegendValue(domain[0]);
+    cb.querySelector('.cb-max').textContent = fmtLegendValue(domain[1]);
+    cb.style.display = 'inline-flex';
+  }
+  if (!showSelector) document.getElementById('wellPicker').style.display = 'none';
 
   (payload.wells || []).forEach(function (well) {
     const opt = document.createElement('option');
@@ -1534,25 +1893,16 @@ def _save_per_well_time_series_graph_artifact(
         "colorDomain": [float(color_norm.vmin), float(color_norm.vmax)],
         "wells": wells,
     }
-    payload_json = json.dumps(payload, separators=(",", ":"), allow_nan=False)
-    artifact_html = (
-        _PER_WELL_TIME_SERIES_HTML_TEMPLATE
-        .replace("___HTML_TITLE___", html_module.escape(title))
-        .replace("___PAYLOAD___", payload_json)
-    )
-
-    artifact_path = _graphs_dir(helper) / f"{artifact_key}.html"
-    artifact_path.write_text(artifact_html, encoding="utf-8")
-
-    helper.saveGraphArtifact(
-        key=artifact_key,
-        title=title,
-        caption="Interactive per-well time series generated by GIST.",
-        renderer="html",
-        path=str(artifact_path),
-        contentType="text/html",
-        displayOrder=display_order,
-        preferredHeight=560,
+    _write_time_series_html_artifact(
+        helper,
+        payload,
+        artifact_key,
+        display_order,
+        title,
+        caption=(
+            "Interactive per-well time series generated by GIST. "
+            "Drag to zoom, Shift+drag to pan, double-click to reset."
+        ),
     )
 
 

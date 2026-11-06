@@ -1,0 +1,5 @@
+# Optional: packages used only by the Jupyter notebooks in src/ (not by the portal step scripts).
+# Install on top of the core lock:  pip install -r requirements-lock.txt -r requirements-notebooks.txt
+seaborn==0.13.2
+geopandas==1.2.0
+contextily==1.7.1
