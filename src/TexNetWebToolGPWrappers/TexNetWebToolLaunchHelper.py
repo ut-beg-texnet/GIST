@@ -108,8 +108,9 @@ class TexNetWebToolLaunchHelper(object):
         ret = None
         
         paramVal = self.getParameterValueWithStepIndexAndParamName(stepIndex, paramName)
-        
-        if paramVal != None:
+
+        # An unset dataset parameter arrives as "" rather than null.
+        if paramVal != None and str(paramVal).strip() != "":
             ret = self._origArgsData["DatasetPaths"][str(paramVal)]
  
         return ret
@@ -256,16 +257,16 @@ class TexNetWebToolLaunchHelper(object):
     def addMessageWithStepIndex(self, stepIndex, messageContent, messageLevel):
         
         if self._origArgsData != None and len(self._origArgsData["SessionState"]["StepState"]) > stepIndex:
-            try:
-                step = self._origArgsData["SessionState"]["StepState"][stepIndex]
+            step = self._origArgsData["SessionState"]["StepState"][stepIndex]
 
-                msg = {}
-                msg["MessageContent"] = messageContent
-                msg["MessageLevel"] = messageLevel
-                
-                step["Messages"].append(msg)
-            except ex:
-                pass
+            msg = {}
+            msg["MessageContent"] = messageContent
+            msg["MessageLevel"] = messageLevel
+
+            if step.get("Messages") is None:
+                step["Messages"] = []
+
+            step["Messages"].append(msg)
         
             
         
