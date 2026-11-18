@@ -1750,21 +1750,6 @@ ___ZOOM_JS___
       yr.textContent = 'BBL/day';
       svg.appendChild(yr);
     }
-
-    if (payload.mode === 'quantiles' && !payload.colorLabel) {
-      const legend = makeEl('g', {});
-      const maxItems = Math.min(6, well.series.length);
-      for (let i = 0; i < maxItems; i++) {
-        const s = well.series[i];
-        const lx = x1 - 130 + (i % 2) * 68;
-        const ly = y0 + 16 + Math.floor(i / 2) * 18;
-        legend.appendChild(makeEl('line', { x1: lx, x2: lx + 18, y1: ly, y2: ly, stroke: colorForValue(s.colorValue, i, well.series.length), 'stroke-width': 2 }));
-        const text = makeEl('text', { x: lx + 23, y: ly + 4, class: 'tick' });
-        text.textContent = s.label;
-        legend.appendChild(text);
-      }
-      svg.appendChild(legend);
-    }
   }
 
   const zoom = GistZoom.attach({
@@ -1891,6 +1876,7 @@ def _save_per_well_time_series_graph_artifact(
     payload = {
         "mode": mode,
         "colorDomain": [float(color_norm.vmin), float(color_norm.vmax)],
+        "colorLabel": "Percentile" if mode == "quantiles" else "Diffusivity (m²/s)",
         "wells": wells,
     }
     _write_time_series_html_artifact(
